@@ -30,7 +30,7 @@ export default function ForgotPasswordPage() {
       {/* Left panel */}
       <div className="w-115 bg-[#F3FEFD] flex flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
-          <img src="/asset/Logo.png" alt="Logo" />
+          <img src="/Logo/Logo.svg" alt="Logo" />
         </div>
 
         <div className="mb-20">

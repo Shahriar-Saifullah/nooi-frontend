@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/Button";
-import ForgotPassword from "../forgot-password/page";
 
 function GoogleIcon() {
   return (
@@ -86,7 +85,7 @@ export default function SigninPage() {
       {/* Left panel */}
       <div className="w-115 bg-[#F3FEFD] flex flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
-          <img src="/asset/Logo.png" alt="Logo" />
+          <img src="/Logo/Logo.svg" alt="Logo" />
         </div>
 
         <div className="mb-20">
@@ -141,7 +140,7 @@ export default function SigninPage() {
           </div>
 
           {/* Form */}
-          <form className="space-y-6">
+          <form className="space-y-3">
             {/* Email */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">

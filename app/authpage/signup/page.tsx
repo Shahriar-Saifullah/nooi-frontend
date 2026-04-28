@@ -105,7 +105,7 @@ export default function SignupPage() {
       {/* Left panel */}
       <div className="w-115 bg-[#F3FEFD] flex flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
-          <img src="/asset/Logo.png" alt="Logo" />
+          <img src="/Logo/Logo.svg" alt="Logo" />
         </div>
 
         <div className="mb-20">
@@ -134,7 +134,7 @@ export default function SignupPage() {
           </div>
 
           {/* Form */}
-          <form className="space-y-4">
+          <form className="-space-y-1">
             {/* Full Name */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -156,7 +156,7 @@ export default function SignupPage() {
                 }`}
               />
               <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${
+                className={`text-red-500 text-xs text-right mt-1 min-h-4 ${
                   errors.fullName ? "visible" : "invisible"
                 }`}
               >
@@ -185,7 +185,7 @@ export default function SignupPage() {
                 }`}
               />
               <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${
+                className={`text-red-500 text-xs text-right mt-1 min-h-4 ${
                   errors.email ? "visible" : "invisible"
                 }`}
               >
@@ -214,14 +214,14 @@ export default function SignupPage() {
                 }`}
               />
               <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${
+                className={`text-red-500 text-xs text-right mt-1 min-h-4 ${
                   errors.password ? "visible" : "invisible"
                 }`}
               >
                 {errors.password ?? " "}
               </p>
               {/* PASSWORD SECTION - STRENGTH INDICATOR */}
-              <div className="flex items-center justify-start mt-2 gap-2 w-full">
+              <div className="flex items-center justify-start -mt-1 mb-3 gap-2 w-full">
                 {/* BAR 1 */}
                 <div
                   className="h-1 flex-1 rounded-full transition-colors"
@@ -288,7 +288,7 @@ export default function SignupPage() {
                 }`}
               />
               <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${
+                className={`text-red-500 text-right text-xs mt-1 min-h-4 ${
                   errors.confirmPassword ? "visible" : "invisible"
                 }`}
               >
@@ -336,7 +336,7 @@ export default function SignupPage() {
 
           {/* Terms and Privacy */}
           <div className="text-center mt-4 text-xs text-gray-500">
-            By continuing you agree to NOOI's{" "}
+            By continuing you agree to NOOI's
             <a href="#" className="text-teal-600 hover:text-teal-700">
               Terms of Service
             </a>{" "}
@@ -344,7 +344,6 @@ export default function SignupPage() {
             <a href="#" className="text-teal-600 hover:text-teal-700">
               Privacy Policy
             </a>
-            .
           </div>
         </div>
       </div>
