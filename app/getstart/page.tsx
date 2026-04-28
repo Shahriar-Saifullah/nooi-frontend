@@ -39,7 +39,7 @@ export default function GetStartPage() {
               Welcome to nooi
             </h1>
             <p className="text-[#9EA8B3] text-base font-inter text-[14px]">
-              Let's set up your profile
+              Let&apos;s set up your profile
             </p>
           </div>
           <Button

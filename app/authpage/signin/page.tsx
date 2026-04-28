@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getGoogleAuthUrl, signIn } from "@/lib/api/auth";
 import Button from "@/components/Button";
 
 function GoogleIcon() {
@@ -32,19 +33,54 @@ function GoogleIcon() {
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_ATTEMPTS = 5;
 
-export default function SigninPage() {
+type FieldErrors = Partial<{
+  email: string;
+  password: string;
+}>;
+
+function extractFieldErrors(error: unknown): FieldErrors {
+  if (!error || typeof error !== "object") return {};
+  const fieldErrors = (error as { fieldErrors?: unknown }).fieldErrors;
+  if (!fieldErrors || typeof fieldErrors !== "object") return {};
+
+  const email = (fieldErrors as { email?: unknown }).email;
+  const password = (fieldErrors as { password?: unknown }).password;
+
+  return {
+    email:
+      Array.isArray(email) && typeof email[0] === "string"
+        ? email[0]
+        : undefined,
+    password:
+      Array.isArray(password) && typeof password[0] === "string"
+        ? password[0]
+        : undefined,
+  };
+}
+
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  google_auth_failed: "Google sign in failed. Please try again.",
+};
+
+function SigninPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<{
     email?: string;
     password?: string;
     auth?: string;
   }>({});
-  const [attempts, setAttempts] = useState(0);
-  const locked = attempts >= MAX_ATTEMPTS;
+
+  useEffect(() => {
+    const errorCode = searchParams.get("error");
+    if (errorCode) {
+      setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
+    }
+  }, [searchParams]);
 
   const validate = () => {
     const next: typeof errors = {};
@@ -57,27 +93,31 @@ export default function SigninPage() {
     return next;
   };
 
-  const handleSignIn = () => {
-    if (locked) return;
+  const handleSignIn = async () => {
     const fieldErrors = validate();
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);
       return;
     }
-    // Mock auth — use demo@nooi.com / Password1 to sign in
-    if (email === "demo@nooi.com" && password === "Password1") {
-      router.push("/");
-    } else {
-      const next = attempts + 1;
-      setAttempts(next);
-      const remaining = MAX_ATTEMPTS - next;
-      setErrors({
-        auth:
-          remaining <= 0
-            ? "Account locked. Too many failed attempts. Please reset your password."
-            : `Email or password is incorrect. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining before lockout.`,
-      });
+
+    setSubmitting(true);
+    const res = await signIn({ email, password });
+    setSubmitting(false);
+
+    if (!res.success) {
+      const nextFieldErrors = extractFieldErrors(res.error);
+      const authMessage =
+        typeof res.error === "string" ? res.error : "Sign in failed";
+      setErrors({ ...nextFieldErrors, auth: authMessage });
+      return;
     }
+
+    const onboardingCompleted = !!res.data.user.onboarding_completed;
+    router.push(onboardingCompleted ? "/dashboard" : "/onboarding");
+  };
+
+  const handleGoogleAuth = () => {
+    window.location.href = getGoogleAuthUrl();
   };
 
   return (
@@ -129,7 +169,7 @@ export default function SigninPage() {
                 </span>
                 <div>
                   <p className="text-red-700 font-semibold text-sm ">
-                    {locked ? "Account locked" : "Incorrect credentials"}
+                    Sign in failed
                   </p>
                   <p className="text-red-600 text-xs mt-0.5">
                     {errors.auth ?? " "}
@@ -216,8 +256,13 @@ export default function SigninPage() {
             </div>
 
             {/* Sign in Button */}
-            <Button type="button" onClick={handleSignIn} fullWidth>
-              Sign in
+            <Button
+              type="button"
+              onClick={handleSignIn}
+              fullWidth
+              disabled={submitting}
+            >
+              {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
 
@@ -229,7 +274,12 @@ export default function SigninPage() {
           </div>
 
           {/* Google Button */}
-          <Button type="button" variant="social" fullWidth>
+          <Button
+            type="button"
+            variant="social"
+            fullWidth
+            onClick={handleGoogleAuth}
+          >
             <GoogleIcon />
             <span>Continue with Google</span>
           </Button>
@@ -237,7 +287,7 @@ export default function SigninPage() {
           {/* Sign up link */}
           <div className="text-center mt-6">
             <span className="text-gray-600 text-sm">
-              Don't have an account?{" "}
+              Don&apos;t have an account?{" "}
               <Button
                 type="button"
                 variant="text"
@@ -250,5 +300,13 @@ export default function SigninPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SigninPage() {
+  return (
+    <Suspense fallback={null}>
+      <SigninPageInner />
+    </Suspense>
   );
 }

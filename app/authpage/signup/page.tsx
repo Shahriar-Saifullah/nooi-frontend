@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
+import { getGoogleAuthUrl, signUp } from "@/lib/api/auth";
 import Button from "@/components/Button";
 
 function GoogleIcon() {
@@ -52,11 +53,44 @@ function getStrength(password: string): {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+type FieldErrors = Partial<{
+  fullName: string;
+  email: string;
+  password: string;
+}>;
+
+function extractFieldErrors(error: unknown): FieldErrors {
+  if (!error || typeof error !== "object") return {};
+  const fieldErrors = (error as { fieldErrors?: unknown }).fieldErrors;
+  if (!fieldErrors || typeof fieldErrors !== "object") return {};
+
+  const fullName = (fieldErrors as { full_name?: unknown }).full_name;
+  const email = (fieldErrors as { email?: unknown }).email;
+  const password = (fieldErrors as { password?: unknown }).password;
+
+  return {
+    fullName:
+      Array.isArray(fullName) && typeof fullName[0] === "string"
+        ? fullName[0]
+        : undefined,
+    email:
+      Array.isArray(email) && typeof email[0] === "string"
+        ? email[0]
+        : undefined,
+    password:
+      Array.isArray(password) && typeof password[0] === "string"
+        ? password[0]
+        : undefined,
+  };
+}
+
 export default function SignupPage() {
   const router = useRouter();
   const signupData = useAuthStore((state) => state.signupData);
   const setSignupData = useAuthStore((state) => state.setSignupData);
+  const resetSignupData = useAuthStore((state) => state.resetSignupData);
   const password = signupData.password;
+  const [submitting, setSubmitting] = useState(false);
 
   const [errors, setErrors] = useState<{
     fullName?: string;
@@ -91,13 +125,52 @@ export default function SignupPage() {
     return next;
   };
 
-  const handleCreateAccount = () => {
+  const handleCreateAccount = async () => {
     const fieldErrors = validate();
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);
       return;
     }
+
+    setSubmitting(true);
+    const res = await signUp({
+      fullName: signupData.fullName,
+      email: signupData.email,
+      password: signupData.password,
+    });
+    setSubmitting(false);
+
+    if (!res.success) {
+      if (typeof res.error === "string") {
+        const message = res.error;
+        setErrors((prev) => ({ ...prev, email: message }));
+        return;
+      }
+
+      const nestedError = (res.error as { fieldErrors?: unknown })?.fieldErrors
+        ? res.error
+        : (res.error as { error?: unknown })?.error;
+
+      const nextFieldErrors = extractFieldErrors(nestedError);
+      if (
+        nextFieldErrors.fullName ||
+        nextFieldErrors.email ||
+        nextFieldErrors.password
+      ) {
+        setErrors((prev) => ({ ...prev, ...nextFieldErrors }));
+        return;
+      }
+
+      setErrors((prev) => ({ ...prev, email: "Sign up failed" }));
+      return;
+    }
+
+    resetSignupData();
     router.push("/authpage/signin");
+  };
+
+  const handleGoogleAuth = () => {
+    window.location.href = getGoogleAuthUrl();
   };
 
   return (
@@ -302,8 +375,9 @@ export default function SignupPage() {
               onClick={handleCreateAccount}
               fullWidth
               className="mt-6"
+              disabled={submitting}
             >
-              Create account
+              {submitting ? "Creating account..." : "Create account"}
             </Button>
           </form>
 
@@ -315,7 +389,12 @@ export default function SignupPage() {
           </div>
 
           {/* Google Button */}
-          <Button type="button" variant="social" fullWidth>
+          <Button
+            type="button"
+            variant="social"
+            fullWidth
+            onClick={handleGoogleAuth}
+          >
             <GoogleIcon />
             <span>Sign up with Google</span>
           </Button>
@@ -336,7 +415,7 @@ export default function SignupPage() {
 
           {/* Terms and Privacy */}
           <div className="text-center mt-4 text-xs text-gray-500">
-            By continuing you agree to NOOI's
+            By continuing you agree to NOOI&apos;s
             <a href="#" className="text-teal-600 hover:text-teal-700">
               Terms of Service
             </a>{" "}
