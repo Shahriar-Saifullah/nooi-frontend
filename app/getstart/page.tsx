@@ -29,7 +29,7 @@ export default function GetStartPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-white">
       {/* Left panel — form */}
-      <div className="w-162 shrink-0 flex flex-col justify-center px-12 py-10 overflow-y-auto bg-white">
+      <div className="w-full md:w-162 md:shrink-0 flex flex-col justify-center px-12 py-10 overflow-y-auto bg-white">
         <div className="flex flex-col items-center justify-center">
           <div className={`${gapBetweenImgRow} w-48 h-12 mb-6 overflow-hidden`}>
             <img src="/Logo/Logo.svg" alt="Logo" />
@@ -59,7 +59,7 @@ export default function GetStartPage() {
       </div>
 
       {/* Right panel — masonry image gallery */}
-      <div className="flex-1 overflow-hidden bg-[#ffffff] -mt-8">
+      <div className="hidden md:block flex-1 overflow-hidden bg-[#ffffff] -mt-8">
         <div className="columns-3 gap-3 p-1.5 [column-fill:balance]">
           {/* Column 1 items */}
           <div

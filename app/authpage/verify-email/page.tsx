@@ -8,7 +8,7 @@ export default function VerifyEmailPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-white">
       {/* Left panel */}
-      <div className="w-115 bg-[#F3FEFD] flex flex-col justify-between px-12 py-12.75 overflow-y-auto">
+      <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
           <img src="/Logo/Logo.svg" alt="Logo" />
         </div>
@@ -27,7 +27,7 @@ export default function VerifyEmailPage() {
       </div>
 
       {/* Right Panel */}
-      <div className="flex-1 flex flex-col justify-center px-16 py-10 overflow-y-auto bg-white">
+      <div className="flex-1 flex flex-col justify-center px-6 md:px-16 py-10 overflow-y-auto bg-white">
         <div className="mx-auto w-full max-w-md ">
           {/* Mail icon */}
           <div className="w-14 h-14 rounded-2xl bg-[#E6FAF8] border border-[#A8E6E0] flex items-center justify-center mx-auto mb-6">

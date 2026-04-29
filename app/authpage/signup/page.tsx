@@ -176,7 +176,7 @@ export default function SignupPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-white">
       {/* Left panel */}
-      <div className="w-115 bg-[#F3FEFD] flex flex-col justify-between px-12 py-12.75 overflow-y-auto">
+      <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
           <img src="/Logo/Logo.svg" alt="Logo" />
         </div>
@@ -195,7 +195,7 @@ export default function SignupPage() {
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex flex-col justify-center px-16 py-10 overflow-y-auto bg-white">
+      <div className="flex-1 flex flex-col justify-center px-6 md:px-16 py-10 overflow-y-auto bg-white">
         <div className="max-w-md mx-auto w-full">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
