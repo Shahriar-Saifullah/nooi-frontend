@@ -1,12 +1,20 @@
 "use client";
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getCurrentUser } from "@/lib/api/auth";
+import { Suspense } from "react";
 
-export default function AuthCallbackPage() {
+function AuthCallbackInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
+    const error = searchParams.get("error");
+    if (error) {
+      router.replace(`/authpage/signin?error=${error}`);
+      return;
+    }
+
     getCurrentUser().then((res) => {
       if (res.success) {
         const done = !!res.data.user.onboarding_completed;
@@ -15,7 +23,7 @@ export default function AuthCallbackPage() {
         router.replace("/authpage/signin?error=google_auth_failed");
       }
     });
-  }, [router]);
+  }, [router, searchParams]);
 
   return (
     <div className="flex h-screen items-center justify-center bg-white">
@@ -24,5 +32,13 @@ export default function AuthCallbackPage() {
         <p className="text-gray-600 text-sm">Signing you in...</p>
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={null}>
+      <AuthCallbackInner />
+    </Suspense>
   );
 }
