@@ -1,3 +1,4 @@
+import { createClient } from "@/utils/supabase/client";
 import { requestApi, type ApiResponse } from "./http";
 
 export type SignInPayload = {
@@ -26,92 +27,239 @@ export type AuthUserResponse = {
   user: AuthUser;
 };
 
+const supabase = createClient();
+
 function normalizeBaseUrl(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
 export function getAuthBaseUrl(): string {
-  //   return "https://nooi-backend-staging.up.railway.app/auth";
   const direct = process.env.NEXT_PUBLIC_AUTH_API_URL;
   if (direct) return normalizeBaseUrl(direct);
-  console.log(direct);
   const apiBase = process.env.NEXT_PUBLIC_API_URL;
   if (!apiBase) return "";
   return `${normalizeBaseUrl(apiBase)}/auth`;
 }
 
-export function getGoogleAuthUrl(): string {
-  const base = getAuthBaseUrl();
-  return base ? `${base}/google` : "/auth/google";
+export function getApiBaseUrl(): string {
+  const apiBase = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiBase) return "";
+  return normalizeBaseUrl(apiBase);
 }
 
+function mapSupabaseUser(user: any): AuthUser {
+  return {
+    id: user.id,
+    email: user.email || "",
+    full_name: user.user_metadata?.full_name || user.user_metadata?.name || "",
+    avatar_url: user.user_metadata?.avatar_url || null,
+    plan: user.user_metadata?.plan || "free",
+    onboarding_completed: !!user.user_metadata?.onboarding_completed,
+    language: user.user_metadata?.language || "en",
+  };
+}
+
+/**
+ * Sign in with email and password.
+ * Uses Supabase client directly, then tries to enrich with backend profile data.
+ */
 export async function signIn(
   payload: SignInPayload,
 ): Promise<ApiResponse<AuthUserResponse>> {
-  return requestApi<AuthUserResponse, SignInPayload>({
-    baseUrl: getAuthBaseUrl(),
-    path: "/login",
-    method: "POST",
-    body: payload,
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: payload.email,
+    password: payload.password,
   });
+
+  if (error) {
+    // Handle specific Supabase error messages
+    if (error.message.toLowerCase().includes("email not confirmed")) {
+      return {
+        success: false,
+        error: {
+          message: "Please verify your email before signing in.",
+          code: "EMAIL_NOT_VERIFIED",
+        },
+      };
+    }
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+
+  if (!data.user) {
+    return {
+      success: false,
+      error: "User not found",
+    };
+  }
+
+  // Try to get enriched profile from backend, fall back to Supabase data
+  try {
+    const backendRes = await requestApi<AuthUserResponse>({
+      baseUrl: getAuthBaseUrl(),
+      path: "/me",
+      method: "GET",
+    });
+    if (backendRes.success) {
+      return backendRes;
+    }
+  } catch {
+    // Backend unavailable or CORS blocked — fall back to Supabase data
+  }
+
+  // Fallback: return user data from Supabase session
+  return {
+    success: true,
+    data: {
+      user: mapSupabaseUser(data.user),
+    },
+  };
 }
 
 export async function signUp(
   payload: SignUpPayload,
 ): Promise<ApiResponse<AuthUserResponse>> {
-  return requestApi<
-    AuthUserResponse,
-    { full_name: string; email: string; password: string }
-  >({
-    baseUrl: getAuthBaseUrl(),
-    path: "/signup",
-    method: "POST",
-    body: {
-      full_name: payload.fullName,
-      email: payload.email,
-      password: payload.password,
+  const { data, error } = await supabase.auth.signUp({
+    email: payload.email,
+    password: payload.password,
+    options: {
+      data: {
+        full_name: payload.fullName,
+      },
+      emailRedirectTo: `${window.location.origin}/auth/callback`,
     },
   });
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+
+  if (!data.user) {
+    return {
+      success: false,
+      error: "Signup failed",
+    };
+  }
+
+  return {
+    success: true,
+    data: {
+      user: mapSupabaseUser(data.user),
+    },
+  };
+}
+
+export async function signInWithGoogle() {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${window.location.origin}/auth/callback`,
+    },
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+// Keep for backward compatibility
+export function getGoogleAuthUrl(): string {
+  return "#";
 }
 
 export async function logout(): Promise<ApiResponse<unknown>> {
-  return requestApi<unknown>({
-    baseUrl: getAuthBaseUrl(),
-    path: "/logout",
-    method: "POST",
-  });
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+  return {
+    success: true,
+    data: {},
+  };
 }
 
+/**
+ * Gets the current user.
+ * Checks Supabase session first, then tries to enrich from backend.
+ * Falls back to Supabase-only data if backend is unreachable.
+ */
 export async function getCurrentUser(): Promise<ApiResponse<AuthUserResponse>> {
-  return requestApi<AuthUserResponse>({
-    baseUrl: getAuthBaseUrl(),
-    path: "/me",
-    method: "GET",
-  });
+  const {
+    data: { user: sbUser },
+    error: sbError,
+  } = await supabase.auth.getUser();
+
+  if (sbError || !sbUser) {
+    return {
+      success: false,
+      error: sbError?.message || "Not authenticated",
+    };
+  }
+
+  // Try to get enriched profile from backend
+  try {
+    const backendRes = await requestApi<AuthUserResponse>({
+      baseUrl: getAuthBaseUrl(),
+      path: "/me",
+      method: "GET",
+    });
+    if (backendRes.success) {
+      return backendRes;
+    }
+  } catch {
+    // Backend unavailable — fall back to Supabase data
+  }
+
+  // Fallback: return Supabase user data
+  return {
+    success: true,
+    data: {
+      user: mapSupabaseUser(sbUser),
+    },
+  };
 }
 
 export async function forgotPassword(
-  payload: { email: string }
+  payload: { email: string },
 ): Promise<ApiResponse<{ message: string }>> {
-  return requestApi<{ message: string }, { email: string }>({
-    baseUrl: getAuthBaseUrl(),
-    path: "/forgot-password",
-    method: "POST",
-    body: payload,
+  const { error } = await supabase.auth.resetPasswordForEmail(payload.email, {
+    redirectTo: `${window.location.origin}/authpage/reset-password`,
   });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  return {
+    success: true,
+    data: { message: "Password reset email sent" },
+  };
 }
 
 export async function resendVerification(
-  payload: { email: string }
+  payload: { email: string },
 ): Promise<ApiResponse<{ message: string }>> {
-  return requestApi<{ message: string }, { email: string }>({
-    baseUrl: getAuthBaseUrl(),
-    path: "/resend-verification",
-    method: "POST",
-    body: payload,
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email: payload.email,
   });
-}
 
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  return {
+    success: true,
+    data: { message: "Verification email resent" },
+  };
+}
 
 export type OnboardingPayload = {
   user_type: string;
@@ -119,15 +267,10 @@ export type OnboardingPayload = {
   interested_topics: string[];
 };
 
-export function getApiBaseUrl(): string {
-  const apiBase = process.env.NEXT_PUBLIC_API_URL;
-  if (!apiBase) return "";
-  return apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
-}
-
 export async function saveOnboarding(
-  payload: OnboardingPayload
+  payload: OnboardingPayload,
 ): Promise<ApiResponse<{ message: string }>> {
+  // Save to Railway backend
   return requestApi<{ message: string }, OnboardingPayload>({
     baseUrl: getApiBaseUrl(),
     path: "/onboarding",

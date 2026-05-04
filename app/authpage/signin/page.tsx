@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getGoogleAuthUrl, signIn } from "@/lib/api/auth";
+import { signInWithGoogle, signIn } from "@/lib/api/auth";
 import Button from "@/components/Button";
 import GoogleIcon from "@/components/GoogleIcon";
 
@@ -99,8 +99,12 @@ function SigninPageInner() {
     router.push(onboardingCompleted ? "/dashboard" : "/onboarding");
   };
 
-  const handleGoogleAuth = () => {
-    window.location.href = getGoogleAuthUrl();
+  const handleGoogleAuth = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      setErrors({ auth: "Google sign in failed. Please try again." });
+    }
   };
 
   return (
