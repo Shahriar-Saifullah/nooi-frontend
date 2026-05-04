@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
-import { getGoogleAuthUrl, signUp } from "@/lib/api/auth";
+import { signInWithGoogle, signUp } from "@/lib/api/auth";
 import Button from "@/components/Button";
 import GoogleIcon from "@/components/GoogleIcon";
 
@@ -143,8 +143,12 @@ export default function SignupPage() {
     router.push(`/authpage/verify-email?email=${encodeURIComponent(verifiedEmail)}`);
   };
 
-  const handleGoogleAuth = () => {
-    window.location.href = getGoogleAuthUrl();
+  const handleGoogleAuth = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      console.error("Google auth error:", error);
+    }
   };
 
   return (

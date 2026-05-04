@@ -1,3 +1,5 @@
+import { createClient } from "@/utils/supabase/client";
+
 export class ApiError extends Error {
   status: number;
   data: unknown;
@@ -64,6 +66,17 @@ function pickErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
+async function getAuthHeaders(headers?: Record<string, string>): Promise<Record<string, string>> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(headers ?? {}),
+  };
+}
+
 export async function requestJson<TResponse, TBody = unknown>(
   options: RequestJsonOptions<TBody>,
 ): Promise<TResponse> {
@@ -87,7 +100,7 @@ export async function requestJson<TResponse, TBody = unknown>(
         ...(options.body !== undefined
           ? { "Content-Type": "application/json" }
           : {}),
-        ...(options.headers ?? {}),
+        ...(await getAuthHeaders(options.headers)),
       },
       body:
         options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -154,7 +167,7 @@ export async function requestApi<TData, TBody = unknown>(
         ...(options.body !== undefined
           ? { "Content-Type": "application/json" }
           : {}),
-        ...(options.headers ?? {}),
+        ...(await getAuthHeaders(options.headers)),
       },
       body:
         options.body !== undefined ? JSON.stringify(options.body) : undefined,
