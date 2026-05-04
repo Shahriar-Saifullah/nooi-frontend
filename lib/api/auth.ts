@@ -89,3 +89,49 @@ export async function getCurrentUser(): Promise<ApiResponse<AuthUserResponse>> {
     method: "GET",
   });
 }
+
+export async function forgotPassword(
+  payload: { email: string }
+): Promise<ApiResponse<{ message: string }>> {
+  return requestApi<{ message: string }, { email: string }>({
+    baseUrl: getAuthBaseUrl(),
+    path: "/forgot-password",
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function resendVerification(
+  payload: { email: string }
+): Promise<ApiResponse<{ message: string }>> {
+  return requestApi<{ message: string }, { email: string }>({
+    baseUrl: getAuthBaseUrl(),
+    path: "/resend-verification",
+    method: "POST",
+    body: payload,
+  });
+}
+
+
+export type OnboardingPayload = {
+  user_type: string;
+  project_types: string[];
+  interested_topics: string[];
+};
+
+export function getApiBaseUrl(): string {
+  const apiBase = process.env.NEXT_PUBLIC_API_URL;
+  if (!apiBase) return "";
+  return apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
+}
+
+export async function saveOnboarding(
+  payload: OnboardingPayload
+): Promise<ApiResponse<{ message: string }>> {
+  return requestApi<{ message: string }, OnboardingPayload>({
+    baseUrl: getApiBaseUrl(),
+    path: "/onboarding",
+    method: "POST",
+    body: payload,
+  });
+}
