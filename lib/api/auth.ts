@@ -27,7 +27,11 @@ export type AuthUserResponse = {
   user: AuthUser;
 };
 
-const supabase = createClient();
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabase() {
+  if (!_supabase) _supabase = createClient();
+  return _supabase;
+}
 
 function normalizeBaseUrl(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
@@ -66,7 +70,7 @@ function mapSupabaseUser(user: any): AuthUser {
 export async function signIn(
   payload: SignInPayload,
 ): Promise<ApiResponse<AuthUserResponse>> {
-  const { data, error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await getSupabase().auth.signInWithPassword({
     email: payload.email,
     password: payload.password,
   });
@@ -121,7 +125,7 @@ export async function signIn(
 export async function signUp(
   payload: SignUpPayload,
 ): Promise<ApiResponse<AuthUserResponse>> {
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await getSupabase().auth.signUp({
     email: payload.email,
     password: payload.password,
     options: {
@@ -155,7 +159,7 @@ export async function signUp(
 }
 
 export async function signInWithGoogle() {
-  const { data, error } = await supabase.auth.signInWithOAuth({
+  const { data, error } = await getSupabase().auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo: `${window.location.origin}/auth/callback`,
@@ -172,7 +176,7 @@ export function getGoogleAuthUrl(): string {
 }
 
 export async function logout(): Promise<ApiResponse<unknown>> {
-  const { error } = await supabase.auth.signOut();
+  const { error } = await getSupabase().auth.signOut();
   if (error) {
     return {
       success: false,
@@ -194,7 +198,7 @@ export async function getCurrentUser(): Promise<ApiResponse<AuthUserResponse>> {
   const {
     data: { user: sbUser },
     error: sbError,
-  } = await supabase.auth.getUser();
+  } = await getSupabase().auth.getUser();
 
   if (sbError || !sbUser) {
     return {
@@ -229,7 +233,7 @@ export async function getCurrentUser(): Promise<ApiResponse<AuthUserResponse>> {
 export async function forgotPassword(
   payload: { email: string },
 ): Promise<ApiResponse<{ message: string }>> {
-  const { error } = await supabase.auth.resetPasswordForEmail(payload.email, {
+  const { error } = await getSupabase().auth.resetPasswordForEmail(payload.email, {
     redirectTo: `${window.location.origin}/authpage/reset-password`,
   });
 
@@ -246,7 +250,7 @@ export async function forgotPassword(
 export async function resendVerification(
   payload: { email: string },
 ): Promise<ApiResponse<{ message: string }>> {
-  const { error } = await supabase.auth.resend({
+  const { error } = await getSupabase().auth.resend({
     type: "signup",
     email: payload.email,
   });
