@@ -87,7 +87,7 @@ function ResetPasswordInner() {
             return;
         }
 
-        router.push("/authpage/signin?reset=success");
+        window.location.href = "/authpage/signin?reset=success";
     };
 
     return (
