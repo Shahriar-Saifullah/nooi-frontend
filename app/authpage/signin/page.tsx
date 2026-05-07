@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithGoogle, signIn } from "@/lib/api/auth";
 import Button from "@/components/Button";
 import GoogleIcon from "@/components/GoogleIcon";
-
+const [resetSuccess, setResetSuccess] = useState(false);
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -56,6 +56,10 @@ function SigninPageInner() {
     const errorCode = searchParams.get("error");
     if (errorCode) {
       setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
+    }
+    const reset = searchParams.get("reset");
+    if (reset === "success") {
+      setResetSuccess(true);
     }
   }, [searchParams]);
 
@@ -135,6 +139,12 @@ function SigninPageInner() {
             className={`transition-transform duration-200 ${errors.auth ? "translate-y-1" : "translate-y-0"
               }`}
           >
+            {resetSuccess && (
+              <div className="flex items-center gap-2 text-[13px] text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 mb-6">
+                <span>✓</span>
+                <span>Password reset successfully! Sign in with your new password.</span>
+              </div>
+            )}
             <div className="mb-8">
               <h1 className="text-3xl font-bold text-gray-900 mb-2">Sign in</h1>
               <p className="text-gray-600 text-sm">
@@ -144,8 +154,8 @@ function SigninPageInner() {
 
             <div
               className={`overflow-hidden transition-all duration-700 ease-out ${errors.auth
-                  ? "max-h-28 opacity-100 translate-y-0 mb-6"
-                  : "max-h-0 opacity-0 -translate-y-1 mb-0"
+                ? "max-h-28 opacity-100 translate-y-0 mb-6"
+                : "max-h-0 opacity-0 -translate-y-1 mb-0"
                 }`}
             >
               <div className="flex bg-red-50 border border-red-200 rounded-lg px-4 py-3  gap-2">
@@ -185,8 +195,8 @@ function SigninPageInner() {
                     }));
                 }}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.email
-                    ? "border-red-400 focus:ring-red-300"
-                    : "border-gray-300 focus:ring-teal-600"
+                  ? "border-red-400 focus:ring-red-300"
+                  : "border-gray-300 focus:ring-teal-600"
                   }`}
               />
               <p
@@ -216,8 +226,8 @@ function SigninPageInner() {
                     }));
                 }}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.password
-                    ? "border-red-400 focus:ring-red-300"
-                    : "border-gray-300 focus:ring-teal-600"
+                  ? "border-red-400 focus:ring-red-300"
+                  : "border-gray-300 focus:ring-teal-600"
                   }`}
               />
               <p
