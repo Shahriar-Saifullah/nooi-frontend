@@ -6,6 +6,7 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const error = searchParams.get("error");
   const status = searchParams.get("status");
+  const type = searchParams.get("type");
 
   if (error) {
     return NextResponse.redirect(
@@ -21,6 +22,13 @@ export async function GET(request: Request) {
   }
 
   if (code) {
+    // If it's a password reset, forward the code to the reset page
+    if (type === "recovery") {
+      return NextResponse.redirect(
+        `${origin}/authpage/reset-password?code=${code}`
+      );
+    }
+
     const supabase = await createClient();
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 

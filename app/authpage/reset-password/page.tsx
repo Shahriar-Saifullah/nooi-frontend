@@ -22,6 +22,7 @@ function getStrength(password: string): {
   if (/[A-Z]/.test(password)) score++;
   if (/[0-9]/.test(password)) score++;
   if (/[^A-Za-z0-9]/.test(password)) score++;
+
   if (score === 0) return { score: 0, label: "", color: "" };
   if (score === 1) return { score: 1, label: "Weak", color: "bg-red-400" };
   if (score === 2) return { score: 2, label: "Fair", color: "bg-orange-400" };
@@ -34,52 +35,78 @@ function ResetPasswordInner() {
   const router = useRouter();
   const code = searchParams.get("code");
 
-  const [ready, setReady] = useState(false);
-  const [exchangeError, setExchangeError] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [refreshToken, setRefreshToken] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [exchanging, setExchanging] = useState(true);
+  const [exchangeError, setExchangeError] = useState("");
 
   const strength = getStrength(password);
 
   useEffect(() => {
     if (!code) {
       setExchangeError("Invalid or missing reset link. Please request a new one.");
+      setExchanging(false);
       return;
     }
 
-    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) {
+    supabase.auth.exchangeCodeForSession(code).then(({ data, error }) => {
+      if (error || !data.session) {
         setExchangeError(
           "This reset link is invalid or has expired. Please request a new one."
         );
       } else {
-        setReady(true);
+        setAccessToken(data.session.access_token);
+        setRefreshToken(data.session.refresh_token);
       }
+      setExchanging(false);
     });
   }, [code]);
 
   const handleSubmit = async () => {
-    if (!password) { setError("Password is required"); return; }
-    if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
-    if (password !== confirmPassword) { setError("Passwords do not match"); return; }
+    if (!password) {
+      setError("Password is required");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
 
     setError("");
     setSubmitting(true);
 
-    // Update password directly via Supabase — no backend needed
-    const { error } = await supabase.auth.updateUser({ password });
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_AUTH_API_URL}/reset-password`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          token: accessToken,
+          refresh_token: refreshToken,
+          new_password: password,
+        }),
+      }
+    );
+
+    const data = await res.json();
     setSubmitting(false);
 
-    if (error) {
-      setError(error.message ?? "Something went wrong. Please try again.");
+    if (!data.success) {
+      setError(data.error ?? "Something went wrong. Please try again.");
       return;
     }
 
-    await supabase.auth.signOut();
     router.push("/authpage/signin?reset=success");
   };
 
@@ -108,7 +135,7 @@ function ResetPasswordInner() {
         <div className="mx-auto w-full max-w-md">
 
           {/* Loading */}
-          {!ready && !exchangeError && (
+          {exchanging && (
             <div className="text-center">
               <div className="w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
               <p className="text-gray-500 text-sm">Verifying your reset link...</p>
@@ -116,7 +143,7 @@ function ResetPasswordInner() {
           )}
 
           {/* Invalid link */}
-          {exchangeError && (
+          {!exchanging && exchangeError && (
             <div className="text-center space-y-4">
               <p className="text-red-500 text-sm">{exchangeError}</p>
               <Link
@@ -129,7 +156,7 @@ function ResetPasswordInner() {
           )}
 
           {/* Form */}
-          {ready && (
+          {!exchanging && !exchangeError && (
             <>
               <Link
                 href="/authpage/signin"
@@ -149,7 +176,7 @@ function ResetPasswordInner() {
               </div>
 
               <div className="space-y-5">
-                {/* Password */}
+                {/* Password field */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Password
@@ -159,7 +186,10 @@ function ResetPasswordInner() {
                       type={showPassword ? "text" : "password"}
                       placeholder="Create a strong password"
                       value={password}
-                      onChange={(e) => { setPassword(e.target.value); if (error) setError(""); }}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (error) setError("");
+                      }}
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-black pr-10"
                     />
                     <button
@@ -167,9 +197,15 @@ function ResetPasswordInner() {
                       onClick={() => setShowPassword((p) => !p)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
                     </button>
                   </div>
+
+                  {/* Strength bars */}
                   {password && (
                     <div className="mt-2">
                       <div className="flex gap-1 mb-1">
@@ -177,7 +213,9 @@ function ResetPasswordInner() {
                           <div
                             key={i}
                             className={`h-1 flex-1 rounded-full transition-all ${
-                              i <= strength.score ? strength.color : "bg-gray-200"
+                              i <= strength.score
+                                ? strength.color
+                                : "bg-gray-200"
                             }`}
                           />
                         ))}
@@ -204,7 +242,10 @@ function ResetPasswordInner() {
                       type={showConfirm ? "text" : "password"}
                       placeholder="Confirm password"
                       value={confirmPassword}
-                      onChange={(e) => { setConfirmPassword(e.target.value); if (error) setError(""); }}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        if (error) setError("");
+                      }}
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-black pr-10"
                     />
                     <button
@@ -212,12 +253,19 @@ function ResetPasswordInner() {
                       onClick={() => setShowConfirm((p) => !p)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      {showConfirm ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      {showConfirm ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
                     </button>
                   </div>
                 </div>
 
-                {error && <p className="text-red-500 text-xs">{error}</p>}
+                {/* Error */}
+                {error && (
+                  <p className="text-red-500 text-xs">{error}</p>
+                )}
 
                 <Button
                   type="button"
