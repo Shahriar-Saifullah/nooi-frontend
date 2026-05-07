@@ -41,35 +41,20 @@ function ResetPasswordInner() {
     const strength = getStrength(password);
 
     useEffect(() => {
-        const code = new URLSearchParams(window.location.search).get("code");
+        const params = new URLSearchParams(window.location.search);
+        const access_token = params.get("access_token");
+        const refresh_token = params.get("refresh_token");
 
-        if (!code) {
-            setExchangeError("Invalid or missing reset link. Please request a new one.");
+        if (!access_token || !refresh_token) {
+            setExchangeError(
+                "This reset link is invalid or has expired. Please request a new one."
+            );
             return;
         }
 
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            {
-                auth: {
-                    flowType: "pkce",
-                },
-            }
-        );
-
-        supabase.auth.exchangeCodeForSession(code).then(({ data, error }) => {
-            console.log("exchange result:", data, error);
-            if (error || !data.session) {
-                setExchangeError(
-                    "This reset link is invalid or has expired. Please request a new one."
-                );
-            } else {
-                setAccessToken(data.session.access_token);
-                setRefreshToken(data.session.refresh_token);
-                setReady(true);
-            }
-        });
+        setAccessToken(access_token);
+        setRefreshToken(refresh_token);
+        setReady(true);
     }, []);
 
     const handleSubmit = async () => {
