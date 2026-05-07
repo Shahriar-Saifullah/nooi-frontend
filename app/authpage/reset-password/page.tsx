@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import Button from "@/components/Button";
+import { createClient } from "@supabase/supabase-js";
 
 function getStrength(password: string): {
     score: number;
@@ -40,29 +41,30 @@ function ResetPasswordInner() {
     const strength = getStrength(password);
 
     useEffect(() => {
+        const code = new URLSearchParams(window.location.search).get("code");
 
-        console.log("URL hash:", window.location.hash);
-        console.log("URL search:", window.location.search);
-        console.log("Full URL:", window.location.href);
-        // Read tokens from URL hash
-        const hash = window.location.hash;
-        if (hash) {
-            const params = new URLSearchParams(hash.substring(1));
-            const access_token = params.get("access_token");
-            const refresh_token = params.get("refresh_token");
-            const type = params.get("type");
-
-            if (access_token && refresh_token && type === "recovery") {
-                setAccessToken(access_token);
-                setRefreshToken(refresh_token);
-                setReady(true);
-                return;
-            }
+        if (!code) {
+            setExchangeError("Invalid or missing reset link. Please request a new one.");
+            return;
         }
 
-        setExchangeError(
-            "This reset link is invalid or has expired. Please request a new one."
+        // Exchange code using Supabase directly
+        const supabase = createClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
         );
+
+        supabase.auth.exchangeCodeForSession(code).then(({ data, error }) => {
+            if (error || !data.session) {
+                setExchangeError(
+                    "This reset link is invalid or has expired. Please request a new one."
+                );
+            } else {
+                setAccessToken(data.session.access_token);
+                setRefreshToken(data.session.refresh_token);
+                setReady(true);
+            }
+        });
     }, []);
 
     const handleSubmit = async () => {
@@ -189,9 +191,9 @@ function ResetPasswordInner() {
                                                 ))}
                                             </div>
                                             <p className={`text-xs font-medium ${strength.score === 1 ? "text-red-400" :
-                                                    strength.score === 2 ? "text-orange-400" :
-                                                        strength.score === 3 ? "text-yellow-500" :
-                                                            "text-teal-500"
+                                                strength.score === 2 ? "text-orange-400" :
+                                                    strength.score === 3 ? "text-yellow-500" :
+                                                        "text-teal-500"
                                                 }`}>
                                                 {strength.label}
                                             </p>
