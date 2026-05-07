@@ -4,7 +4,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { getGoogleAuthUrl, signIn } from "@/lib/api/auth";
 import Button from "@/components/Button";
 import GoogleIcon from "@/components/GoogleIcon";
-const [resetSuccess, setResetSuccess] = useState(false);
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -43,6 +42,7 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
 function SigninPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [resetSuccess, setResetSuccess] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
