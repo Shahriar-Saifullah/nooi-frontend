@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Group">
+<g id="Group_2">
+<path id="Path" fill-rule="evenodd" clip-rule="evenodd" d="M13.228 5.53283L9.228 2.4215C8.506 1.8595 7.49467 1.8595 6.772 2.4215L2.772 5.53283C2.28467 5.9115 2 6.49417 2 7.1115V12.0002C2 13.1048 2.89533 14.0002 4 14.0002H12C13.1047 14.0002 14 13.1048 14 12.0002V7.1115C14 6.49417 13.7153 5.9115 13.228 5.53283Z" stroke="var(--stroke-0, #0A0A0A)" stroke-width="1.25"/>
+<path id="Path_2" d="M6 11.3333H10" stroke="var(--stroke-0, #0A0A0A)" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="Path_3">
+</g>
+</g>
+</svg>
