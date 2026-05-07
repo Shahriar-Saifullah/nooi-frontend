@@ -233,18 +233,12 @@ export async function getCurrentUser(): Promise<ApiResponse<AuthUserResponse>> {
 export async function forgotPassword(
   payload: { email: string },
 ): Promise<ApiResponse<{ message: string }>> {
-  const { error } = await getSupabase().auth.resetPasswordForEmail(payload.email, {
-    redirectTo: `${window.location.origin}/authpage/reset-password`,
+  return requestApi<{ message: string }, { email: string }>({
+    baseUrl: getAuthBaseUrl(),
+    path: "/forgot-password",
+    method: "POST",
+    body: payload,
   });
-
-  if (error) {
-    return { success: false, error: error.message };
-  }
-
-  return {
-    success: true,
-    data: { message: "Password reset email sent" },
-  };
 }
 
 export async function resendVerification(
