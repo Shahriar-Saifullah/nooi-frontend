@@ -7,242 +7,244 @@ import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import Button from "@/components/Button";
 
 function getStrength(password: string): {
-  score: number;
-  label: string;
-  color: string;
+    score: number;
+    label: string;
+    color: string;
 } {
-  let score = 0;
-  if (password.length >= 8) score++;
-  if (/[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^A-Za-z0-9]/.test(password)) score++;
-  if (score === 0) return { score: 0, label: "", color: "" };
-  if (score === 1) return { score: 1, label: "Weak", color: "bg-red-400" };
-  if (score === 2) return { score: 2, label: "Fair", color: "bg-orange-400" };
-  if (score === 3) return { score: 3, label: "Good", color: "bg-yellow-400" };
-  return { score: 4, label: "Strong", color: "bg-teal-500" };
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[^A-Za-z0-9]/.test(password)) score++;
+    if (score === 0) return { score: 0, label: "", color: "" };
+    if (score === 1) return { score: 1, label: "Weak", color: "bg-red-400" };
+    if (score === 2) return { score: 2, label: "Fair", color: "bg-orange-400" };
+    if (score === 3) return { score: 3, label: "Good", color: "bg-yellow-400" };
+    return { score: 4, label: "Strong", color: "bg-teal-500" };
 }
 
 function ResetPasswordInner() {
-  const router = useRouter();
+    const router = useRouter();
 
-  const [accessToken, setAccessToken] = useState("");
-  const [refreshToken, setRefreshToken] = useState("");
-  const [ready, setReady] = useState(false);
-  const [exchangeError, setExchangeError] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+    const [accessToken, setAccessToken] = useState("");
+    const [refreshToken, setRefreshToken] = useState("");
+    const [ready, setReady] = useState(false);
+    const [exchangeError, setExchangeError] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
+    const [error, setError] = useState("");
+    const [submitting, setSubmitting] = useState(false);
 
-  const strength = getStrength(password);
+    const strength = getStrength(password);
 
-  useEffect(() => {
-    // Read tokens from URL hash
-    const hash = window.location.hash;
-    if (hash) {
-      const params = new URLSearchParams(hash.substring(1));
-      const access_token = params.get("access_token");
-      const refresh_token = params.get("refresh_token");
-      const type = params.get("type");
+    useEffect(() => {
 
-      if (access_token && refresh_token && type === "recovery") {
-        setAccessToken(access_token);
-        setRefreshToken(refresh_token);
-        setReady(true);
-        return;
-      }
-    }
+        console.log("URL hash:", window.location.hash);
+        console.log("URL search:", window.location.search);
+        console.log("Full URL:", window.location.href);
+        // Read tokens from URL hash
+        const hash = window.location.hash;
+        if (hash) {
+            const params = new URLSearchParams(hash.substring(1));
+            const access_token = params.get("access_token");
+            const refresh_token = params.get("refresh_token");
+            const type = params.get("type");
 
-    setExchangeError(
-      "This reset link is invalid or has expired. Please request a new one."
-    );
-  }, []);
+            if (access_token && refresh_token && type === "recovery") {
+                setAccessToken(access_token);
+                setRefreshToken(refresh_token);
+                setReady(true);
+                return;
+            }
+        }
 
-  const handleSubmit = async () => {
-    if (!password) { setError("Password is required"); return; }
-    if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
-    if (password !== confirmPassword) { setError("Passwords do not match"); return; }
+        setExchangeError(
+            "This reset link is invalid or has expired. Please request a new one."
+        );
+    }, []);
 
-    setError("");
-    setSubmitting(true);
+    const handleSubmit = async () => {
+        if (!password) { setError("Password is required"); return; }
+        if (password.length < 8) { setError("Password must be at least 8 characters"); return; }
+        if (password !== confirmPassword) { setError("Passwords do not match"); return; }
 
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_AUTH_API_URL}/reset-password`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          token: accessToken,
-          refresh_token: refreshToken,
-          new_password: password,
-        }),
-      }
-    );
+        setError("");
+        setSubmitting(true);
 
-    const data = await res.json();
-    setSubmitting(false);
+        const res = await fetch(
+            `${process.env.NEXT_PUBLIC_AUTH_API_URL}/reset-password`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                    token: accessToken,
+                    refresh_token: refreshToken,
+                    new_password: password,
+                }),
+            }
+        );
 
-    if (!data.success) {
-      setError(data.error ?? "Something went wrong. Please try again.");
-      return;
-    }
+        const data = await res.json();
+        setSubmitting(false);
 
-    router.push("/authpage/signin?reset=success");
-  };
+        if (!data.success) {
+            setError(data.error ?? "Something went wrong. Please try again.");
+            return;
+        }
 
-  return (
-    <div className="flex h-screen overflow-hidden bg-white">
-      {/* Left panel */}
-      <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12 overflow-y-auto">
-        <div className="w-24 h-8">
-          <img src="/Logo/Logo.svg" alt="Logo" />
-        </div>
-        <div className="mb-20">
-          <h2 className="text-4xl italic font-light text-gray-800 mb-6 leading-tight">
-            Calm your
-            <br />
-            workflow.
-          </h2>
-          <p className="text-gray-600 text-sm leading-relaxed pr-25">
-            A focused workspace designed to reduce noise and help your team
-            move with intention.
-          </p>
-        </div>
-      </div>
+        router.push("/authpage/signin?reset=success");
+    };
 
-      {/* Right panel */}
-      <div className="flex-1 flex flex-col justify-center px-6 md:px-16 py-10 overflow-y-auto bg-white">
-        <div className="mx-auto w-full max-w-md">
-
-          {/* Invalid link */}
-          {exchangeError && (
-            <div className="text-center space-y-4">
-              <p className="text-red-500 text-sm">{exchangeError}</p>
-              <Link
-                href="/authpage/forgot-password"
-                className="text-teal-600 hover:text-teal-700 font-medium text-sm"
-              >
-                Request a new reset link
-              </Link>
+    return (
+        <div className="flex h-screen overflow-hidden bg-white">
+            {/* Left panel */}
+            <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12 overflow-y-auto">
+                <div className="w-24 h-8">
+                    <img src="/Logo/Logo.svg" alt="Logo" />
+                </div>
+                <div className="mb-20">
+                    <h2 className="text-4xl italic font-light text-gray-800 mb-6 leading-tight">
+                        Calm your
+                        <br />
+                        workflow.
+                    </h2>
+                    <p className="text-gray-600 text-sm leading-relaxed pr-25">
+                        A focused workspace designed to reduce noise and help your team
+                        move with intention.
+                    </p>
+                </div>
             </div>
-          )}
 
-          {/* Form */}
-          {ready && (
-            <>
-              <Link
-                href="/authpage/signin"
-                className="inline-flex items-center gap-1 text-[13px] text-[#646968] hover:text-gray-800 transition-colors"
-              >
-                <ChevronLeft className="size-4" />
-                Back to sign in
-              </Link>
+            {/* Right panel */}
+            <div className="flex-1 flex flex-col justify-center px-6 md:px-16 py-10 overflow-y-auto bg-white">
+                <div className="mx-auto w-full max-w-md">
 
-              <div className="mt-9 mb-7">
-                <h1 className="text-[26px] font-bold text-gray-900">
-                  Create new password
-                </h1>
-                <p className="text-[14px] text-gray-600">
-                  Your new password must be different from previously used passwords.
-                </p>
-              </div>
+                    {/* Invalid link */}
+                    {exchangeError && (
+                        <div className="text-center space-y-4">
+                            <p className="text-red-500 text-sm">{exchangeError}</p>
+                            <Link
+                                href="/authpage/forgot-password"
+                                className="text-teal-600 hover:text-teal-700 font-medium text-sm"
+                            >
+                                Request a new reset link
+                            </Link>
+                        </div>
+                    )}
 
-              <div className="space-y-5">
-                {/* Password */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Create a strong password"
-                      value={password}
-                      onChange={(e) => { setPassword(e.target.value); if (error) setError(""); }}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-black pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((p) => !p)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                    </button>
-                  </div>
-                  {password && (
-                    <div className="mt-2">
-                      <div className="flex gap-1 mb-1">
-                        {[1, 2, 3, 4].map((i) => (
-                          <div
-                            key={i}
-                            className={`h-1 flex-1 rounded-full transition-all ${
-                              i <= strength.score ? strength.color : "bg-gray-200"
-                            }`}
-                          />
-                        ))}
-                      </div>
-                      <p className={`text-xs font-medium ${
-                        strength.score === 1 ? "text-red-400" :
-                        strength.score === 2 ? "text-orange-400" :
-                        strength.score === 3 ? "text-yellow-500" :
-                        "text-teal-500"
-                      }`}>
-                        {strength.label}
-                      </p>
-                    </div>
-                  )}
+                    {/* Form */}
+                    {ready && (
+                        <>
+                            <Link
+                                href="/authpage/signin"
+                                className="inline-flex items-center gap-1 text-[13px] text-[#646968] hover:text-gray-800 transition-colors"
+                            >
+                                <ChevronLeft className="size-4" />
+                                Back to sign in
+                            </Link>
+
+                            <div className="mt-9 mb-7">
+                                <h1 className="text-[26px] font-bold text-gray-900">
+                                    Create new password
+                                </h1>
+                                <p className="text-[14px] text-gray-600">
+                                    Your new password must be different from previously used passwords.
+                                </p>
+                            </div>
+
+                            <div className="space-y-5">
+                                {/* Password */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Password
+                                    </label>
+                                    <div className="relative">
+                                        <input
+                                            type={showPassword ? "text" : "password"}
+                                            placeholder="Create a strong password"
+                                            value={password}
+                                            onChange={(e) => { setPassword(e.target.value); if (error) setError(""); }}
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-black pr-10"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword((p) => !p)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                        >
+                                            {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                                        </button>
+                                    </div>
+                                    {password && (
+                                        <div className="mt-2">
+                                            <div className="flex gap-1 mb-1">
+                                                {[1, 2, 3, 4].map((i) => (
+                                                    <div
+                                                        key={i}
+                                                        className={`h-1 flex-1 rounded-full transition-all ${i <= strength.score ? strength.color : "bg-gray-200"
+                                                            }`}
+                                                    />
+                                                ))}
+                                            </div>
+                                            <p className={`text-xs font-medium ${strength.score === 1 ? "text-red-400" :
+                                                    strength.score === 2 ? "text-orange-400" :
+                                                        strength.score === 3 ? "text-yellow-500" :
+                                                            "text-teal-500"
+                                                }`}>
+                                                {strength.label}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Confirm password */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Confirm Password
+                                    </label>
+                                    <div className="relative">
+                                        <input
+                                            type={showConfirm ? "text" : "password"}
+                                            placeholder="Confirm password"
+                                            value={confirmPassword}
+                                            onChange={(e) => { setConfirmPassword(e.target.value); if (error) setError(""); }}
+                                            className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-black pr-10"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowConfirm((p) => !p)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                        >
+                                            {showConfirm ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {error && <p className="text-red-500 text-xs">{error}</p>}
+
+                                <Button
+                                    type="button"
+                                    fullWidth
+                                    onClick={handleSubmit}
+                                    disabled={submitting}
+                                >
+                                    {submitting ? "Resetting..." : "Reset Password"}
+                                </Button>
+                            </div>
+                        </>
+                    )}
                 </div>
-
-                {/* Confirm password */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Confirm Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showConfirm ? "text" : "password"}
-                      placeholder="Confirm password"
-                      value={confirmPassword}
-                      onChange={(e) => { setConfirmPassword(e.target.value); if (error) setError(""); }}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-transparent text-black pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirm((p) => !p)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showConfirm ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {error && <p className="text-red-500 text-xs">{error}</p>}
-
-                <Button
-                  type="button"
-                  fullWidth
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                >
-                  {submitting ? "Resetting..." : "Reset Password"}
-                </Button>
-              </div>
-            </>
-          )}
+            </div>
         </div>
-      </div>
-    </div>
-  );
+    );
 }
 
 export default function ResetPasswordPage() {
-  return (
-    <Suspense fallback={null}>
-      <ResetPasswordInner />
-    </Suspense>
-  );
+    return (
+        <Suspense fallback={null}>
+            <ResetPasswordInner />
+        </Suspense>
+    );
 }
