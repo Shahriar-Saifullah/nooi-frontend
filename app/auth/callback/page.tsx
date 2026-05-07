@@ -15,6 +15,52 @@ function AuthCallbackInner() {
       return;
     }
 
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token")) {
+      const params = new URLSearchParams(hash.substring(1));
+      const accessToken = params.get("access_token");
+      const refreshToken = params.get("refresh_token");
+
+      if (accessToken && refreshToken) {
+        fetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL}/set-session`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          }),
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.success) {
+              const done = !!data.user?.onboarding_completed;
+              router.replace(done ? "/dashboard" : "/onboarding");
+            } else {
+              router.replace("/authpage/signin?error=google_auth_failed");
+            }
+          })
+          .catch(() => {
+            router.replace("/authpage/signin?error=server_error");
+          });
+        return;
+      }
+    }
+
+    const status = searchParams.get("status");
+    if (status === "success") {
+      getCurrentUser().then((res) => {
+        if (res.success) {
+          const done = !!res.data.user.onboarding_completed;
+          router.replace(done ? "/dashboard" : "/onboarding");
+        } else {
+          router.replace("/authpage/signin?error=google_auth_failed");
+        }
+      });
+      return;
+    }
+
+    // Fallback — just check current session
     getCurrentUser().then((res) => {
       if (res.success) {
         const done = !!res.data.user.onboarding_completed;
