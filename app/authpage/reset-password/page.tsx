@@ -48,13 +48,18 @@ function ResetPasswordInner() {
             return;
         }
 
-        // Exchange code using Supabase directly
         const supabase = createClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+                auth: {
+                    flowType: "pkce",
+                },
+            }
         );
 
         supabase.auth.exchangeCodeForSession(code).then(({ data, error }) => {
+            console.log("exchange result:", data, error);
             if (error || !data.session) {
                 setExchangeError(
                     "This reset link is invalid or has expired. Please request a new one."
