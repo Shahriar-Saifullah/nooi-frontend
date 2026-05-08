@@ -3,9 +3,9 @@
 import { Suspense, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ChevronLeft, Eye, EyeOff } from "lucide-react";
+import { ChevronLeft, Eye, EyeOff, TriangleAlert } from "lucide-react";
 import Button from "@/components/Button";
-import { createClient } from "@supabase/supabase-js";
+import { forgotPassword } from "@/lib/api/auth";
 
 function getStrength(password: string): {
     score: number;
@@ -24,13 +24,23 @@ function getStrength(password: string): {
     return { score: 4, label: "Strong", color: "bg-teal-500" };
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function ResetPasswordInner() {
     const router = useRouter();
 
     const [accessToken, setAccessToken] = useState("");
     const [refreshToken, setRefreshToken] = useState("");
     const [ready, setReady] = useState(false);
-    const [exchangeError, setExchangeError] = useState("");
+    const [exchangeError, setExchangeError] = useState(false);
+
+    // For invalid link — resend form
+    const [resendEmail, setResendEmail] = useState("");
+    const [resendError, setResendError] = useState("");
+    const [resendSending, setResendSending] = useState(false);
+    const [resendSent, setResendSent] = useState(false);
+
+    // For valid link — reset form
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
@@ -46,9 +56,7 @@ function ResetPasswordInner() {
         const refresh_token = params.get("refresh_token");
 
         if (!access_token || !refresh_token) {
-            setExchangeError(
-                "This reset link is invalid or has expired. Please request a new one."
-            );
+            setExchangeError(true);
             return;
         }
 
@@ -56,6 +64,33 @@ function ResetPasswordInner() {
         setRefreshToken(refresh_token);
         setReady(true);
     }, []);
+
+    const handleResend = async () => {
+        if (!resendEmail) {
+            setResendError("Email is required");
+            return;
+        }
+        if (!EMAIL_REGEX.test(resendEmail)) {
+            setResendError("Please enter a valid email");
+            return;
+        }
+
+        setResendError("");
+        setResendSending(true);
+        const res = await forgotPassword({ email: resendEmail });
+        setResendSending(false);
+
+        if (!res.success) {
+            setResendError(
+                typeof res.error === "string"
+                    ? res.error
+                    : "Something went wrong. Please try again."
+            );
+            return;
+        }
+
+        setResendSent(true);
+    };
 
     const handleSubmit = async () => {
         if (!password) { setError("Password is required"); return; }
@@ -116,20 +151,88 @@ function ResetPasswordInner() {
             <div className="flex-1 flex flex-col justify-center px-6 md:px-16 py-10 overflow-y-auto bg-white">
                 <div className="mx-auto w-full max-w-md">
 
-                    {/* Invalid link */}
+                    {/* Invalid / Expired link state */}
                     {exchangeError && (
-                        <div className="text-center space-y-4">
-                            <p className="text-red-500 text-sm">{exchangeError}</p>
+                        <>
                             <Link
-                                href="/authpage/forgot-password"
-                                className="text-teal-600 hover:text-teal-700 font-medium text-sm"
+                                href="/authpage/signin"
+                                className="inline-flex items-center gap-1 text-[13px] text-[#646968] hover:text-gray-800 transition-colors mb-8"
                             >
-                                Request a new reset link
+                                <ChevronLeft className="size-4" />
+                                Back to sign in
                             </Link>
-                        </div>
+
+                            {resendSent ? (
+                                <div className="text-center space-y-2">
+                                    <div className="w-14 h-14 rounded-full bg-teal-50 border border-teal-200 flex items-center justify-center mx-auto mb-4">
+                                        <span className="text-teal-600 text-2xl">✓</span>
+                                    </div>
+                                    <h1 className="text-[22px] font-bold text-gray-900">Check your inbox</h1>
+                                    <p className="text-[14px] text-gray-600">
+                                        We sent a new password reset link to <span className="font-semibold text-gray-900">{resendEmail}</span>
+                                    </p>
+                                    <p className="text-[13px] text-gray-500 mt-4">
+                                        Didn&apos;t receive it?{" "}
+                                        <button
+                                            onClick={() => { setResendSent(false); setResendEmail(""); }}
+                                            className="text-teal-600 hover:text-teal-700 font-medium"
+                                        >
+                                            Try again
+                                        </button>
+                                    </p>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Warning icon */}
+                                    <div className="w-16 h-16 rounded-full bg-yellow-50 border border-yellow-200 flex items-center justify-center mx-auto mb-6">
+                                        <TriangleAlert className="size-7 text-yellow-500" />
+                                    </div>
+
+                                    <h1 className="text-[22px] font-bold text-gray-900 text-center mb-2">
+                                        Invalid reset link
+                                    </h1>
+                                    <p className="text-[14px] text-gray-600 text-center mb-8">
+                                        This password reset link is invalid or has expired. Please request a new one.
+                                    </p>
+
+                                    <div className="space-y-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Email
+                                            </label>
+                                            <input
+                                                type="email"
+                                                placeholder="you@company.com"
+                                                value={resendEmail}
+                                                onChange={(e) => {
+                                                    setResendEmail(e.target.value);
+                                                    if (resendError) setResendError("");
+                                                }}
+                                                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${resendError
+                                                    ? "border-red-400 focus:ring-red-300"
+                                                    : "border-gray-300 focus:ring-teal-600"
+                                                    }`}
+                                            />
+                                            {resendError && (
+                                                <p className="text-red-500 text-xs mt-1">{resendError}</p>
+                                            )}
+                                        </div>
+
+                                        <Button
+                                            type="button"
+                                            fullWidth
+                                            onClick={handleResend}
+                                            disabled={resendSending}
+                                        >
+                                            {resendSending ? "Sending..." : "Send reset link"}
+                                        </Button>
+                                    </div>
+                                </>
+                            )}
+                        </>
                     )}
 
-                    {/* Form */}
+                    {/* Valid link — Reset form */}
                     {ready && (
                         <>
                             <Link
@@ -177,16 +280,14 @@ function ResetPasswordInner() {
                                                 {[1, 2, 3, 4].map((i) => (
                                                     <div
                                                         key={i}
-                                                        className={`h-1 flex-1 rounded-full transition-all ${i <= strength.score ? strength.color : "bg-gray-200"
-                                                            }`}
+                                                        className={`h-1 flex-1 rounded-full transition-all ${i <= strength.score ? strength.color : "bg-gray-200"}`}
                                                     />
                                                 ))}
                                             </div>
                                             <p className={`text-xs font-medium ${strength.score === 1 ? "text-red-400" :
                                                 strength.score === 2 ? "text-orange-400" :
                                                     strength.score === 3 ? "text-yellow-500" :
-                                                        "text-teal-500"
-                                                }`}>
+                                                        "text-teal-500"}`}>
                                                 {strength.label}
                                             </p>
                                         </div>

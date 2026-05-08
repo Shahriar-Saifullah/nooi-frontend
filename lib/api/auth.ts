@@ -247,6 +247,9 @@ export async function resendVerification(
   const { error } = await getSupabase().auth.resend({
     type: "signup",
     email: payload.email,
+    options: {
+      emailRedirectTo: `${window.location.origin}/auth/callback-client`,
+    },
   });
 
   if (error) {
