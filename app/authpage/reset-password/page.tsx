@@ -95,7 +95,9 @@ function ResetPasswordInner() {
             {/* Left panel */}
             <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12 overflow-y-auto">
                 <div className="w-24 h-8">
-                    <img src="/Logo/Logo.svg" alt="Logo" />
+                    <a href="/">
+                        <img src="/Logo/Logo.svg" alt="Logo" />
+                    </a>
                 </div>
                 <div className="mb-20">
                     <h2 className="text-4xl italic font-light text-gray-800 mb-6 leading-tight">

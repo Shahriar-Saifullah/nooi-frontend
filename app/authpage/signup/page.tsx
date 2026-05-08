@@ -156,7 +156,9 @@ export default function SignupPage() {
       {/* Left panel */}
       <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
-          <img src="/Logo/Logo.svg" alt="Logo" />
+          <a href="/">
+            <img src="/Logo/Logo.svg" alt="Logo" />
+          </a>
         </div>
 
         <div className="mb-20">
@@ -201,8 +203,8 @@ export default function SignupPage() {
                     setErrors((p) => ({ ...p, fullName: undefined }));
                 }}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.fullName
-                    ? "border-red-400 focus:ring-red-300"
-                    : "border-gray-300 focus:ring-teal-600"
+                  ? "border-red-400 focus:ring-red-300"
+                  : "border-gray-300 focus:ring-teal-600"
                   }`}
               />
               <p
@@ -228,8 +230,8 @@ export default function SignupPage() {
                     setErrors((p) => ({ ...p, email: undefined }));
                 }}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.email
-                    ? "border-red-400 focus:ring-red-300"
-                    : "border-gray-300 focus:ring-teal-600"
+                  ? "border-red-400 focus:ring-red-300"
+                  : "border-gray-300 focus:ring-teal-600"
                   }`}
               />
               <p
@@ -255,8 +257,8 @@ export default function SignupPage() {
                     setErrors((p) => ({ ...p, password: undefined }));
                 }}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.password
-                    ? "border-red-400 focus:ring-red-300"
-                    : "border-gray-300 focus:ring-teal-600"
+                  ? "border-red-400 focus:ring-red-300"
+                  : "border-gray-300 focus:ring-teal-600"
                   }`}
               />
               <p
@@ -327,8 +329,8 @@ export default function SignupPage() {
                     setErrors((p) => ({ ...p, confirmPassword: undefined }));
                 }}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.confirmPassword
-                    ? "border-red-400 focus:ring-red-300"
-                    : "border-gray-300 focus:ring-teal-600"
+                  ? "border-red-400 focus:ring-red-300"
+                  : "border-gray-300 focus:ring-teal-600"
                   }`}
               />
               <p
