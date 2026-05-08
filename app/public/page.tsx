@@ -146,7 +146,7 @@ export default function LandingPage() {
           {/* Actions & Hamburger */}
           <div className="flex items-center gap-[8px] justify-end shrink-0">
             {/* The ? button is hidden on md (tablet) to avoid overlapping Pricing, visible only on lg */}
-            <button className="hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
+            <button className="relative hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
               <Image fill src="/assets/container-svg.svg" alt="Help" className="" />
             </button>
             
