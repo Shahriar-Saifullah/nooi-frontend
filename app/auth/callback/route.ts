@@ -17,7 +17,19 @@ export async function GET(request: Request) {
   if (status === "success") {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    const done = !!user?.user_metadata?.onboarding_completed;
+
+    if (!user) {
+      return NextResponse.redirect(`${origin}/authpage/signin`);
+    }
+
+    // Check onboarding from profiles table
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("onboarding_completed")
+      .eq("id", user.id)
+      .single();
+
+    const done = !!profile?.onboarding_completed;
     return NextResponse.redirect(`${origin}${done ? "/dashboard" : "/onboarding"}`);
   }
 
@@ -33,7 +45,13 @@ export async function GET(request: Request) {
         );
       }
 
-      const done = !!data.user?.user_metadata?.onboarding_completed;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("onboarding_completed")
+        .eq("id", data.user.id)
+        .single();
+
+      const done = !!profile?.onboarding_completed;
       return NextResponse.redirect(`${origin}${done ? "/dashboard" : "/onboarding"}`);
     }
 

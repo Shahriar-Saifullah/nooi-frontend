@@ -42,7 +42,9 @@ export default function ForgotPasswordPage() {
       {/* Left panel */}
       <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
-          <img src="/Logo/Logo.svg" alt="Logo" />
+          <a href="/">
+            <img src="/Logo/Logo.svg" alt="Logo" />
+          </a>
         </div>
         <div className="mb-20">
           <h2 className="text-4xl italic font-light text-gray-800 mb-6 leading-tight">
@@ -88,7 +90,7 @@ export default function ForgotPasswordPage() {
             </div>
           ) : (
 
-          /* FORM STATE */
+            /* FORM STATE */
             <>
               <Link
                 href="/authpage/signin"
@@ -126,11 +128,10 @@ export default function ForgotPasswordPage() {
                       setEmail(e.target.value);
                       if (error) setError("");
                     }}
-                    className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${
-                      error
+                    className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${error
                         ? "border-red-400 focus:ring-red-300"
                         : "border-gray-300 focus:ring-teal-600"
-                    }`}
+                      }`}
                   />
                   <p
                     className={`text-red-500 text-xs mt-1 min-h-4 ${error ? "visible" : "invisible"}`}

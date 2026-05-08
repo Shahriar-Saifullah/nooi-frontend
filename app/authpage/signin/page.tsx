@@ -130,7 +130,9 @@ function SigninPageInner() {
       {/* Left panel */}
       <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto">
         <div className="w-24 h-8">
-          <img src="/Logo/Logo.svg" alt="Logo" />
+          <a href="/">
+            <img src="/Logo/Logo.svg" alt="Logo" />
+          </a>
         </div>
 
         <div className="mb-20">
