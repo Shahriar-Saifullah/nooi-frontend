@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 
 const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string }) => {
@@ -18,7 +19,7 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
         transition={{ delay: 0.4 }}
         className="absolute top-[12%] right-[2%] w-[22%] py-10 px-4 pb-3 pt-4 md:w-[140px] z-20"
       >
-        <img src="/assets/Furniture 4 3.png" className="w-full h-auto rounded-[16px] shadow-2xl border border-white/60" alt="Style Picker" />
+        <Image width={500} height={500} src="/assets/Furniture 4 3.png" className="w-full h-auto rounded-[16px] shadow-2xl border border-white/60" alt="Style Picker" />
       </motion.div>
 
       {/* Top Window Card */}
@@ -29,11 +30,9 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
         className="absolute top-[6%] left-[4%] w-[75%] h-[55%] z-10"
       >
         <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_70px_rgba(0,0,0,0.1)] border border-white/80 p-1 md:p-2 flex items-center justify-center overflow-hidden">
-          <img 
-            src={img1} 
+          <Image width={800} height={800} src={img1} 
             className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500" 
-            alt="Window 1" 
-          />
+            alt="Window 1" />
         </div>
       </motion.div>
 
@@ -46,11 +45,9 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
         className="absolute bottom-[6%] right-[5%] w-[75%] h-[55%] z-0"
       >
         <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_70px_rgba(0,0,0,0.1)] border border-white/80 p-1 md:p-2 flex items-center justify-center overflow-hidden">
-          <img 
-            src={img2} 
+          <Image width={800} height={800} src={img2} 
             className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500" 
-            alt="Window 2" 
-          />
+            alt="Window 2" />
         </div>
       </motion.div>
     </div>
@@ -126,7 +123,7 @@ export default function LandingPage() {
           {/* Left: Logo */}
           <div className="flex items-center shrink-0">
             <Link href="/" className="flex items-center gap-[9px]">
-              <img src="/assets/logo.png" alt="NOOI" className="w-[32px] md:w-[40px] h-auto object-contain" />
+              <Image width={100} height={100} src="/assets/logo.png" alt="NOOI" className="w-[32px] md:w-[40px] h-auto object-contain" />
               <span className="font-inter font-bold text-[18px] md:text-[20px] text-[#111d27] tracking-tight">NOOI</span>
             </Link>
           </div>
@@ -135,11 +132,11 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center gap-[11px] flex-1 justify-center whitespace-nowrap">
             <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Products</span>
-              <img src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
+              <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
             </button>
             <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Resources</span>
-              <img src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
+              <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
             </button>
             <button className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Pricing</span>
@@ -150,7 +147,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-[8px] justify-end shrink-0">
             {/* The ? button is hidden on md (tablet) to avoid overlapping Pricing, visible only on lg */}
             <button className="hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
-              <img src="/assets/container-svg.svg" alt="Help" className="w-full h-full" />
+              <Image fill src="/assets/container-svg.svg" alt="Help" className="" />
             </button>
             
             <div className="flex items-center gap-[2px] md:gap-[4px] h-[40px] md:h-[46px] bg-white border border-[#e6e6e8] p-[2px] md:p-[4px] rounded-[10px] md:rounded-[12px] flex-nowrap shrink-0">
@@ -190,11 +187,11 @@ export default function LandingPage() {
             >
               <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
                 <span className="font-schibsted text-[16px] text-[#003230] font-medium">Products</span>
-                <img src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
+                <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
               </button>
               <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
                 <span className="font-schibsted text-[16px] text-[#003230] font-medium">Resources</span>
-                <img src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
+                <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
               </button>
               <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium">
                 Pricing
@@ -228,13 +225,13 @@ export default function LandingPage() {
       <section className="relative pt-[152px] pb-[60px] flex flex-col items-center z-10 px-4 min-h-[860px] overflow-hidden bg-[#eef2f7]">
         {/* Background Grid */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1408px] h-[717px] pointer-events-none -z-10 opacity-50">
-          <img src="/assets/bg-grid.svg" alt="" className="w-full h-full object-cover" />
+          <Image fill src="/assets/bg-grid.svg" alt="" className="object-cover" />
         </div>
 
         <div className="flex flex-col gap-[44px] items-center max-w-[1240px] w-full">
           {/* Ã¢â‚¬â€ */}
           <div className="bg-white/30 border border-[#548381]/20 rounded-full px-[14px] py-[7px] flex items-center gap-[8px] cursor-default backdrop-blur-sm">
-            <img src="/assets/stars.svg" alt="" className="w-[14px] h-[14px]" />
+            <Image width={100} height={100} src="/assets/stars.svg" alt="" className="w-[14px] h-[14px]" />
             <p className="text-[13px] font-medium tracking-tight flex gap-1">
               <span className="text-[#b0b0b5] font-schibsted font-medium">New:</span>
               <span className="text-[#555f6d] font-schibsted font-medium">Drag & drop workflow builder</span>
@@ -274,13 +271,13 @@ export default function LandingPage() {
             <div className="flex items-center justify-between w-full mt-2">
               {/* Attach */}
               <button className="w-[44px] h-[44px] bg-[#f7f8f8] border border-[#d8d9da] rounded-[12px] flex items-center justify-center hover:bg-[#eef0f1] transition-colors">
-                <img src="/assets/vector-1.svg" alt="Attach" className="w-[18px] h-[18px] opacity-60" />
+                <Image width={100} height={100} src="/assets/vector-1.svg" alt="Attach" className="w-[18px] h-[18px] opacity-60" />
               </button>
 
               <div className="flex items-center gap-[10px]">
                 {/* Voice */}
                 <button className="w-[32px] h-[32px] flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
-                  <img src="/Logo/icon.svg" alt="Voice" className="w-[24px] h-[24px]" />
+                  <Image width={100} height={100} src="/Logo/icon.svg" alt="Voice" className="w-[24px] h-[24px]" />
                 </button>
 
                 {/* Now */}
@@ -288,7 +285,7 @@ export default function LandingPage() {
                   <span className="font-schibsted font-semibold text-white text-[14px] leading-none whitespace-nowrap">
                     Build Now
                   </span>
-                  <img src="/assets/icon.svg" alt="" className="w-[16px] h-[16px] brightness-[10] group-hover:translate-x-0.5 transition-transform" />
+                  <Image width={100} height={100} src="/assets/icon.svg" alt="" className="w-[16px] h-[16px] brightness-[10] group-hover:translate-x-0.5 transition-transform" />
                 </button>
               </div>
             </div>
@@ -322,11 +319,9 @@ export default function LandingPage() {
             >
               {/* Image Container */}
               <div className="bg-white border border-[#e6f0f2] rounded-[8.2px] p-[12px] mb-[24px] aspect-[350/255] flex items-center justify-center overflow-hidden">
-                <img
-                  src={feature.img}
+                <Image width={500} height={500} src={feature.img}
                   alt={feature.name}
-                  className="w-full h-auto object-contain"
-                />
+                  className="w-full h-auto object-contain" />
               </div>
               {/* + */}
               <div className="flex items-center justify-between">
@@ -334,7 +329,7 @@ export default function LandingPage() {
                   {feature.name}
                 </h3>
                 <button className="w-[46px] h-[46px] bg-[#142d25] rounded-[8px] flex items-center justify-center hover:bg-[#003330] transition-colors shadow-sm shrink-0">
-                  <img src="/assets/arrow-outward.svg" alt="Go" className="w-[24px] h-[24px] brightness-[10]" />
+                  <Image width={100} height={100} src="/assets/arrow-outward.svg" alt="Go" className="w-[24px] h-[24px] brightness-[10]" />
                 </button>
               </div>
             </motion.div>
@@ -345,7 +340,7 @@ export default function LandingPage() {
         <button className="bg-[#004643] text-white pl-[24px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
           <span className="text-[20px] font-schibsted font-normal">View All Design</span>
           <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-            <img src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
+            <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
           </div>
         </button>
       </section>
@@ -391,7 +386,7 @@ export default function LandingPage() {
               <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
                 <span className="text-[20px] font-schibsted font-normal">View All Design</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <img src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
                 </div>
               </button>
             </div>
@@ -422,7 +417,7 @@ export default function LandingPage() {
               <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
                 <span className="text-[20px] font-schibsted font-normal">View All Design</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <img src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
                 </div>
               </button>
             </div>
@@ -452,7 +447,7 @@ export default function LandingPage() {
               <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
                 <span className="text-[20px] font-schibsted font-normal">View All Design</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <img src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px] -rotate-0" />
                 </div>
               </button>
             </div>
@@ -536,7 +531,7 @@ export default function LandingPage() {
               >
                 <span className="text-[18px] font-schibsted font-normal">{steps[activeStep].btnText}</span>
                 <div className="bg-white p-[10px] rounded-[12px] flex items-center justify-center">
-                  <img src="/assets/arrow-down-01.svg" alt="" className="w-[20px] h-[20px] -rotate-90" />
+                  <Image width={100} height={100} src="/assets/arrow-down-01.svg" alt="" className="w-[20px] h-[20px] -rotate-90" />
                 </div>
               </button>
             </div>
@@ -564,11 +559,9 @@ export default function LandingPage() {
                 {/* Image Container Card - Removed white background/border per user request */}
                 <div className="rounded-[20px] pt-[20px] pb-[20px] mb-6 relative">
                   <div className="aspect-[4096/2730] rounded-[12px] overflow-hidden relative border border-white/5 shadow-sm">
-                    <img
-                      src={steps[activeStep].img}
+                    <Image fill src={steps[activeStep].img}
                       alt={steps[activeStep].miniTitle}
-                      className="w-full h-full object-cover rounded-[12px]"
-                    />
+                      className="object-cover rounded-[12px]" />
                   </div>
                   {/* Dynamic Scan Line Effect */}
                   {/* {steps[activeStep].showScanLine && (
@@ -642,16 +635,16 @@ export default function LandingPage() {
             {/* Column 1 */}
             <div className="flex flex-col gap-[20px]">
               <div className="relative w-full h-[380px] rounded-[20px] overflow-hidden group">
-                <img src="/assets/gallery-1.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <Image fill src="/assets/gallery-1.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
-                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
                   <span className="text-[12px] text-[#556370] font-medium">View more [4]</span>
                 </div>
               </div>
               <div className="relative w-full h-[280px] rounded-[20px] overflow-hidden group">
-                <img src="/assets/gallery-2.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <Image fill src="/assets/gallery-2.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
-                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
                   <span className="text-[12px] text-[#556370] font-medium">View more [7]</span>
                 </div>
               </div>
@@ -660,16 +653,16 @@ export default function LandingPage() {
             {/* Column 2 */}
             <div className="flex flex-col gap-[20px]">
               <div className="relative w-full h-[280px] rounded-[20px] overflow-hidden group">
-                <img src="/assets/gallery-3.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <Image fill src="/assets/gallery-3.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
-                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
                   <span className="text-[12px] text-[#556370] font-medium">View more [3]</span>
                 </div>
               </div>
               <div className="relative w-full h-[380px] rounded-[20px] overflow-hidden group">
-                <img src="/assets/gallery-4.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <Image fill src="/assets/gallery-4.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
-                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
                   <span className="text-[12px] text-[#556370] font-medium">View more [6]</span>
                 </div>
               </div>
@@ -678,16 +671,16 @@ export default function LandingPage() {
             {/* Column 3 */}
             <div className="flex flex-col sm:flex-row lg:flex-col gap-[20px] sm:col-span-2 lg:col-span-1">
               <div className="relative w-full sm:w-1/2 lg:w-full h-[380px] rounded-[20px] overflow-hidden group">
-                <img src="/assets/gallery-5.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <Image fill src="/assets/gallery-5.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
-                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
                   <span className="text-[12px] text-[#556370] font-medium">View more [10]</span>
                 </div>
               </div>
               <div className="relative w-full sm:w-1/2 lg:w-full h-[280px] sm:h-[380px] lg:h-[280px] rounded-[20px] overflow-hidden group">
-                <img src="/assets/gallery-6.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <Image fill src="/assets/gallery-6.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
-                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
                   <span className="text-[12px] text-[#556370] font-medium">View more [17]</span>
                 </div>
               </div>
@@ -735,7 +728,7 @@ export default function LandingPage() {
                   }`}
                 >
                   <div className="w-[48px] h-[48px] bg-[#e2e8f0] rounded-[12px] flex items-center justify-center shrink-0">
-                    <img src={item.icon || "/assets/verified-user.svg"} alt="" className="w-[20px] h-[20px] opacity-70" />
+                    <Image width={100} height={100} src={item.icon || "/assets/verified-user.svg"} alt="" className="w-[20px] h-[20px] opacity-70" />
                   </div>
                   <div className="flex-1 min-w-0 pt-[10px]">
                     <h4 className="text-[18px] sm:text-[20px] font-medium text-[#111D27] leading-snug mb-[8px]">{item.title}</h4>
@@ -750,7 +743,7 @@ export default function LandingPage() {
             {/* Right - Image & Floating Card */}
             <div className="flex-1 w-full relative">
               <div className="relative w-full aspect-square sm:aspect-[500/560] lg:aspect-auto lg:h-[600px] rounded-[32px] overflow-hidden bg-[#c2c6c9]">
-                <img src="/assets/feature-image.png" alt="3D Room" className="w-full h-full object-cover scale-105 opacity-90" />
+                <Image fill src="/assets/feature-image.png" alt="3D Room" className="object-cover scale-105 opacity-90" />
               </div>
 
               {/* Floating Dashboard Card */}
@@ -808,7 +801,7 @@ export default function LandingPage() {
       */}
       <section className="relative py-[60px] lg:py-[80px] px-4 overflow-hidden">
         <div className="absolute inset-0 z-0">
-          <img src="/assets/imgImage13.png" alt="" className="w-full h-full object-cover" />
+          <Image fill src="/assets/imgImage13.png" alt="" className="object-cover" />
           <div className="absolute inset-0 bg-[#111D27]/70" />
         </div>
 
@@ -850,7 +843,7 @@ export default function LandingPage() {
             {/* Brand column */}
             <div>
               <Link href="/" className="flex items-center gap-[10px] mb-5">
-                <img src="/assets/logo.png" alt="NOOI" className="w-[34px] h-auto object-contain" />
+                <Image width={500} height={500} src="/assets/logo.png" alt="NOOI" className="w-[34px] h-auto object-contain" />
                 <span className="font-inter font-bold text-[20px] text-neutral-900 tracking-tight">NOOI</span>
               </Link>
               <p className="text-[#6b7280] mb-7 text-[14px] sm:text-[15px] leading-relaxed max-w-[320px]">
@@ -871,8 +864,8 @@ export default function LandingPage() {
 
               {/* Platform icons */}
               <div className="flex items-center gap-4">
-                <img src="/assets/windows.svg" alt="Windows" className="w-[18px] h-[18px] opacity-30 hover:opacity-70 transition-opacity cursor-pointer" />
-                <img src="/assets/apple.svg" alt="Mac" className="w-[18px] h-[18px] opacity-30 hover:opacity-70 transition-opacity cursor-pointer" />
+                <Image width={100} height={100} src="/assets/windows.svg" alt="Windows" className="w-[18px] h-[18px] opacity-30 hover:opacity-70 transition-opacity cursor-pointer" />
+                <Image width={100} height={100} src="/assets/apple.svg" alt="Mac" className="w-[18px] h-[18px] opacity-30 hover:opacity-70 transition-opacity cursor-pointer" />
               </div>
             </div>
 
@@ -915,13 +908,13 @@ export default function LandingPage() {
             </p>
             <div className="flex items-center gap-6">
               <div className="flex items-center gap-1.5 text-[#9ca3af] text-[12px] font-medium cursor-pointer hover:text-neutral-700 transition-colors">
-                <img src="/assets/language-circle.svg" alt="" className="w-[14px] h-[14px]" />
+                <Image width={100} height={100} src="/assets/language-circle.svg" alt="" className="w-[14px] h-[14px]" />
                 <span>English</span>
-                <img src="/assets/arrow-down-01.svg" alt="" className="w-3 h-3 opacity-50" />
+                <Image width={100} height={100} src="/assets/arrow-down-01.svg" alt="" className="w-3 h-3 opacity-50" />
               </div>
               <div className="flex gap-2.5">
                 <div className="w-8 h-8 rounded-full bg-[#f5f5f5] border border-neutral-100 flex items-center justify-center hover:bg-[#004643] group transition-all cursor-pointer">
-                  <img src="/assets/group.svg" alt="Social" className="w-3.5 h-3.5 group-hover:brightness-[10] transition-all" />
+                  <Image width={100} height={100} src="/assets/group.svg" alt="Social" className="w-3.5 h-3.5 group-hover:brightness-[10] transition-all" />
                 </div>
               </div>
             </div>

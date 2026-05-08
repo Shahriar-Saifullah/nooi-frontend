@@ -8,6 +8,7 @@ import {
   Wand2, Paintbrush, LayoutDashboard, Sparkles, Image as ImageIcon,
   Monitor, Sofa, ArrowUpRight, Loader2, Plus
 } from "lucide-react";
+import Image from "next/image";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -59,7 +60,7 @@ export default function DashboardPage() {
       <header className="bg-white px-6 lg:px-8 py-3 flex items-center justify-between shadow-sm sticky top-0 z-50">
         <div className="flex items-center">
           <div className="flex items-center w-[120px] shrink-0">
-            <img src="/Logo/Logo.svg" alt="Nooi" className="h-6 w-auto" />
+            <Image width={100} height={100} src="/Logo/Logo.svg" alt="Nooi" className="h-6 w-auto" />
           </div>
 
           <div className="hidden md:flex bg-[#f5f5f5] h-10 items-center p-1 rounded-full">
@@ -86,9 +87,9 @@ export default function DashboardPage() {
 
           <div className="bg-[#f5f5f5] flex items-center gap-3 py-1 pl-1 pr-3 rounded-full shadow-sm cursor-pointer group" onClick={handleLogout} title="Click to logout">
             {user?.avatar_url ? (
-              <img src={user.avatar_url} alt={user.full_name} className="w-8 h-8 rounded-full object-cover" />
+              <Image width={100} height={100} src={user.avatar_url} alt={user.full_name} className="w-8 h-8 rounded-full object-cover" />
             ) : (
-              <img src="/assets/imgAvatar.png" alt={user?.full_name || "User"} className="w-8 h-8 rounded-full object-cover" />
+              <Image width={100} height={100} src="/assets/imgAvatar.png" alt={user?.full_name || "User"} className="w-8 h-8 rounded-full object-cover" />
             )}
             <span className="text-xs font-medium hidden sm:block group-hover:text-red-600 transition-colors">{user?.full_name || "User"}</span>
             <ChevronRight className="w-4 h-4 text-gray-500" />
@@ -124,11 +125,11 @@ export default function DashboardPage() {
                 <div className={`${action.bg} w-12 h-12 rounded-xl shrink-0 flex items-center justify-center relative`}>
                   {action.overlay ? (
                     <div className="relative w-8 h-8 flex items-center justify-center">
-                      <img src={action.overlay} className="absolute inset-0 w-full h-full object-contain" alt="base" />
-                      <img src={action.icon} className="relative w-3.5 h-3.5 object-contain z-10" alt="overlay" />
+                      <Image fill src={action.overlay} className="absolute inset-0 object-contain" alt="base" />
+                      <Image width={800} height={800} src={action.icon} className="relative w-3.5 h-3.5 object-contain z-10" alt="overlay" />
                     </div>
                   ) : (
-                    <img src={action.icon} className="w-8 h-8 object-contain" alt={action.title} />
+                    <Image width={100} height={100} src={action.icon} className="w-8 h-8 object-contain" alt={action.title} />
                   )}
                 </div>
                 <div className="flex-1 min-w-0 flex flex-col self-stretch justify-center">
@@ -143,8 +144,8 @@ export default function DashboardPage() {
           {/* Free Plan Banner */}
           <motion.div variants={itemVariants} className="bg-[#fcfdf8] border border-[#f0f4e3] rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
             <div className="bg-[#d2e88a] w-10 h-10 rounded-full flex items-center justify-center shrink-0 relative">
-              <img src="/assets/imgVerticalContainer1.svg" className="absolute inset-0 w-full h-full object-contain" alt="bg" />
-              <img src="/assets/imgIllustration1.svg" className="relative w-6 h-6 object-contain z-10" alt="diamond" />
+              <Image fill src="/assets/imgVerticalContainer1.svg" className="absolute inset-0 object-contain" alt="bg" />
+              <Image width={100} height={100} src="/assets/imgIllustration1.svg" className="relative w-6 h-6 object-contain z-10" alt="diamond" />
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="text-[15px] font-[700] mb-0.5">You're currently on the Free Plan</h3>
@@ -182,9 +183,9 @@ export default function DashboardPage() {
                   title: 'Smart Render', time: 'Yesterday',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
-                      <img src="/assets/imgImage.png" className="absolute inset-0 w-full h-full object-cover" alt="Render" />
+                      <Image fill src="/assets/imgImage.png" className="absolute inset-0 object-cover" alt="Render" />
                       <div className="absolute inset-y-0 left-0 w-1/2 border-r-2 border-white overflow-hidden">
-                        <img src="/assets/imgImage1.png" className="absolute inset-y-0 left-0 w-[200%] h-full max-w-none object-cover" alt="Sketch" />
+                        <Image width={800} height={800} src="/assets/imgImage1.png" className="absolute inset-y-0 left-0 w-[200%] h-full max-w-none object-cover" alt="Sketch" />
                       </div>
                     </div>
                   )
@@ -193,9 +194,9 @@ export default function DashboardPage() {
                   title: 'Recolor', time: '2 days ago',
                   imageContent: (
                     <div className="relative w-full h-full bg-[#E5EAD7] overflow-hidden">
-                      <img src="/assets/imgImage2.png" className="absolute inset-0 w-full h-full object-cover" alt="Recolor" />
+                      <Image fill src="/assets/imgImage2.png" className="absolute inset-0 object-cover" alt="Recolor" />
                       <div className="absolute inset-y-0 left-0 w-1/2 border-r-2 border-white overflow-hidden">
-                        <img src="/assets/imgImage4.png" className="absolute inset-y-0 left-0 w-[200%] h-full max-w-none object-cover" alt="Original" />
+                        <Image width={800} height={800} src="/assets/imgImage4.png" className="absolute inset-y-0 left-0 w-[200%] h-full max-w-none object-cover" alt="Original" />
                       </div>
                     </div>
                   )
@@ -203,16 +204,16 @@ export default function DashboardPage() {
                 {
                   title: 'Prompt Render', time: '3 weeks ago',
                   imageContent: (
-                    <img src="/assets/imgImage5.png" className="w-full h-full object-cover" alt="Prompt Render" />
+                    <Image fill src="/assets/imgImage5.png" className="object-cover" alt="Prompt Render" />
                   )
                 },
                 {
                   title: 'Clear Room', time: '3 weeks ago',
                   imageContent: (
                     <div className="relative w-full h-full bg-[#F3F4F6] overflow-hidden">
-                      <img src="/assets/imgImage6.png" className="absolute inset-0 w-full h-full object-cover" alt="Clear Room" />
+                      <Image fill src="/assets/imgImage6.png" className="absolute inset-0 object-cover" alt="Clear Room" />
                       <div className="absolute inset-y-0 left-0 w-[45%] border-r-2 border-white overflow-hidden">
-                        <img src="/assets/imgImage7.png" className="absolute inset-y-0 left-0 w-[222%] h-full max-w-none object-cover" alt="Original Room" />
+                        <Image width={800} height={800} src="/assets/imgImage7.png" className="absolute inset-y-0 left-0 w-[222%] h-full max-w-none object-cover" alt="Original Room" />
                       </div>
                     </div>
                   )
@@ -254,9 +255,9 @@ export default function DashboardPage() {
                   splitPos: '50.2%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
-                      <img src="/assets/imgImage8.png" className="absolute inset-0 w-full h-full object-cover" alt="Render" />
+                      <Image fill src="/assets/imgImage8.png" className="absolute inset-0 object-cover" alt="Render" />
                       <div className="absolute inset-y-0 left-0 w-[50.2%] border-r-2 border-white overflow-hidden">
-                        <img src="/assets/imgImage9.png" className="absolute inset-y-0 left-0 w-[199%] h-full max-w-none object-cover" alt="Sketch" />
+                        <Image width={800} height={800} src="/assets/imgImage9.png" className="absolute inset-y-0 left-0 w-[199%] h-full max-w-none object-cover" alt="Sketch" />
                       </div>
                     </div>
                   )
@@ -266,9 +267,9 @@ export default function DashboardPage() {
                   splitPos: '27.6%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
-                      <img src="/assets/imgImage10.png" className="absolute inset-0 w-full h-full object-cover" alt="Render" />
+                      <Image fill src="/assets/imgImage10.png" className="absolute inset-0 object-cover" alt="Render" />
                       <div className="absolute inset-y-0 left-0 w-[27.6%] border-r-2 border-white overflow-hidden">
-                        <img src="/assets/imgImage11.png" className="absolute inset-y-0 left-0 w-[362%] h-full max-w-none object-cover" alt="Room" />
+                        <Image width={800} height={800} src="/assets/imgImage11.png" className="absolute inset-y-0 left-0 w-[362%] h-full max-w-none object-cover" alt="Room" />
                       </div>
                     </div>
                   )
@@ -278,11 +279,11 @@ export default function DashboardPage() {
                   splitPos: '48%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
-                      <img src="/assets/imgImage12.png" className="absolute inset-0 w-full h-full object-cover" alt="Room" />
+                      <Image fill src="/assets/imgImage12.png" className="absolute inset-0 object-cover" alt="Room" />
                       <div className="absolute inset-y-0 left-0 w-[48%] border-r-2 border-white overflow-hidden">
-                        <img src="/assets/imgImage11.png" className="absolute inset-y-0 left-0 w-[208%] h-full max-w-none object-cover" alt="Room split" />
+                        <Image width={800} height={800} src="/assets/imgImage11.png" className="absolute inset-y-0 left-0 w-[208%] h-full max-w-none object-cover" alt="Room split" />
                       </div>
-                      <img src="/assets/imgImage13.png" className="absolute inset-0 m-auto w-[65%] h-[65%] object-cover rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.1)] border-2 border-white" alt="Expanded" />
+                      <Image width={1200} height={1200} src="/assets/imgImage13.png" className="absolute inset-0 m-auto w-[65%] h-[65%] object-cover rounded-xl shadow-[0_4px_16px_rgba(0,0,0,0.1)] border-2 border-white" alt="Expanded" />
                     </div>
                   )
                 },
@@ -291,9 +292,9 @@ export default function DashboardPage() {
                   splitPos: '50.6%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
-                      <img src="/assets/imgImage14.png" className="absolute inset-0 w-full h-full object-cover" alt="Render" />
+                      <Image fill src="/assets/imgImage14.png" className="absolute inset-0 object-cover" alt="Render" />
                       <div className="absolute inset-y-0 left-0 w-[50.6%] border-r-2 border-white overflow-hidden">
-                        <img src="/assets/imgImage15.png" className="absolute inset-y-0 left-0 w-[197%] h-full max-w-none object-cover" alt="Low Res" />
+                        <Image width={800} height={800} src="/assets/imgImage15.png" className="absolute inset-y-0 left-0 w-[197%] h-full max-w-none object-cover" alt="Low Res" />
                       </div>
                     </div>
                   )
@@ -308,11 +309,11 @@ export default function DashboardPage() {
                       className="absolute w-5 h-5 bg-white shadow-[0_2px_8px_rgba(99,99,99,0.12)] rounded-full flex items-center justify-center z-10 p-1 top-1/2 -translate-y-1/2 -translate-x-1/2"
                       style={{ left: item.splitPos || '50%' }}
                     >
-                      <img src="/assets/imgRating.svg" className="w-full h-full" alt="slider" />
+                      <Image fill src="/assets/imgRating.svg" className="" alt="slider" />
                     </div>
                     {item.badge && (
                       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-[rgba(255,255,255,0.8)] backdrop-blur-md px-2 sm:px-4 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm border border-[var(--secondary\/300,#c7de7d)] z-10">
-                        <img src="/assets/imgRating1.svg" className="w-3 h-3 shrink-0" alt="sparkle" />
+                        <Image width={100} height={100} src="/assets/imgRating1.svg" className="w-3 h-3 shrink-0" alt="sparkle" />
                         <span className="text-[9px] font-medium text-[#0a0a0a] whitespace-nowrap tracking-[-0.3px] hidden sm:block">{item.badge}</span>
                       </div>
                     )}
@@ -339,12 +340,12 @@ export default function DashboardPage() {
     <div className="flex items-center justify-between">
       <h2 className="text-[20px] font-[600] tracking-[-0.6px] text-[#0a0a0a]">Tutorials For You</h2>
       <button className="bg-[#f5f5f5] h-9 px-4 rounded-full flex items-center gap-2 hover:bg-gray-200 transition-colors">
-        <img src="/assets/imgGroup1.svg" className="w-4 h-4" alt="help" />
+        <Image width={100} height={100} src="/assets/imgGroup1.svg" className="w-4 h-4" alt="help" />
         <span className="text-[14px] font-medium text-[#0a0a0a] tracking-[-0.42px]">Help</span>
       </button>
     </div>
     <div className="bg-[#f5f5f5] rounded-[12px] h-11 px-4 flex items-center gap-3">
-      <img src="/assets/imgVerticalContainer.svg" className="w-5 h-5 opacity-60" alt="search" />
+      <Image width={100} height={100} src="/assets/imgVerticalContainer.svg" className="w-5 h-5 opacity-60" alt="search" />
       <input type="text" placeholder="Search" className="bg-transparent text-[14px] w-full outline-none placeholder:text-[#a1a1a1] tracking-[-0.42px]" />
     </div>
   </div>
@@ -357,32 +358,28 @@ export default function DashboardPage() {
 
         {/* Base Image — bottom-left */}
         <div className="absolute left-[7.5%] bottom-[11.3%] w-[60.2%] h-[58.8%] rounded-[16px] overflow-hidden border border-white shadow-sm">
-          <img
-            src="/assets/imgImage16.png"
+          <Image fill src="/assets/imgImage16.png"
             alt="Before"
-            className="w-full h-full object-cover"
-            style={{ objectPosition: '-8.595px 0px', width: '100.159%', maxWidth: 'none' }}
-          />
+            className="object-cover"
+            style={{ objectPosition: '-8.595px 0px', width: '100.159%', maxWidth: 'none' }} />
         </div>
 
         {/* Overlap Image — top-right */}
         <div className="absolute right-[7.5%] top-[4.5%] w-[48.2%] h-[54.3%] rounded-[16px] overflow-hidden border border-white shadow-[0_2px_8px_rgba(99,99,99,0.12)] z-10">
-          <img
-            src="/assets/imgImage17.png"
+          <Image fill src="/assets/imgImage17.png"
             alt="After"
-            className="w-full h-full object-cover"
-            style={{ objectPosition: '-17.954px 0px', width: '127.167%', maxWidth: 'none' }}
-          />
+            className="object-cover"
+            style={{ objectPosition: '-17.954px 0px', width: '127.167%', maxWidth: 'none' }} />
         </div>
 
         {/* Arrow — sits between the two images */}
         <div className="absolute left-[37.7%] top-[27.1%] w-[15%] z-20" style={{ transform: 'rotate(8.345deg)' }}>
-          <img src="/assets/imgArrow3.svg" className="w-full aspect-[1.1] object-contain" alt="arrow" />
+          <Image width={100} height={100} src="/assets/imgArrow3.svg" className="w-full aspect-[1.1] object-contain" alt="arrow" />
         </div>
 
         {/* Floating Action Bubble — pinned to bottom-center */}
         <div className="absolute bottom-[3%] left-1/2 -translate-x-1/2 bg-white px-4 py-2 rounded-full flex items-center justify-center gap-2 border-[1.5px] border-[#d2e88a] shadow-[0_4px_12px_rgba(0,0,0,0.08)] z-30 whitespace-nowrap opacity-88 max-w-[90%]">
-          <img src="/assets/imgRating2.svg" className="w-4 h-4 shrink-0" alt="sparkle" />
+          <Image width={100} height={100} src="/assets/imgRating2.svg" className="w-4 h-4 shrink-0" alt="sparkle" />
           <span className="text-[clamp(10px,2.5cqi,14px)] font-[500] tracking-[-0.42px] text-[#0a0a0a] truncate">
             Add picture in the wall | <span className="text-gray-400 ml-1"></span>
           </span>
@@ -400,7 +397,7 @@ export default function DashboardPage() {
 
       {/* Sketch panel */}
       <div className="flex-1 h-[80%] rounded-[12px] overflow-hidden shadow-md border-2 border-white relative">
-        <img src="/assets/imgImage9.png" alt="Sketch" className="absolute inset-0 w-full h-full object-cover" />
+        <Image fill src="/assets/imgImage9.png" alt="Sketch" className="absolute inset-0 object-cover" />
         {/* Label pinned inside the panel at the bottom */}
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/95 px-3 py-1 rounded-xl text-[11px] font-medium shadow-sm whitespace-nowrap z-10">
           Sketch
@@ -409,7 +406,7 @@ export default function DashboardPage() {
 
       {/* Render result panel */}
       <div className="flex-[1.3] h-full rounded-[12px] overflow-hidden shadow-md border-2 border-white relative">
-        <img src="/assets/imgImage8.png" alt="Render" className="absolute inset-0 w-full h-full object-cover" />
+        <Image fill src="/assets/imgImage8.png" alt="Render" className="absolute inset-0 object-cover" />
         {/* Label pinned inside the panel at the bottom */}
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/95 px-3 py-1 rounded-xl text-[11px] font-medium shadow-sm whitespace-nowrap z-10">
           Render result
@@ -418,7 +415,7 @@ export default function DashboardPage() {
 
       {/* Arrow — already percentage-based, no change */}
       <div className="absolute left-[36%] bottom-[3%] w-6 h-6 z-20 pointer-events-none transform -rotate-12 scale-y-[-1]">
-        <img src="/assets/imgArrow4.svg" className="w-full h-full object-contain" alt="curved arrow" />
+        <Image fill src="/assets/imgArrow4.svg" className="object-contain" alt="curved arrow" />
       </div>
 
     </div>
@@ -434,27 +431,23 @@ export default function DashboardPage() {
 
         {/* Left Image (Before) */}
         <div className="absolute left-[6%] top-[18.1%] w-[42.8%] h-[48%] rounded-[16px] overflow-hidden border border-white shadow-[0_2px_8px_rgba(99,99,99,0.12)] z-20">
-          <img src="/assets/imgImage18.png" className="w-full h-full object-cover" alt="Before" />
+          <Image fill src="/assets/imgImage18.png" className="object-cover" alt="Before" />
 
           {/* Brush Interaction Point Container — relative to the left image box */}
           <div className="absolute left-[52.8%] top-[75.5%] w-[56.3%] h-[75.5%] z-40">
 
             {/* Interactive Ring */}
             <div className="absolute left-[-25%] top-[-31.25%] w-[37.5%] h-[37.5%] z-30">
-              <img
-                src="/assets/imgVerticalContainer1.svg"
-                className="w-full h-full object-contain"
-                alt="ring"
-              />
+              <Image fill src="/assets/imgVerticalContainer1.svg"
+                className="object-contain"
+                alt="ring" />
             </div>
 
             {/* Cursor */}
             <div className="absolute left-[-2.5%] top-[-1.25%] w-[18.75%] h-[18.75%] z-40">
-              <img
-                src="/assets/imgVerticalContainer2.svg"
-                className="w-full h-full object-contain"
-                alt="cursor"
-              />
+              <Image fill src="/assets/imgVerticalContainer2.svg"
+                className="object-contain"
+                alt="cursor" />
             </div>
 
           </div>
@@ -462,17 +455,17 @@ export default function DashboardPage() {
 
         {/* Connecting Arrow */}
         <div className="absolute left-[46.1%] top-[27.1%] w-[9.6%] h-[12.7%] z-30" style={{ transform: 'rotate(69.63deg)' }}>
-          <img src="/assets/imgArrow5.svg" className="w-full h-full object-contain" alt="arrow" />
+          <Image fill src="/assets/imgArrow5.svg" className="object-contain" alt="arrow" />
         </div>
 
         {/* Right Image (After) */}
         <div className="absolute left-[52.7%] top-[29.4%] w-[42.8%] h-[47%] rounded-[16px] overflow-hidden border border-white shadow-[0_2px_8px_rgba(99,99,99,0.12)] z-0">
-          <img src="/assets/imgImage19.png" className="w-full h-full object-cover" alt="After" />
+          <Image fill src="/assets/imgImage19.png" className="object-cover" alt="After" />
         </div>
 
         {/* Label Bubble — positioned on the aspect box, not the old inner wrapper */}
         <div className="absolute left-[28.6%] top-[65.6%] w-[19.6%] h-[20.8%] flex items-center justify-center z-50">
-          <img src="/assets/imgTextInput11.svg" className="absolute inset-0 w-full h-full" alt="bubble" />
+          <Image fill src="/assets/imgTextInput11.svg" className="absolute inset-0 " alt="bubble" />
           <span className="relative flex items-center justify-center text-[10px] font-bold text-[#c7de7d] tracking-[-0.3px]">Brush..</span>
         </div>
 
