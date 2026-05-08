@@ -8,26 +8,32 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
   return (
     <div className="relative w-full aspect-[640/560] bg-[#f0f4f8]/30 rounded-[32px] overflow-visible border border-[#e2eaf0] shadow-inner group p-4 sm:p-10">
       {/* Grid Background */}
-      <div className="absolute inset-0 opacity-[0.05] pointer-events-none rounded-[32px]" style={{ backgroundImage: 'linear-gradient(#004643 1px, transparent 1px), linear-gradient(90deg, #004643 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+      <div className="absolute inset-0 opacity-[0.05] pointer-events-none rounded-[32px]" style={{ backgroundImage: 'linear-gradient(#004643 1px, transparent 1px), linear-gradient(90deg, #004643 1px, transparent 1px)', backgroundSize: '30px 30px' }}></div>
       
+      {/* Floating Style Card 1 (Outside Top Window) */}
+      <motion.div 
+        initial={{ x: 20, opacity: 0 }}
+        whileInView={{ x: 0, opacity: 1 }}
+        viewport={{ once: true }}
+        transition={{ delay: 0.4 }}
+        className="absolute top-[12%] right-[2%] w-[22%] py-10 px-4 pb-3 pt-4 md:w-[140px] z-20"
+      >
+        <img src="/assets/Furniture 4 3.png" className="w-full h-auto rounded-[16px] shadow-2xl border border-white/60" alt="Style Picker" />
+      </motion.div>
+
       {/* Top Window Card */}
       <motion.div 
         initial={{ x: -60, y: -20, opacity: 0 }}
         whileInView={{ x: 0, y: 0, opacity: 1 }}
         viewport={{ once: true }}
-        className="absolute top-[8%] left-[5%] w-[68%] h-[55%] z-10"
+        className="absolute top-[6%] left-[4%] w-[75%] h-[55%] z-10"
       >
-        <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_60px_rgba(0,0,0,0.08)] border border-white/60 p-4 md:p-6 flex items-center">
-          <div className="relative w-full h-full flex items-center justify-between gap-4">
-            {/* Main Window Image */}
-            <div className="relative w-[75%] h-full flex items-center">
-              <img src={img1} className="w-full h-auto drop-shadow-xl" alt="Window 1" />
-            </div>
-            {/* Floating Style Card for Window 1 */}
-            <div className="w-[25%] flex items-center">
-              <img src="/assets/Furniture 4 3.jpg" className="w-full h-auto rounded-[12px] shadow-lg border border-[#e2eaf0]" alt="Style" />
-            </div>
-          </div>
+        <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_70px_rgba(0,0,0,0.1)] border border-white/80 p-1 md:p-2 flex items-center justify-center overflow-hidden">
+          <img 
+            src={img1} 
+            className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500" 
+            alt="Window 1" 
+          />
         </div>
       </motion.div>
 
@@ -37,19 +43,14 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
         whileInView={{ x: 0, y: 0, opacity: 1 }}
         viewport={{ once: true }}
         transition={{ delay: 0.2 }}
-        className="absolute bottom-[8%] right-[5%] w-[68%] h-[55%] z-0"
+        className="absolute bottom-[6%] right-[5%] w-[75%] h-[55%] z-0"
       >
-        <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_60px_rgba(0,0,0,0.08)] border border-white/60 p-4 md:p-6 flex items-center">
-          <div className="relative w-full h-full flex items-center justify-between gap-4">
-            {/* Main Window Image (baked-in Style picker) */}
-            <div className="relative w-[75%] h-full flex items-center">
-              <img src={img2} className="w-full h-auto drop-shadow-xl" alt="Window 2" />
-            </div>
-            {/* Secondary Style Card for Window 2 */}
-            <div className="w-[25%] flex items-center">
-              <img src="/assets/Furniture 4 3.jpg" className="w-full h-auto rounded-[12px] shadow-lg border border-[#e2eaf0]" alt="Style" />
-            </div>
-          </div>
+        <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_70px_rgba(0,0,0,0.1)] border border-white/80 p-1 md:p-2 flex items-center justify-center overflow-hidden">
+          <img 
+            src={img2} 
+            className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500" 
+            alt="Window 2" 
+          />
         </div>
       </motion.div>
     </div>
@@ -68,31 +69,50 @@ export default function LandingPage() {
   const steps = [
     {
       title: "Start with your space",
-      description: "Bring in your own floor plan or sketch it quickly online no complex tools, just a clean starting point.",
-      img: "/assets/video-pic-1.png",
+      description: "Bring in your own floor plan or sketch it quickly online no complex tools, just a clean starting point. Bring in your own floor plan or sketch it quickly online no complex tools, just a clean starting point.",
+      img: "/assets/4th Draft 1.png",
       miniTitle: "Upload or Sketch",
-      miniDesc: "Turn rough ideas into editable 2D/3D layouts instantly. Our AI cleans up drawings and prepares them for design."
+      miniDesc: "Turn rough ideas into editable 2D/3D layouts instantly. Our AI cleans up drawings and prepares them for design.",
+      accentColor: "#b3ed97",
+      mainBg: "#0c1a17",
+      miniCardBg: "#3d4a39",
+      btnText: "View All Step"
     },
     {
-      title: "AI Layout Generation",
-      description: "Let our AI analyze your space and suggest optimal furniture layouts and interior styles.",
-      img: "/assets/video-pic-2.png",
-      miniTitle: "Smart Suggestions",
-      miniDesc: "Instantly see multiple design options tailored to your specific room dimensions and needs."
+      title: "Style in seconds",
+      description: "Let AI suggest layouts, furniture placement, and flow so you never start with a blank canvas.",
+      img: "/assets/image 19.png",
+      miniTitle: "Smart AI Design",
+      miniDesc: "Generate layouts that fit your space and style in just a click. Edit and customize until it feels like home.",
+      accentColor: "#c3b4fc",
+      mainBg: "#1a0b3b",
+      miniCardBg: "#4a3a6b",
+      btnText: "Try AI Design",
+      showMiniBtn: true,
+      showScanLine: true
     },
     {
-      title: "Realistic 3D Walkthrough",
-      description: "Visualize your future home in high-fidelity 3D. Walk through every room and experience the design.",
-      img: "/assets/imgImage10.png",
-      miniTitle: "Immersive View",
-      miniDesc: "High-quality rendering that brings your vision to life with realistic lighting and textures."
+      title: "Shop the look you create",
+      description: "Drag in real furniture and décor, then order the exact items—straight from your design.",
+      img: "/assets/image step3.png",
+      miniTitle: "Furnish With Confidence",
+      miniDesc: "Everything you see is a real product. No mismatches, no guesswork—just one click to bring it home.",
+      accentColor: "#d18d53",
+      mainBg: "#2b1b11",
+      miniCardBg: "#82614a",
+      btnText: "Browse Furnitures"
     },
     {
-      title: "Furniture & Delivery",
-      description: "Ready to move in? Order the furniture from your design directly through our integrated partners.",
-      img: "/assets/furniture-2-2.png",
-      miniTitle: "Seamless Logistics",
-      miniDesc: "From screen to doorstep. We handle the ordering and logistics for your selected furniture pieces."
+      title: "From screen to doorstep",
+      description: "Your design isn't just virtual—we deliver every piece straight to you",
+      img: "/assets/image 19.png",
+      miniTitle: "Track Your Order",
+      miniDesc: "Follow your delivery in real-time, from checkout to doorstep. Designed, ordered, and received—without hassle.",
+      accentColor: "#a5688e",
+      mainBg: "#410948",
+      miniCardBg: "#7C5A7D",
+      btnText: "Order from Design",
+      showScanLine: true
     }
   ];
 
@@ -101,17 +121,10 @@ export default function LandingPage() {
 
       {/* NAVBAR */}
       <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[1240px] h-[72px] z-50">
-        <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center justify-between pl-[12px] md:pl-[24px] pr-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)]">
-          {/* Menu */}
-          <div className="flex items-center gap-2 md:w-[200px]">
-            <button
-              className="md:hidden w-10 h-10 flex flex-col items-center justify-center gap-1.5 p-2 rounded-lg hover:bg-black/5"
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-            >
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "rotate-45 translate-y-2" : ""}`} />
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "opacity-0" : ""}`} />
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "-rotate-45 -translate-y-2" : ""}`} />
-            </button>
+        <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center justify-between pl-[16px] md:pl-[24px] pr-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)] gap-4">
+          
+          {/* Left: Logo */}
+          <div className="flex items-center shrink-0">
             <Link href="/" className="flex items-center gap-[9px]">
               <img src="/assets/logo.png" alt="NOOI" className="w-[32px] md:w-[40px] h-auto object-contain" />
               <span className="font-inter font-bold text-[18px] md:text-[20px] text-[#111d27] tracking-tight">NOOI</span>
@@ -119,7 +132,7 @@ export default function LandingPage() {
           </div>
 
           {/* Nav */}
-          <div className="hidden md:flex items-center gap-[11px] flex-1 justify-center">
+          <div className="hidden md:flex items-center gap-[11px] flex-1 justify-center whitespace-nowrap">
             <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Products</span>
               <img src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
@@ -133,44 +146,75 @@ export default function LandingPage() {
             </button>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-[4px] md:gap-[8px] justify-end md:w-[200px]">
-            <button className="hidden sm:flex w-[40px] h-[40px] md:w-[46px] md:h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
+          {/* Actions & Hamburger */}
+          <div className="flex items-center gap-[8px] justify-end shrink-0">
+            {/* The ? button is hidden on md (tablet) to avoid overlapping Pricing, visible only on lg */}
+            <button className="hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
               <img src="/assets/container-svg.svg" alt="Help" className="w-full h-full" />
             </button>
+            
             <div className="flex items-center gap-[2px] md:gap-[4px] h-[40px] md:h-[46px] bg-white border border-[#e6e6e8] p-[2px] md:p-[4px] rounded-[10px] md:rounded-[12px] flex-nowrap shrink-0">
               <Link
                 href="/authpage/signin"
-                className="h-full px-3 md:px-[16px] flex items-center justify-center bg-[#f8f8f8] rounded-[6px] md:rounded-[8px] text-[#272e35] text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-neutral-100 transition-colors whitespace-nowrap"
+                className="h-full px-4 md:px-[16px] flex items-center justify-center bg-[#f8f8f8] rounded-[6px] md:rounded-[8px] text-[#272e35] text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-neutral-100 transition-colors whitespace-nowrap"
               >
                 Log in
               </Link>
               <Link
                 href="/authpage/signup"
-                className="h-full px-3 md:px-[16px] flex items-center justify-center bg-[#004643] rounded-[7px] md:rounded-[9px] text-white text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm whitespace-nowrap"
+                className="hidden md:flex h-full px-3 md:px-[16px] items-center justify-center bg-[#004643] rounded-[7px] md:rounded-[9px] text-white text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm whitespace-nowrap"
               >
                 Start for free
               </Link>
             </div>
+
+            <button
+              className="md:hidden w-[40px] h-[40px] flex flex-col items-center justify-center gap-1.5 p-2 rounded-lg hover:bg-black/5 ml-1"
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+            >
+              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "rotate-45 translate-y-2" : ""}`} />
+              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "opacity-0" : ""}`} />
+              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "-rotate-45 -translate-y-2" : ""}`} />
+            </button>
           </div>
         </div>
 
         {/* Menu */}
-        {isMenuOpen && (
-          <div className="absolute top-[80px] left-0 w-full bg-[#f7fbfc] border border-[#e2eaf0] rounded-[22px] p-6 shadow-2xl flex flex-col gap-4 md:hidden z-[60] backdrop-blur-xl">
-            <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-              <span className="font-schibsted text-[16px] text-[#003230]">Products</span>
-              <img src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
-            </button>
-            <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-              <span className="font-schibsted text-[16px] text-[#003230]">Resources</span>
-              <img src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
-            </button>
-            <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230]">
-              Pricing
-            </button>
-          </div>
-        )}
+        <AnimatePresence>
+          {isMenuOpen && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="absolute top-[80px] left-0 w-full bg-[#f7fbfc] border border-[#e2eaf0] rounded-[22px] p-6 shadow-2xl flex flex-col gap-4 md:hidden z-[60] backdrop-blur-xl"
+            >
+              <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
+                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Products</span>
+                <img src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
+              </button>
+              <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
+                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Resources</span>
+                <img src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
+              </button>
+              <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium">
+                Pricing
+              </button>
+              <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium flex items-center justify-between">
+                <span>Help & Support</span>
+              </button>
+              
+              <div className="h-px w-full bg-black/5 my-2" />
+              
+              <Link
+                href="/authpage/signup"
+                className="w-full py-3 flex items-center justify-center bg-[#004643] rounded-[10px] text-white text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Start for free
+              </Link>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </nav>
 
       {/* HERO */}
@@ -267,9 +311,9 @@ export default function LandingPage() {
         {/* card */}
         <div className="w-full max-w-[1240px] grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[24px] mb-[60px]">
           {[
-            { name: "Room Planner",      img: "/assets/video-pic-1.png" },
-            { name: "AI Home Planner",   img: "/assets/video-pic-2.png" },
-            { name: "Kitchen Planner",   img: "/assets/video-pic-1.png" },
+            { name: "Room Planner", img: "/assets/video-pic-1.png" },
+            { name: "AI Home Planner", img: "/assets/video-pic-2.png" },
+            { name: "Kitchen Planner", img: "/assets/video-pic-1.png" },
           ].map((feature, i) => (
             <motion.div
               key={i}
@@ -353,9 +397,9 @@ export default function LandingPage() {
             </div>
             {/* card */}
             <div className="flex-1 w-full max-w-[608px]">
-              <PremiumFeatureContainer 
-                img1="/assets/furniture-2-2.png" 
-                img2="/assets/furniture-4-2.png" 
+              <PremiumFeatureContainer
+                img1="/assets/furniture-2-2.png"
+                img2="/assets/furniture-4-2.png"
               />
             </div>
           </div>
@@ -383,9 +427,9 @@ export default function LandingPage() {
               </button>
             </div>
             <div className="flex-1 w-full max-w-[608px]">
-              <PremiumFeatureContainer 
-                img1="/assets/furniture-2-2.png" 
-                img2="/assets/imgImage10.png" 
+              <PremiumFeatureContainer
+                img1="/assets/furniture-2-2.png"
+                img2="/assets/imgImage10.png"
               />
             </div>
           </div>
@@ -413,9 +457,9 @@ export default function LandingPage() {
               </button>
             </div>
             <div className="flex-1 w-full max-w-[608px]">
-              <PremiumFeatureContainer 
-                img1="/assets/imgImage1.png" 
-                img2="/assets/furniture-4-2.png" 
+              <PremiumFeatureContainer
+                img1="/assets/imgImage1.png"
+                img2="/assets/furniture-4-2.png"
               />
             </div>
           </div>
@@ -435,62 +479,125 @@ export default function LandingPage() {
         </div>
 
         {/* Card */}
-        <div className="w-full max-w-[1240px] bg-[#142d26] rounded-[22px] p-[30px] lg:p-[107px_30px_30px_107px] flex flex-col lg:flex-row items-center gap-[60px] lg:gap-[151px]">
+        <motion.div 
+          animate={{ backgroundColor: steps[activeStep].mainBg }}
+          transition={{ duration: 0.5 }}
+          className="w-full max-w-[1240px] rounded-[22px] p-[20px] sm:p-[30px] lg:p-[40px_40px_40px_80px] flex flex-col lg:flex-row items-center lg:items-stretch gap-[40px] lg:gap-[100px] mx-auto overflow-hidden"
+        >
           {/* Column */}
-          <div className="flex-1 max-w-[464px]">
-            {/* nav */}
-            <div className="flex items-center border-b border-[#859c80]/30 mb-[82px]">
-              {["Step 1", "Step 2", "Step 3", "Step 4"].map((step, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveStep(i)}
-                  className={`px-[20px] py-[10px] text-[20px] font-semibold leading-[1.5] transition-all relative whitespace-nowrap shrink-0 border-b-[4px] ${
-                    activeStep === i ? "text-[#b3ed97] border-[#8bec5c]" : "text-[#859c80] border-transparent hover:text-white/60"
-                  }`}
-                >
-                  {step}
-                </button>
-              ))}
+          <div className="flex-1 w-full max-w-[500px] flex flex-col mx-auto lg:mx-0 py-5">
+            {/* nav - Boxed style to match design, responsive fit for Mobile S */}
+            <div className="flex items-center border border-white/10 rounded-lg p-1 mb-[40px] md:mb-[80px] w-full sm:w-fit mx-auto lg:mx-0 overflow-hidden">
+              <div className="flex items-center justify-between sm:justify-start w-full sm:w-auto">
+                {["Step 1", "Step 2", "Step 3", "Step 4"].map((step, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setActiveStep(i)}
+                    className={`cursor-pointer px-[8px] min-[375px]:px-[12px] sm:px-[16px] py-[8px] text-[13px] min-[375px]:text-[14px] sm:text-[18px] font-medium transition-all relative whitespace-nowrap shrink-0 rounded-md flex-1 sm:flex-none text-center ${
+                      activeStep === i ? "bg-white/5" : "text-[#859c80] hover:text-white/60"
+                    }`}
+                    style={{ color: activeStep === i ? steps[activeStep].accentColor : undefined }}
+                  >
+                    {step}
+                    {activeStep === i && (
+                      <motion.div 
+                        layoutId="activeStepUnderline"
+                        className="absolute bottom-0 left-1 right-1 h-[2px]"
+                        style={{ backgroundColor: steps[activeStep].accentColor }}
+                      />
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Content (1040:5326) */}
-            <div className="flex flex-col gap-[15px]">
-              <h3 className="text-[36px] font-medium text-white leading-[1.5] font-schibsted">
-                {steps[activeStep].title}
-              </h3>
-              <p className="text-[20px] text-[#7e8c9a] leading-[1.5] font-schibsted mb-[30px]">
-                {steps[activeStep].description}
-              </p>
-              {/* Button (1040:5434) */}
-              <button className="bg-[#52644d] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#455440] transition-all shadow-lg group w-fit">
-                <span className="text-[20px] font-schibsted font-normal">View All Step</span>
-                <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <img src="/assets/arrow-down-01.svg" alt="" className="w-[24px] h-[24px] -rotate-90" />
+            {/* Content Container */}
+            <div className="flex flex-col gap-[20px] min-h-[300px]">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeStep}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 10 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <h3 className="text-[32px] sm:text-[42px] font-bold text-white leading-[1.1] font-schibsted mb-6">
+                    {steps[activeStep].title}
+                  </h3>
+                  <p className="text-[18px] sm:text-[20px] text-white/60 leading-[1.6] font-schibsted mb-[40px]">
+                    {steps[activeStep].description}
+                  </p>
+                </motion.div>
+              </AnimatePresence>
+              
+              <button 
+                className="text-white pl-[24px] pr-[8px] py-[8px] rounded-[16px] flex items-center gap-[16px] transition-all shadow-lg group w-fit mt-auto mx-auto lg:mx-0"
+                style={{ backgroundColor: steps[activeStep].miniCardBg }}
+              >
+                <span className="text-[18px] font-schibsted font-normal">{steps[activeStep].btnText}</span>
+                <div className="bg-white p-[10px] rounded-[12px] flex items-center justify-center">
+                  <img src="/assets/arrow-down-01.svg" alt="" className="w-[20px] h-[20px] -rotate-90" />
                 </div>
               </button>
             </div>
           </div>
 
-          {/* Column */}
-          <div className="flex-1 w-full max-w-[489px] bg-[#52644d] rounded-[15px] p-[30px] flex flex-col gap-[22px]">
-            <h4 className="text-[28px] text-white leading-[32px] font-schibsted">
-              {steps[activeStep].miniTitle}
-            </h4>
-            <div className="aspect-[4096/2730] bg-[#f5f5f5] rounded-[15px] overflow-hidden relative">
-              <img
-                src={steps[activeStep].img}
-                alt={steps[activeStep].miniTitle}
-                className="w-full h-full object-cover opacity-80"
-              />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <img src="/assets/vector-1.svg" alt="" className="w-[60px] h-[60px] brightness-[10] opacity-50" />
-              </div>
-            </div>
-            <p className="text-[20px] text-white leading-[1.5] font-schibsted">
-              {steps[activeStep].miniDesc}
-            </p>
-          </div>
-        </div>
+          {/* Column - Right Side Mini Card */}
+          <motion.div 
+            animate={{ backgroundColor: steps[activeStep].miniCardBg }}
+            transition={{ duration: 0.5 }}
+            className="flex-1 w-full max-w-[520px] rounded-[24px] p-[25px] sm:p-[40px] flex flex-col gap-[25px] mx-auto lg:mx-0 shadow-2xl h-fit"
+          >
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeStep}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                className="flex flex-col h-full"
+              >
+                <h4 className="text-[24px] sm:text-[28px] text-white font-medium leading-[1.2] font-schibsted mb-6">
+                  {steps[activeStep].miniTitle}
+                </h4>
+                
+                {/* Image Container Card - Removed white background/border per user request */}
+                <div className="rounded-[20px] pt-[20px] pb-[20px] mb-6 relative">
+                  <div className="aspect-[4096/2730] rounded-[12px] overflow-hidden relative border border-white/5 shadow-sm">
+                    <img
+                      src={steps[activeStep].img}
+                      alt={steps[activeStep].miniTitle}
+                      className="w-full h-full object-cover rounded-[12px]"
+                    />
+                  </div>
+                  {/* Dynamic Scan Line Effect */}
+                  {/* {steps[activeStep].showScanLine && (
+                    <motion.div 
+                      initial={{ x: "-100%" }}
+                      animate={{ x: "100%" }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                      className="absolute inset-y-0 left-0 w-1 bg-blue-400 shadow-[0_0_15px_rgba(96,165,250,0.8)] z-10"
+                    />
+                  )} */}
+                </div>
+
+                <p className="text-[16px] sm:text-[18px] text-white/80 leading-[1.6] font-schibsted mb-6">
+                  {steps[activeStep].miniDesc}
+                </p>
+
+                {/* Optional Mini Button for Step 2 */}
+                {steps[activeStep].showMiniBtn && (
+                  <button 
+                    className="w-full py-[14px] rounded-[14px] text-[18px] font-medium transition-all hover:opacity-90"
+                    style={{ backgroundColor: steps[activeStep].accentColor, color: steps[activeStep].mainBg }}
+                  >
+                    {steps[activeStep].btnText}
+                  </button>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </motion.div>
+        </motion.div>
       </section>
 
       {/* GALLERY */}
@@ -500,29 +607,29 @@ export default function LandingPage() {
         FIX: Grid gap tightened to gap-4 to match Figma tighter layout
         FIX: Image border-radius 16px (Figma shows slightly tighter radius)
       */}
-      <section className="py-[50px] lg:py-[60px] px-4 bg-white">
+      <section className="py-[50px] lg:py-[80px] px-4 bg-white">
         <div className="max-w-[1240px] mx-auto">
-
           {/* Header */}
-          <div className="max-w-[680px] mx-auto text-center mb-12">
-            <h2 className="text-[38px] sm:text-[48px] lg:text-[52px] font-bold text-[#111D27] leading-[1.1] mb-5 tracking-tight">
+          <div className="max-w-[800px] mx-auto text-center mb-[40px]">
+            <h2 className="text-[36px] sm:text-[48px] lg:text-[56px] font-bold text-[#111D27] leading-[1.1] mb-[16px] tracking-tight">
               Explore Our Gallery
             </h2>
-            <p className="text-[16px] sm:text-[18px] text-[#6b7280] leading-[1.65]">
-              Automated floor plan generation with AI with Realistic 3D rendering & design visualization. Automated floor plan generation with AI with Realistic.
+            <p className="text-[16px] sm:text-[18px] text-[#556370] leading-[1.6]">
+              Automated floor plan generation with AI with Realistic 3D rendering & design
+              <br className="hidden sm:block" /> visualization, Automated floor plan generation with AI with Realistic
             </p>
           </div>
 
-          {/* pills */}
-          <div className="flex flex-wrap justify-center gap-2.5 mb-10">
-            {["All", "Living Room", "Dining Room", "Bedroom", "Office", "Show more"].map((f, i) => (
+          {/* Filter Tabs */}
+          <div className="flex flex-wrap justify-center gap-[12px] mb-[50px]">
+            {["All", "Living room", "Dining Room", "Kitchen", "Furniture", "Others"].map((f, i) => (
               <button
                 key={i}
                 onClick={() => setActiveFilter(i)}
-                className={`px-5 py-2 rounded-full text-[13px] font-semibold transition-all ${
+                className={`px-[20px] py-[8px] rounded-[6px] text-[14px] font-medium transition-all border ${
                   activeFilter === i
-                    ? "bg-[#004643] text-white shadow-md"
-                    : "bg-[#f5f5f5] text-[#555] hover:bg-neutral-100"
+                    ? "bg-[#0c1a17] text-white border-[#0c1a17]"
+                    : "bg-white text-[#556370] border-gray-200 hover:border-gray-300"
                 }`}
               >
                 {f}
@@ -530,34 +637,62 @@ export default function LandingPage() {
             ))}
           </div>
 
-          {/* image */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              { id: 1, name: "Modern Living" },
-              { id: 2, name: "Minimalist Kitchen" },
-              { id: 3, name: "Classic Dining" },
-              { id: 4, name: "Cozy Bedroom" },
-              { id: 5, name: "Office Setup" },
-              { id: 6, name: "Luxury Lounge" },
-            ].map((card) => (
-              <motion.div
-                key={card.id}
-                whileHover={{ y: -4 }}
-                className="relative aspect-[4/3] rounded-[16px] overflow-hidden group border border-neutral-100"
-              >
-                <img
-                  src={`/assets/gallery-${card.id}.png`}
-                  alt={card.name}
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-108"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <div className="absolute bottom-4 left-4 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
-                  <p className="text-white text-[16px] font-bold">{card.name}</p>
+          {/* Masonry Grid Layout */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[20px]">
+            {/* Column 1 */}
+            <div className="flex flex-col gap-[20px]">
+              <div className="relative w-full h-[380px] rounded-[20px] overflow-hidden group">
+                <img src="/assets/gallery-1.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
+                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <span className="text-[12px] text-[#556370] font-medium">View more [4]</span>
                 </div>
-              </motion.div>
-            ))}
-          </div>
+              </div>
+              <div className="relative w-full h-[280px] rounded-[20px] overflow-hidden group">
+                <img src="/assets/gallery-2.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
+                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <span className="text-[12px] text-[#556370] font-medium">View more [7]</span>
+                </div>
+              </div>
+            </div>
 
+            {/* Column 2 */}
+            <div className="flex flex-col gap-[20px]">
+              <div className="relative w-full h-[280px] rounded-[20px] overflow-hidden group">
+                <img src="/assets/gallery-3.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
+                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <span className="text-[12px] text-[#556370] font-medium">View more [3]</span>
+                </div>
+              </div>
+              <div className="relative w-full h-[380px] rounded-[20px] overflow-hidden group">
+                <img src="/assets/gallery-4.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
+                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <span className="text-[12px] text-[#556370] font-medium">View more [6]</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Column 3 */}
+            <div className="flex flex-col sm:flex-row lg:flex-col gap-[20px] sm:col-span-2 lg:col-span-1">
+              <div className="relative w-full sm:w-1/2 lg:w-full h-[380px] rounded-[20px] overflow-hidden group">
+                <img src="/assets/gallery-5.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
+                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <span className="text-[12px] text-[#556370] font-medium">View more [10]</span>
+                </div>
+              </div>
+              <div className="relative w-full sm:w-1/2 lg:w-full h-[280px] sm:h-[380px] lg:h-[280px] rounded-[20px] overflow-hidden group">
+                <img src="/assets/gallery-6.png" alt="Gallery" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
+                  <img src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
+                  <span className="text-[12px] text-[#556370] font-medium">View more [17]</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -568,69 +703,101 @@ export default function LandingPage() {
         FIX: Icon square size 48px with teal-tinted bg #edf4f3
         FIX: Right image card aspect ratio adjusted; floating card tightened
       */}
-      <section className="py-[90px] lg:py-[110px] px-4 bg-[#f7fbfc]">
-        <div className="max-w-[1240px] mx-auto flex flex-col lg:flex-row items-start gap-14 lg:gap-[72px]">
-
-          {/* Left */}
-          <div className="flex-1">
-            <h2 className="text-[38px] sm:text-[48px] lg:text-[52px] font-bold text-[#111D27] leading-[1.1] mb-12 tracking-tight">
-              Why Choose NOOI?
+      <section className="py-[60px] lg:py-[100px] px-4 bg-[#f8fafc]">
+        <div className="max-w-[1240px] mx-auto">
+          {/* Header (Full Width Centered) */}
+          <div className="max-w-[800px] mx-auto text-center mb-[60px]">
+            <h2 className="text-[36px] sm:text-[48px] lg:text-[56px] font-bold text-[#111D27] leading-[1.1] mb-[16px] tracking-tight">
+              Why Choose NOOI
             </h2>
-            {/* list */}
-            <div className="flex flex-col">
+            <p className="text-[16px] sm:text-[18px] text-[#556370] leading-[1.6]">
+              Automated floor plan generation with AI with Realistic 3D rendering & design
+              <br className="hidden sm:block" /> visualization, Automated floor plan generation with AI with Realistic
+            </p>
+          </div>
+
+          <div className="flex flex-col lg:flex-row items-center lg:items-start gap-[40px] lg:gap-[80px]">
+            {/* Left - Feature List */}
+            <div className="flex-1 w-full flex flex-col">
               {[
-                { title: "Expert-Level Tools, Beginner-Friendly Interface", desc: "Our algorithms ensure every design is both beautiful and spatially accurate.", icon: "/assets/verified-user.svg" },
-                { title: "All-in-One Platform", desc: "Shop directly from your 3D models with real-time inventory and pricing.", icon: "/assets/webhook.svg" },
-                { title: "Real-World Integration", desc: "Share designs with clients or teammates and edit in real-time.", icon: "/assets/verified-user.svg" },
-                { title: "Accuracy & Speed", desc: "We handle everything from order placement to final delivery.", icon: "/assets/webhook.svg" },
+                { title: "Expert-Level Tools, Beginner-Friendly Interface", desc: "Powerful enough for professionals, intuitive enough for beginners. Nooi's clean interface makes advanced design tools easy to use from day one.", icon: "/assets/image-svg-2.svg", active: true },
+                { title: "All-in-One Platform", icon: "/assets/arrows-output.svg", active: false },
+                { title: "Real-World Integration", icon: "/assets/icon.svg", active: false },
+                { title: "Trusted by Professionals", icon: "/assets/verified-user.svg", active: false },
+                { title: "Accuracy & Speed", icon: "/assets/vector-1.svg", active: false },
               ].map((item, i, arr) => (
                 <div
                   key={i}
-                  className={`flex gap-4 py-5 ${i < arr.length - 1 ? "border-b border-[#e4ecee]" : ""}`}
+                  className={`flex items-start gap-[20px] p-[20px] sm:p-[24px] transition-all ${
+                    item.active 
+                      ? "bg-[#f1f5f9] rounded-[16px] border border-transparent" 
+                      : `border-b border-[#e2e8f0] rounded-none ${i === arr.length - 1 ? 'border-none' : ''}`
+                  }`}
                 >
-                  {/* Icon */}
-                  <div className="w-[48px] h-[48px] bg-[#edf4f3] border border-[#d4e6e3] rounded-[12px] flex items-center justify-center shrink-0 mt-0.5">
-                    <img src={item.icon} alt="" className="w-[20px] h-[20px]" style={{ filter: "invert(24%) sepia(80%) saturate(400%) hue-rotate(145deg)" }} />
+                  <div className="w-[48px] h-[48px] bg-[#e2e8f0] rounded-[12px] flex items-center justify-center shrink-0">
+                    <img src={item.icon || "/assets/verified-user.svg"} alt="" className="w-[20px] h-[20px] opacity-70" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-[16px] sm:text-[17px] font-bold text-[#111D27] mb-1.5 leading-snug">{item.title}</h4>
-                    <p className="text-[#6b7280] leading-relaxed text-[14px] sm:text-[15px]">{item.desc}</p>
+                  <div className="flex-1 min-w-0 pt-[10px]">
+                    <h4 className="text-[18px] sm:text-[20px] font-medium text-[#111D27] leading-snug mb-[8px]">{item.title}</h4>
+                    {item.active && (
+                      <p className="text-[#64748b] leading-relaxed text-[15px] sm:text-[16px] pr-4">{item.desc}</p>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
-          </div>
 
-          {/* Ã¢â‚¬â€ */}
-          <div className="flex-1 w-full relative">
-            <div className="relative w-full aspect-[500/560] rounded-[28px] overflow-hidden border border-[#e4ecee] shadow-md">
-              <img src="/assets/feature-image.png" alt="3D Room" className="w-full h-full object-cover" />
-            </div>
+            {/* Right - Image & Floating Card */}
+            <div className="flex-1 w-full relative">
+              <div className="relative w-full aspect-square sm:aspect-[500/560] lg:aspect-auto lg:h-[600px] rounded-[32px] overflow-hidden bg-[#c2c6c9]">
+                <img src="/assets/feature-image.png" alt="3D Room" className="w-full h-full object-cover scale-105 opacity-90" />
+              </div>
 
-            {/* balance */}
-            <div className="absolute bottom-[5%] left-[4%] right-[4%] bg-white/90 backdrop-blur-xl p-5 rounded-[20px] border border-white/80 shadow-2xl">
-              <div className="flex items-end justify-between mb-4">
-                <div>
-                  <p className="text-[10px] text-[#9ca3af] font-bold uppercase tracking-[0.12em] mb-1">Total Balance</p>
-                  <p className="text-[26px] sm:text-[30px] font-bold text-[#111D27] leading-none">$190,848.00</p>
+              {/* Floating Dashboard Card */}
+              <div className="absolute bottom-[20px] left-[20px] sm:bottom-[30px] sm:left-[30px] bg-white p-[24px] rounded-[24px] shadow-[0_20px_40px_rgba(0,0,0,0.08)] w-[260px] sm:w-[300px]">
+                <div className="flex justify-between items-start mb-[16px]">
+                  <div>
+                    <p className="text-[12px] text-[#94a3b8] font-medium mb-[4px]">Current Balance</p>
+                    <p className="text-[20px] sm:text-[24px] font-bold text-[#111D27] leading-none">$ 250,560.0</p>
+                  </div>
+                  <div className="flex gap-[8px]">
+                    <span className="text-[11px] text-[#94a3b8]">24h</span>
+                    <span className="text-[11px] text-[#94a3b8]">7d</span>
+                    <span className="text-[11px] text-[#94a3b8]">30d</span>
+                  </div>
                 </div>
+                
                 {/* Bar chart */}
-                <div className="flex items-end gap-1.5 h-9">
-                  {[35, 65, 45, 90, 60, 80, 50].map((h, i) => (
+                <div className="flex items-end justify-between h-[60px] gap-[8px] sm:gap-[12px] mb-[16px] px-1">
+                  {[
+                    { h: 35, active: false },
+                    { h: 15, active: false },
+                    { h: 25, active: false },
+                    { h: 90, active: true },
+                    { h: 20, active: false }
+                  ].map((bar, i) => (
                     <div
                       key={i}
-                      className="w-[9px] bg-[#004643] rounded-t-[3px] hover:bg-[#8bec5c] transition-colors cursor-pointer"
-                      style={{ height: `${h}%` }}
+                      className={`w-full rounded-[6px] ${bar.active ? "bg-[#d4a017]" : "bg-[#f1f5f9]"}`}
+                      style={{ height: `${bar.h}%` }}
                     />
                   ))}
                 </div>
+                
+                {/* X-axis labels */}
+                <div className="flex justify-between items-center text-[10px] text-[#94a3b8] font-medium">
+                  {["Jan", "Feb", "Mar", "Apr", "May", "Jun"].map((label, i) => (
+                    <span key={i} className={`px-[8px] py-[4px] rounded-full transition-colors ${label === "Apr" ? "bg-[#1e3a3a] text-white" : ""}`}>
+                      {label}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className="h-px bg-neutral-100 w-full" />
             </div>
           </div>
-
         </div>
       </section>
+
 
       {/* UNLOCK */}
       {/*
@@ -763,7 +930,8 @@ export default function LandingPage() {
         </div>
       </footer>
 
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}} />
