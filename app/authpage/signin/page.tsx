@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signInWithGoogle, signIn } from "@/lib/api/auth";
+import { getGoogleAuthUrl, signIn } from "@/lib/api/auth";
 import Button from "@/components/Button";
 import GoogleIcon from "@/components/GoogleIcon";
 
@@ -53,29 +53,29 @@ function SigninPageInner() {
   }>({});
 
   useEffect(() => {
-    // Check if this is a password recovery redirect
-    const hash = window.location.hash;
-    if (hash && hash.includes("type=recovery")) {
-      const params = new URLSearchParams(hash.substring(1));
-      const access_token = params.get("access_token");
-      const refresh_token = params.get("refresh_token");
-      if (access_token && refresh_token) {
-        router.replace(
-          `/authpage/reset-password?access_token=${access_token}&refresh_token=${refresh_token}`
-        );
-        return;
-      }
+  // Check if this is a password recovery redirect
+  const hash = window.location.hash;
+  if (hash && hash.includes("type=recovery")) {
+    const params = new URLSearchParams(hash.substring(1));
+    const access_token = params.get("access_token");
+    const refresh_token = params.get("refresh_token");
+    if (access_token && refresh_token) {
+      router.replace(
+        `/authpage/reset-password?access_token=${access_token}&refresh_token=${refresh_token}`
+      );
+      return;
     }
+  }
 
-    const errorCode = searchParams.get("error");
-    if (errorCode) {
-      setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
-    }
-    const reset = searchParams.get("reset");
-    if (reset === "success") {
-      setResetSuccess(true);
-    }
-  }, [searchParams, router]);
+  const errorCode = searchParams.get("error");
+  if (errorCode) {
+    setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
+  }
+  const reset = searchParams.get("reset");
+  if (reset === "success") {
+    setResetSuccess(true);
+  }
+}, [searchParams, router]);
 
   const validate = () => {
     const next: typeof errors = {};
@@ -119,7 +119,7 @@ function SigninPageInner() {
 
   const handleGoogleAuth = async () => {
     try {
-      await signInWithGoogle();
+      window.location.href = getGoogleAuthUrl();
     } catch (error) {
       setErrors({ auth: "Google sign in failed. Please try again." });
     }
