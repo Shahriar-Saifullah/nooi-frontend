@@ -242,10 +242,13 @@ export default function LandingPage() {
           <div className="flex flex-col items-center gap-0">
             {/* 2: */}
             <h1 className="text-center max-w-[960px] flex flex-col items-center">
-              <span className="block font-schibsted font-semibold text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] tracking-[-2px]">
+              <span className="block font-schibsted font-semibold text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27]" style={{ letterSpacing: "0px" }}>
                 Design, Plan, Furniture get
               </span>
-              <span className="block font-instrument italic font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] tracking-[-1.5px] -mt-1">
+              <span
+                className="block italic font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] -mt-1"
+                style={{ fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", fontStyle: "italic", letterSpacing: "0.5px" }}
+              >
                 All in One Platform.
               </span>
             </h1>
@@ -883,7 +886,10 @@ export default function LandingPage() {
             <div>
               <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">Company</h5>
               <ul className="space-y-3.5 text-[14px] text-[#6b7280]">
-                {["About Us", "Blog", "Careers", "Privacy"].map((l) => (
+                <li className="hover:text-[#004643] cursor-pointer transition-colors">
+                  <Link href="/about">About Us</Link>
+                </li>
+                {["Blog", "Careers", "Privacy"].map((l) => (
                   <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors">{l}</li>
                 ))}
               </ul>

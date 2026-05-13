@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Schibsted_Grotesk, Instrument_Serif, Scada, Outfit, DM_Sans, Figtree } from "next/font/google";
+import { Inter, Schibsted_Grotesk, Instrument_Serif, Scada, Outfit, DM_Sans, Figtree, Playfair_Display } from "next/font/google";
 import "./globals.css";
 
 const inter = Inter({
@@ -10,6 +10,7 @@ const inter = Inter({
 const schibsted = Schibsted_Grotesk({
   variable: "--font-schibsted",
   subsets: ["latin"],
+  display: "block",
 });
 
 const instrument = Instrument_Serif({
@@ -17,6 +18,7 @@ const instrument = Instrument_Serif({
   subsets: ["latin"],
   weight: "400",
   style: "italic",
+  display: "block",
 });
 
 const scada = Scada({
@@ -40,6 +42,14 @@ const figtree = Figtree({
   subsets: ["latin"],
 });
 
+const playfair = Playfair_Display({
+  variable: "--font-playfair",
+  subsets: ["latin"],
+  style: ["italic", "normal"],
+  weight: ["400", "600", "700"],
+  display: "block",
+});
+
 export const metadata: Metadata = {
   title: "Nooi — AI-Powered Interior Design",
   description: "Plan, design, shop and receive furniture — all in one place. Nooi makes interior design effortless with AI.",
@@ -54,7 +64,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${schibsted.variable} ${instrument.variable} ${scada.variable} ${outfit.variable} ${dmSans.variable} ${figtree.variable} h-full antialiased`}
+      className={`${inter.variable} ${schibsted.variable} ${instrument.variable} ${scada.variable} ${outfit.variable} ${dmSans.variable} ${figtree.variable} ${playfair.variable} h-full antialiased`}
     >
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         {children}
