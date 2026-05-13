@@ -134,6 +134,9 @@ export default function LandingPage() {
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Products</span>
               <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
             </button>
+            {/* <Link href="/marketplace" className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
+              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Marketplace</span>
+            </Link> */}
             <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Resources</span>
               <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
@@ -189,6 +192,10 @@ export default function LandingPage() {
                 <span className="font-schibsted text-[16px] text-[#003230] font-medium">Products</span>
                 <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
               </button>
+              {/* <Link href="/marketplace" className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg" onClick={() => setIsMenuOpen(false)}>
+                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Marketplace</span>
+                <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
+              </Link> */}
               <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
                 <span className="font-schibsted text-[16px] text-[#003230] font-medium">Resources</span>
                 <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
