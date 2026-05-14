@@ -9,6 +9,7 @@
   --font-outfit: var(--font-outfit);
   --font-dm-sans: var(--font-dm-sans);
   --font-figtree: var(--font-figtree);
+  --font-playfair: var(--font-playfair);
 
   /* Colors */
   --color-primary: #004643;
@@ -57,4 +58,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-schibsted), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1;
 }

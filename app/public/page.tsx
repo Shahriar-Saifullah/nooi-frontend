@@ -134,6 +134,9 @@ export default function LandingPage() {
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Products</span>
               <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
             </button>
+            {/* <Link href="/marketplace" className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
+              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Marketplace</span>
+            </Link> */}
             <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
               <span className="font-schibsted font-normal text-[#003230] text-[14px]">Resources</span>
               <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
@@ -189,6 +192,10 @@ export default function LandingPage() {
                 <span className="font-schibsted text-[16px] text-[#003230] font-medium">Products</span>
                 <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
               </button>
+              {/* <Link href="/marketplace" className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg" onClick={() => setIsMenuOpen(false)}>
+                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Marketplace</span>
+                <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
+              </Link> */}
               <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
                 <span className="font-schibsted text-[16px] text-[#003230] font-medium">Resources</span>
                 <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
@@ -242,10 +249,13 @@ export default function LandingPage() {
           <div className="flex flex-col items-center gap-0">
             {/* 2: */}
             <h1 className="text-center max-w-[960px] flex flex-col items-center">
-              <span className="block font-schibsted font-semibold text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] tracking-[-2px]">
+              <span className="block font-schibsted font-semibold text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27]" style={{ letterSpacing: "0px" }}>
                 Design, Plan, Furniture get
               </span>
-              <span className="block font-instrument italic font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] tracking-[-1.5px] -mt-1">
+              <span
+                className="block italic font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] -mt-1"
+                style={{ fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", fontStyle: "italic", letterSpacing: "0.5px" }}
+              >
                 All in One Platform.
               </span>
             </h1>
@@ -883,7 +893,10 @@ export default function LandingPage() {
             <div>
               <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">Company</h5>
               <ul className="space-y-3.5 text-[14px] text-[#6b7280]">
-                {["About Us", "Blog", "Careers", "Privacy"].map((l) => (
+                <li className="hover:text-[#004643] cursor-pointer transition-colors">
+                  <Link href="/about">About Us</Link>
+                </li>
+                {["Blog", "Careers", "Privacy"].map((l) => (
                   <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors">{l}</li>
                 ))}
               </ul>
