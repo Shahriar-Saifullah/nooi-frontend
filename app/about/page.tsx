@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
+import Navbar from "@/components/Navbar";
 
 export default function AboutPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -67,78 +68,7 @@ export default function AboutPage() {
     <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
 
       {/* NAVBAR */}
-      <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[1240px] h-[72px] z-50">
-        <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center justify-between pl-[16px] md:pl-[24px] pr-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)] gap-4">
-          <div className="flex items-center shrink-0">
-            <Link href="/public" className="flex items-center gap-[9px]">
-              <Image width={40} height={40} src="/assets/logo.png" alt="NOOI" className="w-[32px] md:w-[40px] h-auto object-contain" />
-              <span className="font-inter font-bold text-[18px] md:text-[20px] text-[#111d27] tracking-tight">NOOI</span>
-            </Link>
-          </div>
-
-          <div className="hidden md:flex items-center gap-[11px] flex-1 justify-center whitespace-nowrap">
-            <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Products</span>
-              <Image width={20} height={20} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
-            </button>
-            <Link href="/marketplace" className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Marketplace</span>
-            </Link>
-            <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Resources</span>
-              <Image width={20} height={20} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
-            </button>
-            <button className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Pricing</span>
-            </button>
-          </div>
-
-          <div className="flex items-center gap-[8px] justify-end shrink-0">
-            <button className="relative hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
-              <Image fill src="/assets/container-svg.svg" alt="Help" className="" />
-            </button>
-            <div className="flex items-center gap-[2px] md:gap-[4px] h-[40px] md:h-[46px] bg-white border border-[#e6e6e8] p-[2px] md:p-[4px] rounded-[10px] md:rounded-[12px] flex-nowrap shrink-0">
-              <Link href="/authpage/signin" className="h-full px-4 md:px-[16px] flex items-center justify-center bg-[#f8f8f8] rounded-[6px] md:rounded-[8px] text-[#272e35] text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-neutral-100 transition-colors whitespace-nowrap">
-                Log in
-              </Link>
-              <Link href="/authpage/signup" className="hidden md:flex h-full px-3 md:px-[16px] items-center justify-center bg-[#004643] rounded-[7px] md:rounded-[9px] text-white text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm whitespace-nowrap">
-                Start for free
-              </Link>
-            </div>
-            <button className="md:hidden w-[40px] h-[40px] flex flex-col items-center justify-center gap-1.5 p-2 rounded-lg hover:bg-black/5 ml-1" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "rotate-45 translate-y-2" : ""}`} />
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "opacity-0" : ""}`} />
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "-rotate-45 -translate-y-2" : ""}`} />
-            </button>
-          </div>
-        </div>
-
-        <AnimatePresence>
-          {isMenuOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute top-[80px] left-0 w-full bg-[#f7fbfc] border border-[#e2eaf0] rounded-[22px] p-6 shadow-2xl flex flex-col gap-4 md:hidden z-[60] backdrop-blur-xl"
-            >
-              <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Products</span>
-              </button>
-              <Link href="/marketplace" className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg" onClick={() => setIsMenuOpen(false)}>
-                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Marketplace</span>
-              </Link>
-              <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Resources</span>
-              </button>
-              <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium">Pricing</button>
-              <div className="h-px w-full bg-black/5 my-2" />
-              <Link href="/authpage/signup" className="w-full py-3 flex items-center justify-center bg-[#004643] rounded-[10px] text-white text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm" onClick={() => setIsMenuOpen(false)}>
-                Start for free
-              </Link>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </nav>
+      <Navbar />
 
       {/* HERO */}
       <section className="relative pt-[140px] pb-[80px] px-4 bg-[#eef2f7] flex flex-col items-center">
@@ -214,9 +144,9 @@ export default function AboutPage() {
           <div className="w-full lg:w-[540px] shrink-0">
             <h2 className="font-schibsted font-bold text-[36px] sm:text-[42px] lg:text-[48px] leading-[1.1] text-[#004643] mb-8 tracking-[-1px]">
               From Sketch to{" "}
-              <span 
-                style={{ 
-                  fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", 
+              <span
+                style={{
+                  fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif",
                   fontStyle: "italic",
                   fontWeight: 400,
                   letterSpacing: "0.3px",
@@ -254,7 +184,7 @@ export default function AboutPage() {
 
           {/* Right — staggered 2-col layout matching Figma */}
           <div className="flex-1 w-full lg:max-w-[540px] flex gap-[16px] mt-10 lg:mt-[70px]">
-            
+
             {/* Left column: tall top, short bottom */}
             <div className="flex-1 flex flex-col gap-[16px]">
               <motion.div
