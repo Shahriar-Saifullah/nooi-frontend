@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, ArrowRight, Check, ShoppingCart, Info, Globe, ShieldCheck, Clock, ChevronDown, TrendingDown, Truck } from "lucide-react";
+import Navbar from "@/components/Navbar";
 
 export default function MarketplacePage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -22,7 +23,7 @@ export default function MarketplacePage() {
     <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden antialiased">
 
       {/* NAVBAR */}
-      <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[1240px] h-[72px] z-50">
+      {/* <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[1240px] h-[72px] z-50">
         <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center justify-between pl-[16px] md:pl-[24px] pr-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)] gap-4">
           <div className="flex items-center shrink-0">
             <Link href="/public" className="flex items-center gap-[9px]">
@@ -93,7 +94,8 @@ export default function MarketplacePage() {
             </motion.div>
           )}
         </AnimatePresence>
-      </nav>
+      </nav> */}
+      <Navbar />
 
       {/* HERO SECTION */}
       <section className="pt-[180px] pb-[80px] px-4 flex flex-col items-center text-center relative overflow-hidden bg-[#E9F0EF]">

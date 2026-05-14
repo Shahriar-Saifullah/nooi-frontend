@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import { Search, ArrowRight, Check, Play, Globe, ChevronDown, Sparkles, Box, Maximize, Smartphone } from "lucide-react";
+import Navbar from "@/components/Navbar";
 
 export default function HomePlannerPage() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -13,39 +14,7 @@ export default function HomePlannerPage() {
     <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden antialiased">
 
       {/* NAVBAR */}
-      <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[1240px] h-[72px] z-50">
-        <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center justify-between pl-[16px] md:pl-[24px] pr-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)] gap-4">
-          <div className="flex items-center shrink-0">
-            <Link href="/public" className="flex items-center gap-[9px]">
-              <Image width={40} height={40} src="/assets/logo.png" alt="NOOI" className="w-[32px] md:w-[40px] h-auto object-contain" />
-              <span className="font-inter font-bold text-[18px] md:text-[20px] text-[#111d27] tracking-tight">NOOI</span>
-            </Link>
-          </div>
-
-          <div className="hidden lg:flex items-center gap-[32px]">
-            {["Marketplace", "Home Planner", "Pricing", "About"].map((item) => (
-              <Link
-                key={item}
-                href={item === "Marketplace" ? "/marketplace" : item === "Home Planner" ? "/homeplanner" : "#"}
-                className={`text-[15px] font-medium transition-colors hover:text-[#004643] ${
-                  item === "Home Planner" ? "text-[#004643] font-bold" : "text-[#555f6d]"
-                }`}
-              >
-                {item}
-              </Link>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button className="hidden sm:flex h-[48px] px-6 items-center justify-center text-[15px] font-bold text-[#111d27] hover:bg-black/5 rounded-full transition-colors">
-              Log in
-            </button>
-            <button className="h-[48px] px-6 bg-[#004643] text-white rounded-full font-bold text-[15px] hover:bg-[#003330] transition-all shadow-[0_10px_20px_rgba(0,70,67,0.1)]">
-              Get Started
-            </button>
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       {/* HERO SECTION */}
       <section className="relative pt-[180px] pb-[100px] px-4 overflow-hidden">
