@@ -1,18 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
+import Navbar from "@/components/Navbar";
 
 const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string }) => {
   return (
     <div className="relative w-full aspect-[640/560] bg-[#f0f4f8]/30 rounded-[32px] overflow-visible border border-[#e2eaf0] shadow-inner group p-4 sm:p-10">
       {/* Grid Background */}
       <div className="absolute inset-0 opacity-[0.05] pointer-events-none rounded-[32px]" style={{ backgroundImage: 'linear-gradient(#004643 1px, transparent 1px), linear-gradient(90deg, #004643 1px, transparent 1px)', backgroundSize: '30px 30px' }}></div>
-      
+
       {/* Floating Style Card 1 (Outside Top Window) */}
-      <motion.div 
+      <motion.div
         initial={{ x: 20, opacity: 0 }}
         whileInView={{ x: 0, opacity: 1 }}
         viewport={{ once: true }}
@@ -23,21 +24,21 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
       </motion.div>
 
       {/* Top Window Card */}
-      <motion.div 
+      <motion.div
         initial={{ x: -60, y: -20, opacity: 0 }}
         whileInView={{ x: 0, y: 0, opacity: 1 }}
         viewport={{ once: true }}
         className="absolute top-[6%] left-[4%] w-[75%] h-[55%] z-10"
       >
         <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_70px_rgba(0,0,0,0.1)] border border-white/80 p-1 md:p-2 flex items-center justify-center overflow-hidden">
-          <Image width={800} height={800} src={img1} 
-            className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500" 
+          <Image width={800} height={800} src={img1}
+            className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500"
             alt="Window 1" />
         </div>
       </motion.div>
 
       {/* Bottom Window Card */}
-      <motion.div 
+      <motion.div
         initial={{ x: 60, y: 60, opacity: 0 }}
         whileInView={{ x: 0, y: 0, opacity: 1 }}
         viewport={{ once: true }}
@@ -45,8 +46,8 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
         className="absolute bottom-[6%] right-[5%] w-[75%] h-[55%] z-0"
       >
         <div className="relative w-full h-full bg-white rounded-[24px] shadow-[0_30px_70px_rgba(0,0,0,0.1)] border border-white/80 p-1 md:p-2 flex items-center justify-center overflow-hidden">
-          <Image width={800} height={800} src={img2} 
-            className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500" 
+          <Image width={800} height={800} src={img2}
+            className="w-[115%] h-full object-contain drop-shadow-2xl transform scale-110 md:scale-125 transition-transform duration-500"
             alt="Window 2" />
         </div>
       </motion.div>
@@ -61,7 +62,7 @@ export default function LandingPage() {
   const [prompt, setPrompt] = useState("");
   const [activeStep, setActiveStep] = useState(0);
   const [activeFilter, setActiveFilter] = useState(0);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
 
   const steps = [
     {
@@ -117,109 +118,7 @@ export default function LandingPage() {
     <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
 
       {/* NAVBAR */}
-      <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[1240px] h-[72px] z-50">
-        <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center justify-between pl-[16px] md:pl-[24px] pr-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)] gap-4">
-          
-          {/* Left: Logo */}
-          <div className="flex items-center shrink-0">
-            <Link href="/" className="flex items-center gap-[9px]">
-              <Image width={100} height={100} src="/assets/logo.png" alt="NOOI" className="w-[32px] md:w-[40px] h-auto object-contain" />
-              <span className="font-inter font-bold text-[18px] md:text-[20px] text-[#111d27] tracking-tight">NOOI</span>
-            </Link>
-          </div>
-
-          {/* Nav */}
-          <div className="hidden md:flex items-center gap-[11px] flex-1 justify-center whitespace-nowrap">
-            <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Products</span>
-              <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
-            </button>
-            {/* <Link href="/marketplace" className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Marketplace</span>
-            </Link> */}
-            <button className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Resources</span>
-              <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-[20px] h-[20px] opacity-60" />
-            </button>
-            <button className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-              <span className="font-schibsted font-normal text-[#003230] text-[14px]">Pricing</span>
-            </button>
-          </div>
-
-          {/* Actions & Hamburger */}
-          <div className="flex items-center gap-[8px] justify-end shrink-0">
-            {/* The ? button is hidden on md (tablet) to avoid overlapping Pricing, visible only on lg */}
-            <button className="relative hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
-              <Image fill src="/assets/container-svg.svg" alt="Help" className="" />
-            </button>
-            
-            <div className="flex items-center gap-[2px] md:gap-[4px] h-[40px] md:h-[46px] bg-white border border-[#e6e6e8] p-[2px] md:p-[4px] rounded-[10px] md:rounded-[12px] flex-nowrap shrink-0">
-              <Link
-                href="/authpage/signin"
-                className="h-full px-4 md:px-[16px] flex items-center justify-center bg-[#f8f8f8] rounded-[6px] md:rounded-[8px] text-[#272e35] text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-neutral-100 transition-colors whitespace-nowrap"
-              >
-                Log in
-              </Link>
-              <Link
-                href="/authpage/signup"
-                className="hidden md:flex h-full px-3 md:px-[16px] items-center justify-center bg-[#004643] rounded-[7px] md:rounded-[9px] text-white text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm whitespace-nowrap"
-              >
-                Start for free
-              </Link>
-            </div>
-
-            <button
-              className="md:hidden w-[40px] h-[40px] flex flex-col items-center justify-center gap-1.5 p-2 rounded-lg hover:bg-black/5 ml-1"
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-            >
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "rotate-45 translate-y-2" : ""}`} />
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "opacity-0" : ""}`} />
-              <div className={`w-6 h-0.5 bg-[#111d27] transition-all ${isMenuOpen ? "-rotate-45 -translate-y-2" : ""}`} />
-            </button>
-          </div>
-        </div>
-
-        {/* Menu */}
-        <AnimatePresence>
-          {isMenuOpen && (
-            <motion.div 
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="absolute top-[80px] left-0 w-full bg-[#f7fbfc] border border-[#e2eaf0] rounded-[22px] p-6 shadow-2xl flex flex-col gap-4 md:hidden z-[60] backdrop-blur-xl"
-            >
-              <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Products</span>
-                <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
-              </button>
-              {/* <Link href="/marketplace" className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg" onClick={() => setIsMenuOpen(false)}>
-                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Marketplace</span>
-                <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
-              </Link> */}
-              <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-                <span className="font-schibsted text-[16px] text-[#003230] font-medium">Resources</span>
-                <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
-              </button>
-              <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium">
-                Pricing
-              </button>
-              <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium flex items-center justify-between">
-                <span>Help & Support</span>
-              </button>
-              
-              <div className="h-px w-full bg-black/5 my-2" />
-              
-              <Link
-                href="/authpage/signup"
-                className="w-full py-3 flex items-center justify-center bg-[#004643] rounded-[10px] text-white text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Start for free
-              </Link>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </nav>
+      <Navbar />
 
       {/* HERO */}
       {/*
@@ -484,7 +383,7 @@ export default function LandingPage() {
         </div>
 
         {/* Card */}
-        <motion.div 
+        <motion.div
           animate={{ backgroundColor: steps[activeStep].mainBg }}
           transition={{ duration: 0.5 }}
           className="w-full max-w-[1240px] rounded-[22px] p-[20px] sm:p-[30px] lg:p-[40px_40px_40px_80px] flex flex-col lg:flex-row items-center lg:items-stretch gap-[40px] lg:gap-[100px] mx-auto overflow-hidden"
@@ -498,14 +397,13 @@ export default function LandingPage() {
                   <button
                     key={i}
                     onClick={() => setActiveStep(i)}
-                    className={`cursor-pointer px-[8px] min-[375px]:px-[12px] sm:px-[16px] py-[8px] text-[13px] min-[375px]:text-[14px] sm:text-[18px] font-medium transition-all relative whitespace-nowrap shrink-0 rounded-md flex-1 sm:flex-none text-center ${
-                      activeStep === i ? "bg-white/5" : "text-[#859c80] hover:text-white/60"
-                    }`}
+                    className={`cursor-pointer px-[8px] min-[375px]:px-[12px] sm:px-[16px] py-[8px] text-[13px] min-[375px]:text-[14px] sm:text-[18px] font-medium transition-all relative whitespace-nowrap shrink-0 rounded-md flex-1 sm:flex-none text-center ${activeStep === i ? "bg-white/5" : "text-[#859c80] hover:text-white/60"
+                      }`}
                     style={{ color: activeStep === i ? steps[activeStep].accentColor : undefined }}
                   >
                     {step}
                     {activeStep === i && (
-                      <motion.div 
+                      <motion.div
                         layoutId="activeStepUnderline"
                         className="absolute bottom-0 left-1 right-1 h-[2px]"
                         style={{ backgroundColor: steps[activeStep].accentColor }}
@@ -534,8 +432,8 @@ export default function LandingPage() {
                   </p>
                 </motion.div>
               </AnimatePresence>
-              
-              <button 
+
+              <button
                 className="text-white pl-[24px] pr-[8px] py-[8px] rounded-[16px] flex items-center gap-[16px] transition-all shadow-lg group w-fit mt-auto mx-auto lg:mx-0"
                 style={{ backgroundColor: steps[activeStep].miniCardBg }}
               >
@@ -548,7 +446,7 @@ export default function LandingPage() {
           </div>
 
           {/* Column - Right Side Mini Card */}
-          <motion.div 
+          <motion.div
             animate={{ backgroundColor: steps[activeStep].miniCardBg }}
             transition={{ duration: 0.5 }}
             className="flex-1 w-full max-w-[520px] rounded-[24px] p-[25px] sm:p-[40px] flex flex-col gap-[25px] mx-auto lg:mx-0 shadow-2xl h-fit"
@@ -565,7 +463,7 @@ export default function LandingPage() {
                 <h4 className="text-[24px] sm:text-[28px] text-white font-medium leading-[1.2] font-schibsted mb-6">
                   {steps[activeStep].miniTitle}
                 </h4>
-                
+
                 {/* Image Container Card - Removed white background/border per user request */}
                 <div className="rounded-[20px] pt-[20px] pb-[20px] mb-6 relative">
                   <div className="aspect-[4096/2730] rounded-[12px] overflow-hidden relative border border-white/5 shadow-sm">
@@ -590,7 +488,7 @@ export default function LandingPage() {
 
                 {/* Optional Mini Button for Step 2 */}
                 {steps[activeStep].showMiniBtn && (
-                  <button 
+                  <button
                     className="w-full py-[14px] rounded-[14px] text-[18px] font-medium transition-all hover:opacity-90"
                     style={{ backgroundColor: steps[activeStep].accentColor, color: steps[activeStep].mainBg }}
                   >
@@ -629,11 +527,10 @@ export default function LandingPage() {
               <button
                 key={i}
                 onClick={() => setActiveFilter(i)}
-                className={`px-[20px] py-[8px] rounded-[6px] text-[14px] font-medium transition-all border ${
-                  activeFilter === i
-                    ? "bg-[#0c1a17] text-white border-[#0c1a17]"
-                    : "bg-white text-[#556370] border-gray-200 hover:border-gray-300"
-                }`}
+                className={`px-[20px] py-[8px] rounded-[6px] text-[14px] font-medium transition-all border ${activeFilter === i
+                  ? "bg-[#0c1a17] text-white border-[#0c1a17]"
+                  : "bg-white text-[#556370] border-gray-200 hover:border-gray-300"
+                  }`}
               >
                 {f}
               </button>
@@ -731,11 +628,10 @@ export default function LandingPage() {
               ].map((item, i, arr) => (
                 <div
                   key={i}
-                  className={`flex items-start gap-[20px] p-[20px] sm:p-[24px] transition-all ${
-                    item.active 
-                      ? "bg-[#f1f5f9] rounded-[16px] border border-transparent" 
-                      : `border-b border-[#e2e8f0] rounded-none ${i === arr.length - 1 ? 'border-none' : ''}`
-                  }`}
+                  className={`flex items-start gap-[20px] p-[20px] sm:p-[24px] transition-all ${item.active
+                    ? "bg-[#f1f5f9] rounded-[16px] border border-transparent"
+                    : `border-b border-[#e2e8f0] rounded-none ${i === arr.length - 1 ? 'border-none' : ''}`
+                    }`}
                 >
                   <div className="w-[48px] h-[48px] bg-[#e2e8f0] rounded-[12px] flex items-center justify-center shrink-0">
                     <Image width={100} height={100} src={item.icon || "/assets/verified-user.svg"} alt="" className="w-[20px] h-[20px] opacity-70" />
@@ -769,7 +665,7 @@ export default function LandingPage() {
                     <span className="text-[11px] text-[#94a3b8]">30d</span>
                   </div>
                 </div>
-                
+
                 {/* Bar chart */}
                 <div className="flex items-end justify-between h-[60px] gap-[8px] sm:gap-[12px] mb-[16px] px-1">
                   {[
@@ -786,7 +682,7 @@ export default function LandingPage() {
                     />
                   ))}
                 </div>
-                
+
                 {/* X-axis labels */}
                 <div className="flex justify-between items-center text-[10px] text-[#94a3b8] font-medium">
                   {["Jan", "Feb", "Mar", "Apr", "May", "Jun"].map((label, i) => (
