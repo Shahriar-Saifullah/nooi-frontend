@@ -60,8 +60,8 @@ export default function Navbar() {
                                     className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 bg-white border border-[#e2eaf0] rounded-[16px] shadow-[0_8px_32px_rgba(0,0,0,0.08)] py-2 min-w-[180px] z-50"
                                 >
                                     {[
-                                        { label: "Furniture", href: "/furniture" },
-                                        { label: "Home Planner", href: "/home-planner" },
+                                        { label: "Furniture", href: "/marketplace" },
+                                        { label: "Home Planner", href: "/homeplanner" },
                                         { label: "Design Studio", href: "/design-studio" },
                                     ].map((item) => (
                                         <Link
