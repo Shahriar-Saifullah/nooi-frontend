@@ -1,12 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Home, Clock, FolderOpen, Crown, Search, HelpCircle, ChevronRight,
-  Wand2, Paintbrush, LayoutDashboard, Sparkles, Image as ImageIcon,
-  Monitor, Sofa, ArrowUpRight, Loader2, Plus
+  Home, Clock, FolderOpen, Crown, ChevronRight,
+  ArrowUpRight, Loader2, LogOut, User, Settings
 } from "lucide-react";
 import Image from "next/image";
 import CreateProjectModal from "@/components/CreateProjectModal";
@@ -16,6 +15,8 @@ export default function DashboardPage() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getCurrentUser().then((res) => {
@@ -28,7 +29,19 @@ export default function DashboardPage() {
     });
   }, [router]);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const handleLogout = async () => {
+    setDropdownOpen(false);
     const res = await logout();
     if (res.success) {
       router.replace("/authpage/signin");
@@ -45,10 +58,7 @@ export default function DashboardPage() {
 
   const containerVariants = {
     hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 }
-    }
+    show: { opacity: 1, transition: { staggerChildren: 0.1 } }
   };
 
   const itemVariants = {
@@ -87,14 +97,70 @@ export default function DashboardPage() {
             <span className="text-xs font-medium text-[#004643]">Upgrade Plan</span>
           </button>
 
-          <div className="bg-[#f5f5f5] flex items-center gap-3 py-1 pl-1 pr-3 rounded-full shadow-sm cursor-pointer group" onClick={handleLogout} title="Click to logout">
-            {user?.avatar_url ? (
-              <Image width={100} height={100} src={user.avatar_url} alt={user.full_name} className="w-8 h-8 rounded-full object-cover" />
-            ) : (
-              <Image width={100} height={100} src="/assets/imgAvatar.png" alt={user?.full_name || "User"} className="w-8 h-8 rounded-full object-cover" />
-            )}
-            <span className="text-xs font-medium hidden sm:block group-hover:text-red-600 transition-colors">{user?.full_name || "User"}</span>
-            <ChevronRight className="w-4 h-4 text-gray-500" />
+          {/* User Avatar — dropdown trigger */}
+          <div className="relative" ref={dropdownRef}>
+            <div
+              className="bg-[#f5f5f5] flex items-center gap-3 py-1 pl-1 pr-3 rounded-full shadow-sm cursor-pointer hover:bg-[#efefef] transition-colors select-none"
+              onClick={() => setDropdownOpen(prev => !prev)}
+            >
+              {user?.avatar_url ? (
+                <Image width={100} height={100} src={user.avatar_url} alt={user.full_name} className="w-8 h-8 rounded-full object-cover" />
+              ) : (
+                <Image width={100} height={100} src="/assets/imgAvatar.png" alt={user?.full_name || "User"} className="w-8 h-8 rounded-full object-cover" />
+              )}
+              <span className="text-xs font-medium hidden sm:block">{user?.full_name || "User"}</span>
+              <ChevronRight
+                className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${dropdownOpen ? "rotate-90" : ""}`}
+              />
+            </div>
+
+            {/* Dropdown */}
+            <AnimatePresence>
+              {dropdownOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute right-0 top-[calc(100%+8px)] w-[220px] bg-white border border-[#f0f0f0] rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.10)] overflow-hidden z-50"
+                >
+                  {/* User info */}
+                  <div className="px-4 py-3 border-b border-[#f5f5f5]">
+                    <p className="text-[13px] font-semibold text-[#0a0a0a] truncate">{user?.full_name || "User"}</p>
+                    <p className="text-[11px] text-[#737373] truncate">{user?.email || ""}</p>
+                  </div>
+
+                  {/* Menu items */}
+                  <div className="py-1.5">
+                    <button
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[#0a0a0a] hover:bg-[#f5f5f5] transition-colors"
+                      onClick={() => setDropdownOpen(false)}
+                    >
+                      <User className="w-4 h-4 text-[#737373]" />
+                      Profile
+                    </button>
+                    <button
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[#0a0a0a] hover:bg-[#f5f5f5] transition-colors"
+                      onClick={() => setDropdownOpen(false)}
+                    >
+                      <Settings className="w-4 h-4 text-[#737373]" />
+                      Settings
+                    </button>
+                  </div>
+
+                  {/* Logout */}
+                  <div className="border-t border-[#f5f5f5] py-1.5">
+                    <button
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-red-500 hover:bg-red-50 transition-colors"
+                      onClick={handleLogout}
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Log out
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </header>
@@ -102,7 +168,7 @@ export default function DashboardPage() {
       {/* Main Content Layout */}
       <main className="w-full px-6 lg:px-8 py-6 flex flex-col xl:flex-row gap-6">
 
-        {/* Left Column (Main Area) */}
+        {/* Left Column */}
         <motion.div
           className="flex-1 bg-white rounded-3xl shadow-[0_0_32px_rgba(149,157,165,0.04)] p-4 sm:p-6 flex flex-col gap-4 sm:gap-6 min-w-0"
           variants={containerVariants}
@@ -205,9 +271,7 @@ export default function DashboardPage() {
                 },
                 {
                   title: 'Prompt Render', time: '3 weeks ago',
-                  imageContent: (
-                    <Image fill src="/assets/imgImage5.png" className="object-cover" alt="Prompt Render" />
-                  )
+                  imageContent: <Image fill src="/assets/imgImage5.png" className="object-cover" alt="Prompt Render" />
                 },
                 {
                   title: 'Clear Room', time: '3 weeks ago',
@@ -328,7 +392,6 @@ export default function DashboardPage() {
               ))}
             </div>
           </motion.div>
-
         </motion.div>
 
         {/* Right Column (Sidebar) */}
@@ -357,124 +420,69 @@ export default function DashboardPage() {
             {/* Tutorial 1 */}
             <motion.div variants={itemVariants} className="flex flex-col gap-3 group cursor-pointer">
               <div className="aspect-[1.5] relative bg-[#f5f5f5] rounded-[32px] overflow-hidden">
-
-                {/* Base Image — bottom-left */}
                 <div className="absolute left-[7.5%] bottom-[11.3%] w-[60.2%] h-[58.8%] rounded-[16px] overflow-hidden border border-white shadow-sm">
-                  <Image fill src="/assets/imgImage16.png"
-                    alt="Before"
-                    className="object-cover"
-                    style={{ objectPosition: '-8.595px 0px' }} />
+                  <Image fill src="/assets/imgImage16.png" alt="Before" className="object-cover" style={{ objectPosition: '-8.595px 0px' }} />
                 </div>
-
-                {/* Overlap Image — top-right */}
                 <div className="absolute right-[7.5%] top-[4.5%] w-[48.2%] h-[54.3%] rounded-[16px] overflow-hidden border border-white shadow-[0_2px_8px_rgba(99,99,99,0.12)] z-10">
-                  <Image fill src="/assets/imgImage17.png"
-                    alt="After"
-                    className="object-cover"
-                    style={{ objectPosition: '-17.954px 0px' }} />
+                  <Image fill src="/assets/imgImage17.png" alt="After" className="object-cover" style={{ objectPosition: '-17.954px 0px' }} />
                 </div>
-
-                {/* Arrow — sits between the two images */}
                 <div className="absolute left-[37.7%] top-[27.1%] w-[15%] z-20" style={{ transform: 'rotate(8.345deg)' }}>
                   <Image width={100} height={100} src="/assets/imgArrow3.svg" className="w-full aspect-[1.1] object-contain" alt="arrow" />
                 </div>
-
-                {/* Floating Action Bubble — pinned to bottom-center */}
                 <div className="absolute bottom-[3%] left-1/2 -translate-x-1/2 bg-white px-4 py-2 rounded-full flex items-center justify-center gap-2 border-[1.5px] border-[#d2e88a] shadow-[0_4px_12px_rgba(0,0,0,0.08)] z-30 whitespace-nowrap opacity-88 max-w-[90%]">
                   <Image width={100} height={100} src="/assets/imgRating2.svg" className="w-4 h-4 shrink-0" alt="sparkle" />
-                  <span className="text-[clamp(10px,2.5cqi,14px)] font-[500] tracking-[-0.42px] text-[#0a0a0a] truncate">
-                    Add picture in the wall | <span className="text-gray-400 ml-1"></span>
-                  </span>
+                  <span className="text-[clamp(10px,2.5cqi,14px)] font-[500] tracking-[-0.42px] text-[#0a0a0a] truncate">Add picture in the wall | <span className="text-gray-400 ml-1"></span></span>
                 </div>
               </div>
-              <p className="text-[16px] font-[600] text-[#0a0a0a] tracking-[-0.48px] leading-[1.4] mt-1">
-                Transform your empty wall into a stylish focal point in just one click.
-              </p>
+              <p className="text-[16px] font-[600] text-[#0a0a0a] tracking-[-0.48px] leading-[1.4] mt-1">Transform your empty wall into a stylish focal point in just one click.</p>
             </motion.div>
 
             {/* Tutorial 2 */}
             <motion.div variants={itemVariants} className="flex flex-col gap-3 group cursor-pointer">
               <div className="aspect-[16/9] relative bg-[#f5f5f5] rounded-[24px] flex items-center justify-center p-3 overflow-hidden">
                 <div className="relative w-full h-full flex items-start gap-2">
-
-                  {/* Sketch panel */}
                   <div className="flex-1 h-[80%] rounded-[12px] overflow-hidden shadow-md border-2 border-white relative">
                     <Image fill src="/assets/imgImage9.png" alt="Sketch" className="absolute inset-0 object-cover" />
-                    {/* Label pinned inside the panel at the bottom */}
-                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/95 px-3 py-1 rounded-xl text-[11px] font-medium shadow-sm whitespace-nowrap z-10">
-                      Sketch
-                    </div>
+                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/95 px-3 py-1 rounded-xl text-[11px] font-medium shadow-sm whitespace-nowrap z-10">Sketch</div>
                   </div>
-
-                  {/* Render result panel */}
                   <div className="flex-[1.3] h-full rounded-[12px] overflow-hidden shadow-md border-2 border-white relative">
                     <Image fill src="/assets/imgImage8.png" alt="Render" className="absolute inset-0 object-cover" />
-                    {/* Label pinned inside the panel at the bottom */}
-                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/95 px-3 py-1 rounded-xl text-[11px] font-medium shadow-sm whitespace-nowrap z-10">
-                      Render result
-                    </div>
+                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-white/95 px-3 py-1 rounded-xl text-[11px] font-medium shadow-sm whitespace-nowrap z-10">Render result</div>
                   </div>
-
-                  {/* Arrow — already percentage-based, no change */}
                   <div className="absolute left-[36%] bottom-[3%] w-6 h-6 z-20 pointer-events-none transform -rotate-12 scale-y-[-1]">
                     <Image fill src="/assets/imgArrow4.svg" className="object-contain" alt="curved arrow" />
                   </div>
-
                 </div>
               </div>
-              <p className="text-[14px] font-[500] text-[#0a0a0a] tracking-[-0.42px] leading-[1.5]">
-                Transform your rough design into a stunning, lifelike visualization in seconds.
-              </p>
+              <p className="text-[14px] font-[500] text-[#0a0a0a] tracking-[-0.42px] leading-[1.5]">Transform your rough design into a stunning, lifelike visualization in seconds.</p>
             </motion.div>
 
             {/* Tutorial 3 */}
             <motion.div variants={itemVariants} className="flex flex-col gap-3 group cursor-pointer">
               <div className="aspect-[1.5] relative bg-[#f5f5f5] rounded-[32px] overflow-hidden">
-
-                {/* Left Image (Before) */}
                 <div className="absolute left-[6%] top-[18.1%] w-[42.8%] h-[48%] rounded-[16px] overflow-hidden border border-white shadow-[0_2px_8px_rgba(99,99,99,0.12)] z-20">
                   <Image fill src="/assets/imgImage18.png" className="object-cover" alt="Before" />
-
-                  {/* Brush Interaction Point Container — relative to the left image box */}
                   <div className="absolute left-[52.8%] top-[75.5%] w-[56.3%] h-[75.5%] z-40">
-
-                    {/* Interactive Ring */}
                     <div className="absolute left-[-25%] top-[-31.25%] w-[37.5%] h-[37.5%] z-30">
-                      <Image fill src="/assets/imgVerticalContainer1.svg"
-                        className="object-contain"
-                        alt="ring" />
+                      <Image fill src="/assets/imgVerticalContainer1.svg" className="object-contain" alt="ring" />
                     </div>
-
-                    {/* Cursor */}
                     <div className="absolute left-[-2.5%] top-[-1.25%] w-[18.75%] h-[18.75%] z-40">
-                      <Image fill src="/assets/imgVerticalContainer2.svg"
-                        className="object-contain"
-                        alt="cursor" />
+                      <Image fill src="/assets/imgVerticalContainer2.svg" className="object-contain" alt="cursor" />
                     </div>
-
                   </div>
                 </div>
-
-                {/* Connecting Arrow */}
                 <div className="absolute left-[46.1%] top-[27.1%] w-[9.6%] h-[12.7%] z-30" style={{ transform: 'rotate(69.63deg)' }}>
                   <Image fill src="/assets/imgArrow5.svg" className="object-contain" alt="arrow" />
                 </div>
-
-                {/* Right Image (After) */}
                 <div className="absolute left-[52.7%] top-[29.4%] w-[42.8%] h-[47%] rounded-[16px] overflow-hidden border border-white shadow-[0_2px_8px_rgba(99,99,99,0.12)] z-0">
                   <Image fill src="/assets/imgImage19.png" className="object-cover" alt="After" />
                 </div>
-
-                {/* Label Bubble — positioned on the aspect box, not the old inner wrapper */}
                 <div className="absolute left-[28.6%] top-[65.6%] w-[19.6%] h-[20.8%] flex items-center justify-center z-50">
-                  <Image fill src="/assets/imgTextInput11.svg" className="absolute inset-0 " alt="bubble" />
+                  <Image fill src="/assets/imgTextInput11.svg" className="absolute inset-0" alt="bubble" />
                   <span className="relative flex items-center justify-center text-[10px] font-bold text-[#c7de7d] tracking-[-0.3px]">Brush..</span>
                 </div>
-
               </div>
-              <p className="text-[16px] font-[600] text-[#0a0a0a] tracking-[-0.48px] leading-[1.4] mt-1">
-                Easily switch colors and tones to explore new design moods.
-              </p>
+              <p className="text-[16px] font-[600] text-[#0a0a0a] tracking-[-0.48px] leading-[1.4] mt-1">Easily switch colors and tones to explore new design moods.</p>
             </motion.div>
 
           </div>
@@ -485,13 +493,8 @@ export default function DashboardPage() {
 
       <style dangerouslySetInnerHTML={{
         __html: `
-        .hide-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-        .hide-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}} />
     </div>
   );
