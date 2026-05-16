@@ -35,9 +35,35 @@ export const useAuthStore = create<AuthState>()(
     {
       name: "auth-store",
       storage: createJSONStorage(() => sessionStorage),
-      // skipHydration prevents SSR crash (sessionStorage doesn't exist on server)
-      // rehydrate() is called manually in the signup page useEffect
       skipHydration: true,
     },
   ),
 );
+
+interface ProjectState {
+  currentProject: {
+    id: string;
+    name: string;
+    floorPlanUrl: string | null;
+  } | null;
+
+  setProject: (project: ProjectState["currentProject"]) => void;
+  resetProject: () => void;
+}
+
+export const useProjectStore = create<ProjectState>()(
+  persist(
+    (set) => ({
+      currentProject: null,
+
+      setProject: (project) => set({ currentProject: project }),
+
+      resetProject: () => set({ currentProject: null }),
+    }),
+    {
+      name: "project-store",
+      storage: createJSONStorage(() => sessionStorage),
+    },
+  ),
+);
+

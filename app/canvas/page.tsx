@@ -19,6 +19,8 @@ import {
   Copy,
   Settings2,
 } from "lucide-react";
+import { useEffect } from "react";
+import { useProjectStore } from "@/lib/store";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -139,6 +141,18 @@ export default function CanvasPage() {
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [zoom, setZoom] = useState(100);
   const [searchQuery, setSearchQuery] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const { currentProject } = useProjectStore();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (mounted) {
+      console.log("Canvas mounted. Current Project:", currentProject);
+    }
+  }, [mounted, currentProject]);
 
   const filteredElements = ELEMENTS.map((cat) => ({
     ...cat,
@@ -285,7 +299,7 @@ export default function CanvasPage() {
 
         {/* Grid canvas area */}
         <div
-          className="flex-1 overflow-hidden"
+          className="flex-1 overflow-hidden relative"
           style={{
             backgroundImage: `
               linear-gradient(to right, #e0e4e3 1px, transparent 1px),
@@ -294,7 +308,26 @@ export default function CanvasPage() {
             backgroundSize: `${zoom * 0.4}px ${zoom * 0.4}px`,
             backgroundPosition: "center center",
           }}
-        />
+        >
+          {mounted && currentProject?.floorPlanUrl && (
+            <div 
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              style={{
+                transform: `scale(${zoom / 100})`,
+                transition: "transform 0.1s ease-out",
+                zIndex: 1
+              }}
+            >
+              <img 
+                src={currentProject.floorPlanUrl} 
+                alt="Floor Plan" 
+                className="max-w-[90%] max-h-[90%] opacity-60 shadow-2xl rounded-lg border-2 border-dashed border-[#004643]/20"
+                onLoad={() => console.log("Floor plan image loaded successfully:", currentProject.floorPlanUrl)}
+                onError={(e) => console.error("Failed to load floor plan image:", currentProject.floorPlanUrl, e)}
+              />
+            </div>
+          )}
+        </div>
       </main>
 
       {/* ── Right Panel: Edit Panel ── */}
