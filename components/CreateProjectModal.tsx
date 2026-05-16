@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, UploadCloud, AlertCircle, Plus, Trash2, Pencil, Loader2 } from "lucide-react";
+import { X, UploadCloud, AlertCircle, Plus, Trash2, Pencil, Loader2, RefreshCw } from "lucide-react";
+import { createProject, uploadFloorPlan } from "@/lib/api/projects";
+import { useProjectStore } from "@/lib/store";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -12,12 +14,16 @@ interface CreateProjectModalProps {
 
 export default function CreateProjectModal({ isOpen, onClose }: CreateProjectModalProps) {
   const router = useRouter();
+  const { setProject } = useProjectStore();
   const [step, setStep] = useState(1);
   const [projectName, setProjectName] = useState("");
   const [projectType, setProjectType] = useState("");
   const [address, setAddress] = useState("");
   const [hasError, setHasError] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   const roomIdCounter = useRef(7); // starts after the 6 initial rooms
 
   // Step 4 state
@@ -43,6 +49,9 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         setCeilingHeight("2.4");
         setFile(null);
         setIsDragging(false);
+        setProjectId(null);
+        setApiError(null);
+        setApiLoading(false);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -108,12 +117,50 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     }
   };
 
-  const handleContinue = () => {
-    if (step === 1 && !projectName.trim()) {
-      setHasError(true);
+  const handleContinue = async () => {
+    setApiError(null);
+
+    if (step === 1) {
+      if (!projectName.trim()) {
+        setHasError(true);
+        return;
+      }
+      try {
+        setApiLoading(true);
+        const project = await createProject(projectName, projectType, address);
+        setProjectId(project.id);
+        setProject({ id: project.id, name: project.name, floorPlanUrl: null });
+        setStep(2);
+      } catch (err: any) {
+        setApiError(err.message || "Failed to create project");
+      } finally {
+        setApiLoading(false);
+      }
       return;
     }
-    setHasError(false);
+
+    if (step === 2) {
+      if (!file) {
+        setApiError("Please upload a floor plan to continue");
+        return;
+      }
+      try {
+        setApiLoading(true);
+        const result = await uploadFloorPlan(projectId!, file);
+        setProject({ 
+          id: projectId!, 
+          name: projectName, 
+          floorPlanUrl: result.floor_plan_url 
+        });
+        setStep(3);
+      } catch (err: any) {
+        setApiError(err.message || "Failed to upload floor plan");
+      } finally {
+        setApiLoading(false);
+      }
+      return;
+    }
+
     if (step < 5) {
       setStep(step + 1);
     } else {
@@ -491,10 +538,17 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
           {/* Footer */}
           <div className="border-t border-[#f1f4f4] px-8 py-5 flex items-center justify-between bg-white rounded-b-[24px]">
+            {apiError && (
+              <div className="absolute left-8 bottom-[72px] right-8 flex items-center gap-2 text-red-500 bg-red-50 px-4 py-2 rounded-lg border border-red-100">
+                <AlertCircle size={16} />
+                <span className="text-[13px] font-medium">{apiError}</span>
+              </div>
+            )}
             {step > 1 ? (
               <button 
                 onClick={handleBack}
-                className="h-[44px] px-8 bg-[#6B7280] text-white rounded-[8px] text-[14px] font-medium hover:bg-[#555b66] transition-colors"
+                disabled={apiLoading}
+                className="h-[44px] px-8 bg-[#6B7280] text-white rounded-[8px] text-[14px] font-medium hover:bg-[#555b66] transition-colors disabled:opacity-50"
               >
                 Back
               </button>
@@ -503,13 +557,14 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
             )}
             <button 
               onClick={handleContinue}
-              disabled={step === 1 && !isStep1Valid}
-              className={`h-[44px] px-8 rounded-[8px] text-[14px] font-medium transition-colors ml-auto ${
-                step === 1 && !isStep1Valid 
+              disabled={(step === 1 && !isStep1Valid) || apiLoading}
+              className={`h-[44px] px-8 rounded-[8px] text-[14px] font-medium transition-all flex items-center gap-2 ml-auto ${
+                (step === 1 && !isStep1Valid) || apiLoading
                   ? "bg-[#004643]/50 text-white cursor-not-allowed" 
                   : "bg-[#004643] text-white hover:bg-[#003633] shadow-[0_2px_8px_rgba(0,70,67,0.15)]"
               }`}
             >
+              {apiLoading && <RefreshCw size={16} className="animate-spin" />}
               {step === 5 ? "Create Project" : "Continue"}
             </button>
           </div>
