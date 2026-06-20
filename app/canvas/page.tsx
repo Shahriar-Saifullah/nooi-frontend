@@ -1,25 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import {
   Search,
   Minus,
   Plus,
   RotateCcw,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  AlignStartVertical,
-  AlignCenterHorizontal,
-  AlignEndVertical,
-  LayoutGrid,
   Sofa,
-  Flower2,
-  Layers2,
-  Copy,
+  Sun,
+  Layers,
+  Send,
+  ImageIcon,
+  Sparkles,
+  ChevronDown,
   Settings2,
+  LayoutGrid,
+  ChevronLeft,
+  Share2,
+  Download,
+  Palette,
+  ChevronRight,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
-import { useEffect } from "react";
 import { useProjectStore } from "@/lib/store";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -91,9 +96,61 @@ const ELEMENTS: Category[] = [
   },
 ];
 
+// ─── Color palette from Figma ─────────────────────────────────────────────────
+
+const PALETTE_COLORS = [
+  "#f5f0e8",
+  "#3d5a4c",
+  "#8a8a8a",
+  "#1a6b63",
+  "#2e8b7a",
+  "#e8c840",
+];
+
+// ─── Suggestion chips from Figma ──────────────────────────────────────────────
+
+const SUGGESTION_CHIPS = [
+  "Cozy Scandinavian living room",
+  "Maximise natural light",
+  "Add plants for biophilic design",
+  "Modern minimalist bedroom",
+];
+
+// ─── Furniture Library Data from Figma ────────────────────────────────────────
+
+const LIBRARY_SECTIONS = [
+  {
+    name: "Living Room",
+    count: "24 items",
+    items: [
+      { name: "L-Shaped Sofa", size: "240 × 160 cm", img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=300&q=80" },
+      { name: "Armchair", size: "85 × 80 cm", img: "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=300&q=80" },
+      { name: "Coffee Table", size: "Ø 100 cm", img: "https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&w=300&q=80" },
+      { name: "TV Stand", size: "180 × 45 cm", img: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?auto=format&fit=crop&w=300&q=80" },
+      { name: "Bookshelf", size: "120 × 30 cm", img: "https://images.unsplash.com/photo-1544644181-1484b3fdfc62?auto=format&fit=crop&w=300&q=80" },
+      { name: "Floor Lamp", size: "Ø 40 cm", img: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=300&q=80" },
+    ]
+  },
+  {
+    name: "Dining",
+    count: "16 items",
+    items: [
+      { name: "Dining Table", size: "200 × 100 cm", img: "https://images.unsplash.com/photo-1615066390971-03e4e1c36ddf?auto=format&fit=crop&w=300&q=80" },
+      { name: "Dining Chair", size: "45 × 50 cm", img: "https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=300&q=80" },
+      { name: "Bar Stool", size: "Ø 40 cm", img: "https://images.unsplash.com/photo-1592078615290-033ee584e267?auto=format&fit=crop&w=300&q=80" },
+      { name: "Sideboard", size: "160 × 45 cm", img: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?auto=format&fit=crop&w=300&q=80" },
+    ]
+  },
+  {
+    name: "Bedroom",
+    count: "18 items",
+    items: []
+  }
+];
+
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
 
-function FurnitureIcon({ type, size = 36 }: { type: string; size?: number }) {
+function FurnitureIcon({ type, size = 24 }: { type: string; size?: number }) {
   const s = size;
   const c = { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (type) {
@@ -137,12 +194,22 @@ function FurnitureIcon({ type, size = 36 }: { type: string; size?: number }) {
 // ─── Main Canvas Page ─────────────────────────────────────────────────────────
 
 export default function CanvasPage() {
-  const [activeTab, setActiveTab] = useState<"assets" | "layers">("assets");
+  const router = useRouter();
+  const [rightTab, setRightTab] = useState<"elements" | "edit">("elements");
+  const [activeSubTab, setActiveSubTab] = useState<"assets" | "layers">("assets");
+  const [activeCategoryIcon, setActiveCategoryIcon] = useState(0);
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [zoom, setZoom] = useState(100);
   const [searchQuery, setSearchQuery] = useState("");
+  const [designPrompt, setDesignPrompt] = useState("");
   const [mounted, setMounted] = useState(false);
   const { currentProject } = useProjectStore();
+  const [attachedFile, setAttachedFile] = useState<string | null>(null);
+  const isPromptActive = designPrompt.trim() !== "" || attachedFile !== null;
+  const [activeEditSubTab, setActiveEditSubTab] = useState<"settings" | "layers" | "palette">("layers");
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [librarySearchQuery, setLibrarySearchQuery] = useState("");
+  const [activeFilterChip, setActiveFilterChip] = useState("All");
 
   useEffect(() => {
     setMounted(true);
@@ -162,114 +229,271 @@ export default function CanvasPage() {
   })).filter((cat) => cat.items.length > 0);
 
   return (
-    <div className="flex h-screen w-screen bg-[#f5f5f5] overflow-hidden font-sans select-none">
+    <div className="flex flex-col h-screen w-screen bg-[#f5f5f5] overflow-hidden select-none" style={{ fontFamily: "'Inter', sans-serif" }}>
+      {/* ── Navbar ── */}
+      <header className="h-[56px] border-b border-[#e5e5e5] bg-white flex items-center justify-between px-4 shrink-0">
+        {/* Left container */}
+        <div className="flex items-center gap-3">
+          {/* Dashboard Return Button */}
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="flex items-center gap-1 px-2 py-1.5 hover:bg-[#fafafa] rounded-full transition-colors text-[12px] font-medium text-[#525252]"
+          >
+            <ChevronLeft size={16} className="text-[#525252]" />
+            Dashboard
+          </button>
+          
+          {/* Vertical divider */}
+          <div className="h-5 w-px bg-[#e5e5e5]" />
+          
+          {/* Project Type Icon Wrapper (Nooi light green badge icon) */}
+          <div className="w-7 h-7 bg-[#c7de7d] rounded-[10px] flex items-center justify-center shrink-0">
+            {/* Grid icon representation for floor plan */}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#003832" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
+            </svg>
+          </div>
+          
+          {/* Project Title and type */}
+          <div className="flex items-baseline gap-1">
+            <span className="text-[14px] font-semibold text-[#0a0a0a] tracking-tight">
+              {currentProject?.name || "Untitled Project"}
+            </span>
+            <span className="text-[12px] text-[#737373]">
+              — Floor plan
+            </span>
+          </div>
+        </div>
 
-      {/* ── Left Panel: Elements Library ── */}
-      <aside className="w-[220px] shrink-0 bg-white border-r border-[#e8eceb] flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="px-4 pt-4 pb-3 border-b border-[#f0f2f1]">
-          <h2 className="text-[14px] font-semibold text-[#101212] mb-3">Elements Library</h2>
+        {/* Right container */}
+        <div className="flex items-center gap-2">
+          {/* Share button */}
+          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-gray-50 transition-all text-[12px] font-medium text-[#525252]">
+            <Share2 size={14} className="text-[#525252]" />
+            Share
+          </button>
+          
+          {/* Export button */}
+          <button className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#004643] rounded-full hover:bg-[#003633] transition-all text-[12px] font-medium text-white shadow-[0_1px_3px_rgba(0,70,67,0.15)]">
+            <Download size={14} className="text-white" />
+            Export
+          </button>
+        </div>
+      </header>
 
-          {/* Search */}
-          <div className="flex items-center gap-2 bg-white border border-[#e2e8e7] rounded-[8px] px-3 h-[34px]">
-            <Search className="w-[13px] h-[13px] text-[#adb5b4] shrink-0" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search elements..."
-              className="flex-1 bg-transparent text-[12px] text-[#101212] placeholder:text-[#adb5b4] focus:outline-none"
-            />
+      {/* Main layout container wrapping panels */}
+      <div className="flex flex-row flex-1 overflow-hidden p-3 gap-3 bg-[#f5f5f5]">
+
+      {/* ══════════════════════════════════════════════════════════════════════
+          LEFT PANEL: AI Design Assistant
+          ══════════════════════════════════════════════════════════════════════ */}
+      <aside
+        className="shrink-0 bg-white flex flex-col overflow-hidden rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06),0_4px_12px_-2px_rgba(0,0,0,0.04)]"
+        style={{ width: 280 }}
+      >
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-3">
+          <div className="flex items-center gap-2.5">
+            {/* Nooi green logo circle */}
+            <div className="w-[26px] h-[26px] rounded-full bg-[#003832] flex items-center justify-center shrink-0">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <circle cx="6" cy="6" r="4" stroke="white" strokeWidth="1.2"/>
+                <circle cx="6" cy="6" r="1.5" fill="white"/>
+              </svg>
+            </div>
+            <span className="text-[13px] font-semibold text-[#0a0a0a] tracking-[-0.01em]">
+              AI Design Assistant
+            </span>
+          </div>
+          {/* Collapse icon */}
+          <button className="w-6 h-6 flex items-center justify-center text-[#a3a3a3] hover:text-[#525252] transition-colors rounded">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+              <rect x="1" y="1" width="12" height="12" rx="2"/>
+              <path d="M5 1v12"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* ── Chat bubble ── */}
+        <div className="px-4 pb-4">
+          <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-3">
+            <p className="text-[12px] leading-[1.55] text-[#404040]">
+              Hi! I&apos;m your Nooi design assistant. Describe the room or style you want and I&apos;ll lay it out for you.
+            </p>
+          </div>
+        </div>
+
+        {/* ── Spacer (chat area) ── */}
+        <div className="flex-1" />
+
+        {/* ── DESIGN SETTINGS ── */}
+        <div className="px-4 pb-3">
+          <p className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase mb-3">
+            Design Settings
+          </p>
+
+          {/* Two dropdowns side by side */}
+          <div className="flex gap-2 mb-3">
+            <div className="flex-1 h-[30px] border border-[#e5e5e5] rounded-[8px] flex items-center justify-between px-2.5 cursor-pointer hover:border-[#d4d4d4] transition-colors">
+              <span className="text-[11px] text-[#a3a3a3]"></span>
+              <ChevronDown size={11} className="text-[#a3a3a3]" />
+            </div>
+            <div className="flex-1 h-[30px] border border-[#e5e5e5] rounded-[8px] flex items-center justify-between px-2.5 cursor-pointer hover:border-[#d4d4d4] transition-colors">
+              <span className="text-[11px] text-[#a3a3a3]"></span>
+              <ChevronDown size={11} className="text-[#a3a3a3]" />
+            </div>
           </div>
 
-          {/* Assets / Layers tabs */}
-          <div className="flex mt-2.5 bg-[#f0f2f1] rounded-[8px] p-[3px]">
-            {(["assets", "layers"] as const).map((tab) => (
+          {/* Palette row */}
+          <div className="flex items-center gap-1 mb-4">
+            <span className="text-[10px] text-[#a3a3a3] mr-1">Palette:</span>
+            {PALETTE_COLORS.map((color, i) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 text-[12px] font-medium py-[5px] rounded-[6px] transition-all ${
-                  activeTab === tab
-                    ? "bg-white text-[#101212] shadow-sm"
-                    : "text-[#8e9493] hover:text-[#101212]"
-                }`}
+                key={i}
+                className="w-[16px] h-[16px] rounded-full border border-black/8 shrink-0 hover:scale-110 transition-transform"
+                style={{ backgroundColor: color }}
+              />
+            ))}
+            <button className="w-[16px] h-[16px] rounded-full border border-dashed border-[#d4d4d4] flex items-center justify-center text-[#a3a3a3] hover:border-[#737373] hover:text-[#737373] transition-colors shrink-0">
+              <Plus size={8} />
+            </button>
+          </div>
+
+          {/* Suggestion chips */}
+          <div className="flex flex-col gap-[6px] mb-4">
+            {SUGGESTION_CHIPS.map((chip) => (
+              <button
+                key={chip}
+                onClick={() => {
+                  setDesignPrompt((prev) => {
+                    const base = prev.trim();
+                    if (base === "") return chip;
+                    if (base.endsWith(",") || base.endsWith(".")) return `${base} ${chip}`;
+                    return `${base}, ${chip}`;
+                  });
+                }}
+                className="flex items-center gap-1.5 text-left text-[11px] text-[#525252] hover:text-[#0a0a0a] transition-colors group"
               >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                <span className="text-[#a3a3a3] group-hover:text-[#525252] transition-colors text-[11px]">+</span>
+                <span>{chip}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* 3 small icon category buttons */}
-        <div className="flex items-center gap-[6px] px-4 py-3 border-b border-[#f0f2f1]">
-          {[
-            <Sofa size={16} />,
-            <Flower2 size={16} />,
-            <LayoutGrid size={16} />,
-          ].map((icon, i) => (
-            <button
-              key={i}
-              className={`flex-1 h-[30px] flex items-center justify-center rounded-[6px] border transition-colors ${
-                i === 0
-                  ? "border-[#004643] text-[#004643] bg-[#f0f7f6]"
-                  : "border-[#e2e8e7] text-[#8e9493] hover:border-[#004643] hover:text-[#004643]"
-              }`}
-            >
-              {icon}
-            </button>
-          ))}
+        {/* ── Prompt Input ── */}
+        <div className="px-4 pb-3">
+          <div className="border border-[#e5e5e5] rounded-[10px] overflow-hidden">
+            <textarea
+              value={designPrompt}
+              onChange={(e) => setDesignPrompt(e.target.value)}
+              placeholder="Describe your design vision..."
+              className="w-full resize-none text-[12px] text-[#0a0a0a] placeholder:text-[#a3a3a3] focus:outline-none px-3 pt-2.5 pb-1 bg-transparent"
+              rows={2}
+            />
+            {attachedFile && (
+              <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 text-[11px] text-[#004643] font-medium bg-[#eaf8f4] rounded-[6px] mx-3 mb-2 w-fit">
+                <span className="truncate max-w-[180px]">{attachedFile}</span>
+                <button
+                  type="button"
+                  onClick={() => setAttachedFile(null)}
+                  className="text-[#a3a3a3] hover:text-red-500 font-bold ml-1"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+            <div className="flex items-center justify-between px-3 pb-2">
+              <label className="flex items-center gap-1.5 text-[11px] text-[#a3a3a3] hover:text-[#525252] transition-colors cursor-pointer">
+                <ImageIcon size={13} />
+                <span>Upload Inspo</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      setAttachedFile(e.target.files[0].name);
+                    }
+                  }}
+                />
+              </label>
+              <button
+                disabled={!isPromptActive}
+                className={`w-[26px] h-[26px] rounded-full flex items-center justify-center text-white transition-all ${
+                  isPromptActive
+                    ? "bg-[#003832] hover:bg-[#004d44] cursor-pointer"
+                    : "bg-[#003832] opacity-40 cursor-not-allowed"
+                }`}
+              >
+                <Send size={11} />
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* Category list */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide">
-          {filteredElements.map((cat) => (
-            <div key={cat.name}>
-              {/* Category header */}
-              <p className="px-4 pt-4 pb-2 text-[13px] font-semibold text-[#101212]">
-                {cat.name}
-              </p>
-              {/* Items grid */}
-              <div className="grid grid-cols-2 gap-[8px] px-4 pb-3">
-                {cat.items.map((item) => (
-                  <button
-                    key={item.id}
-                    draggable
-                    className="flex flex-col items-center gap-[6px] group"
-                  >
-                    {/* Icon card */}
-                    <div className="w-full aspect-square border border-[#e2e8e7] rounded-[8px] bg-white flex items-center justify-center text-[#555] group-hover:border-[#004643] group-hover:text-[#004643] group-hover:bg-[#f0f7f6] transition-all">
-                      <FurnitureIcon type={item.icon} size={20} />
-                    </div>
-                    {/* Label */}
-                    <span className="text-[11px] text-[#555] text-center leading-tight group-hover:text-[#101212] transition-colors">
-                      {item.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-          <div className="h-4" />
+        {/* ── Generate Button ── */}
+        <div className="px-4 pb-4">
+          <button
+            disabled={!isPromptActive}
+            className={`w-full h-[38px] text-white rounded-[10px] flex items-center justify-center gap-2 text-[13px] font-medium transition-all ${
+              isPromptActive
+                ? "bg-[#003832] hover:bg-[#004d44] cursor-pointer"
+                : "bg-[#003832] opacity-40 cursor-not-allowed"
+            }`}
+          >
+            <Sparkles size={14} />
+            <span>Generate design</span>
+          </button>
         </div>
       </aside>
 
 
-      {/* ── Center: Canvas ── */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
-        {/* Top bar */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 bg-white border border-[#e8eceb] rounded-full px-1 py-1 shadow-sm">
-          {(["2d", "3d"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
-              className={`px-5 py-2 rounded-full text-[13px] font-semibold transition-all ${
-                viewMode === mode
-                  ? "bg-[#004643] text-white"
-                  : "text-[#8e9493] hover:text-[#101212]"
-              }`}
-            >
-              {mode === "2d" ? "2D Floor Plan" : "3D Walkthrough"}
-            </button>
-          ))}
+      {/* ══════════════════════════════════════════════════════════════════════
+          CENTER: Canvas
+          ══════════════════════════════════════════════════════════════════════ */}
+      <main className="flex-1 flex flex-col overflow-hidden relative bg-white border border-[#e5e5e5] rounded-[16px] shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+        {/* Top bar — 2D / 3D Switcher */}
+        <div className="absolute top-[18px] left-1/2 -translate-x-1/2 z-10 bg-white border border-[#e5e5e5] rounded-full p-[5px] flex items-center gap-[4px] shadow-[0px_4px_6px_rgba(0,0,0,0.05),0px_2px_4px_rgba(0,0,0,0.05)]">
+          {(["2d", "3d"] as const).map((mode) => {
+            const isActive = viewMode === mode;
+            return (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`flex items-center gap-[6px] px-[16px] py-[6px] rounded-full text-[12px] font-medium leading-[18px] transition-all whitespace-nowrap ${
+                  isActive
+                    ? "bg-[#003832] text-white shadow-sm"
+                    : "text-[#525252] hover:text-[#0a0a0a] hover:bg-[#f5f5f5]"
+                }`}
+              >
+                {mode === "2d" ? (
+                  <>
+                    <Image
+                      width={14}
+                      height={14}
+                      src="/Logo/floor-plan.svg"
+                      alt=""
+                      className={`w-[14px] h-[14px] ${isActive ? "brightness-0 invert" : ""}`}
+                    />
+                    <span>2D Floor Plan</span>
+                  </>
+                ) : (
+                  <>
+                    <Image
+                      width={14}
+                      height={14}
+                      src="/Logo/3d-studio.svg"
+                      alt=""
+                      className={`w-[14px] h-[14px] ${isActive ? "brightness-0 invert" : ""}`}
+                    />
+                    <span>3D Walkthrough</span>
+                  </>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* Zoom controls */}
@@ -299,161 +523,520 @@ export default function CanvasPage() {
 
         {/* Grid canvas area */}
         <div
-          className="flex-1 overflow-hidden relative"
+          className="flex-1 overflow-hidden relative flex items-center justify-center"
           style={{
+            backgroundColor: "#f7f8f8",
             backgroundImage: `
-              linear-gradient(to right, #e0e4e3 1px, transparent 1px),
-              linear-gradient(to bottom, #e0e4e3 1px, transparent 1px)
+              linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px)
             `,
             backgroundSize: `${zoom * 0.4}px ${zoom * 0.4}px`,
             backgroundPosition: "center center",
           }}
         >
-          {mounted && currentProject?.floorPlanUrl && (
-            <div 
-              className="absolute inset-0 flex items-center justify-center pointer-events-none"
-              style={{
-                transform: `scale(${zoom / 100})`,
-                transition: "transform 0.1s ease-out",
-                zIndex: 1
-              }}
-            >
-              <img 
-                src={currentProject.floorPlanUrl} 
-                alt="Floor Plan" 
-                className="max-w-[90%] max-h-[90%] opacity-60 shadow-2xl rounded-lg border-2 border-dashed border-[#004643]/20"
-                onLoad={() => console.log("Floor plan image loaded successfully:", currentProject.floorPlanUrl)}
-                onError={(e) => console.error("Failed to load floor plan image:", currentProject.floorPlanUrl, e)}
-              />
+          <div
+            className="relative transition-transform duration-100 ease-out"
+            style={{
+              transform: `scale(${zoom / 100})`,
+            }}
+          >
+            {/* White card container from Figma */}
+            <div className="bg-white border-2 border-[#d4d4d4] border-solid h-[460px] w-[680px] rounded-[14px] shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1),0px_1px_2px_-1px_rgba(0,0,0,0.1)] flex items-center justify-center p-[64px] relative overflow-hidden">
+              {mounted && currentProject?.floorPlanUrl ? (
+                <img
+                  src={currentProject.floorPlanUrl}
+                  alt="Floor Plan"
+                  className="max-w-full max-h-full object-contain opacity-80"
+                  onLoad={() => console.log("Floor plan image loaded successfully:", currentProject.floorPlanUrl)}
+                  onError={(e) => console.error("Failed to load floor plan image:", currentProject.floorPlanUrl, e)}
+                />
+              ) : (
+                <div className="text-gray-300 text-sm font-medium flex flex-col items-center gap-2 select-none">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                    <circle cx="9" cy="9" r="2"/>
+                    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+                  </svg>
+                  <span>No Floor Plan Uploaded</span>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </main>
 
-      {/* ── Right Panel: Edit Panel ── */}
-      <aside className="w-[300px] shrink-0 bg-white border-l border-[#e8eceb] flex flex-col overflow-hidden overflow-y-auto scrollbar-hide">
-        {/* Header */}
-        <div className="px-5 pt-5 pb-4 border-b border-[#f0f2f1]">
-          <h2 className="text-[15px] font-semibold text-[#101212]">Edit Panel</h2>
-        </div>
 
-        {/* Top action icons */}
-        <div className="px-4 py-4 border-b border-[#f0f2f1]">
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            {[<Settings2 size={16} />, <Layers2 size={16} />, <Copy size={16} />].map((icon, i) => (
-              <button
-                key={i}
-                className="h-[36px] flex items-center justify-center rounded-[8px] border border-[#e8eceb] text-[#8e9493] hover:border-[#004643] hover:text-[#004643] transition-colors"
-              >
-                {icon}
-              </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              <AlignLeft size={16} />,
-              <AlignCenter size={16} />,
-              <AlignRight size={16} />,
-              <AlignStartVertical size={16} />,
-              <AlignCenterHorizontal size={16} />,
-              <AlignEndVertical size={16} />,
-            ].map((icon, i) => (
-              <button
-                key={i}
-                className="h-[36px] flex items-center justify-center rounded-[8px] border border-[#e8eceb] text-[#8e9493] hover:border-[#004643] hover:text-[#004643] transition-colors"
-              >
-                {icon}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Position/Size inputs */}
-        <div className="px-4 py-4 border-b border-[#f0f2f1] flex flex-col gap-3">
-          {[
-            { label: "X", value: "120", label2: "Y", value2: "350" },
-            { label: "W", value: "240", label2: "H", value2: "85" },
-            { label: "°", value: "0", label2: "Z", value2: "0" },
-          ].map((row, i) => (
-            <div key={i} className="grid grid-cols-2 gap-2">
-              {[
-                { l: row.label, v: row.value },
-                { l: row.label2, v: row.value2 },
-              ].map(({ l, v }) => (
-                <div key={l} className="flex items-center gap-2 border border-[#e8eceb] rounded-[8px] h-[34px] px-3">
-                  <span className="text-[12px] text-[#8e9493] font-medium w-4 shrink-0">{l}</span>
-                  <input
-                    defaultValue={v}
-                    className="flex-1 text-[13px] text-[#101212] font-medium bg-transparent focus:outline-none text-right"
-                  />
-                </div>
-              ))}
-            </div>
-          ))}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <div className="w-4 h-4 rounded border border-[#004643] bg-[#004643] flex items-center justify-center shrink-0">
-              <svg viewBox="0 0 10 10" className="w-2.5 h-2.5"><path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
-            </div>
-            <span className="text-[13px] text-[#444]">Constrain proportions</span>
-          </label>
-        </div>
-
-        {/* Layers section */}
-        <div className="px-5 py-4 border-b border-[#f0f2f1] flex flex-col">
-          <h3 className="text-[14px] font-semibold text-[#101212] mb-1">Layers</h3>
-          <p className="text-[12px] text-[#8e9493] mb-5">Manage all elements in your design</p>
-          {/* Empty state */}
-          <div className="flex flex-col items-center justify-center gap-3 py-8">
-            <svg width="52" height="52" viewBox="0 0 40 40" fill="none">
-              <rect x="8" y="16" width="24" height="4" rx="2" fill="#e0e4e3"/>
-              <rect x="8" y="22" width="24" height="4" rx="2" fill="#eaedec"/>
-              <rect x="8" y="10" width="24" height="4" rx="2" fill="#d4d9d8"/>
-            </svg>
-            <p className="text-[13px] font-medium text-[#101212]">No elements yet</p>
-            <p className="text-[12px] text-[#8e9493] text-center">Add items from the left panel</p>
-          </div>
-        </div>
-
-        {/* Layer actions */}
-        <div className="px-5 py-4 border-b border-[#f0f2f1]">
-          <h3 className="text-[14px] font-semibold text-[#101212] mb-3">Layer Actions</h3>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[13px] text-[#444]">
-            {["Bring Forward", "Send Backward", "To Front", "To Back"].map((action) => (
-              <button
-                key={action}
-                className="text-left hover:text-[#004643] transition-colors py-0.5"
-              >
-                {action}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Materials section */}
-        <div className="px-5 py-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-[12px] font-bold text-[#8e9493] tracking-[0.07em] uppercase">Materials</h3>
-            <button className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#f5f7f6] text-[#8e9493] hover:text-[#101212] transition-colors">
-              <Plus size={14} />
+      {/* ══════════════════════════════════════════════════════════════════════
+          RIGHT PANEL: Elements + Edit
+          ══════════════════════════════════════════════════════════════════════ */}
+      <aside
+        className="shrink-0 bg-white flex flex-col overflow-hidden rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06),0_4px_12px_-2px_rgba(0,0,0,0.04)]"
+        style={{ width: 280 }}
+      >
+        {/* ── Top Tabs: Elements | Edit | Grid icon ── */}
+        <div className="flex items-center px-3 pt-3 pb-2 gap-2">
+          <div className="flex bg-[#f5f5f5] rounded-full p-[3px] flex-1">
+            <button
+              onClick={() => setRightTab("elements")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-[5.5px] rounded-full text-[12px] font-medium transition-all ${
+                rightTab === "elements"
+                  ? "bg-white text-[#0a0a0a] shadow-sm"
+                  : "text-[#737373] hover:text-[#0a0a0a]"
+              }`}
+            >
+              <Sofa size={13} />
+              <span>Elements</span>
+            </button>
+            <button
+              onClick={() => setRightTab("edit")}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-[5.5px] rounded-full text-[12px] font-medium transition-all ${
+                rightTab === "edit"
+                  ? "bg-white text-[#0a0a0a] shadow-sm"
+                  : "text-[#737373] hover:text-[#0a0a0a]"
+              }`}
+            >
+              <SlidersHorizontal size={13} />
+              <span>Edit</span>
             </button>
           </div>
-          <div className="flex flex-col gap-3">
-            {[
-              { color: "#d4cfc9", name: "Fabric · Grey Linen", pct: "100%" },
-              { color: "#3d2b1f", name: "Wood · Dark Walnut", pct: "100%" },
-            ].map((mat) => (
-              <div key={mat.name} className="flex items-center gap-3">
-                <div
-                  className="w-5 h-5 rounded-md shrink-0 border border-black/10"
-                  style={{ backgroundColor: mat.color }}
-                />
-                <span className="flex-1 text-[13px] text-[#444] truncate">{mat.name}</span>
-                <span className="text-[12px] text-[#8e9493]">{mat.pct}</span>
-              </div>
-            ))}
-          </div>
+          {/* Grid/layout icon button */}
+          <button className="w-[28px] h-[28px] flex items-center justify-center text-[#a3a3a3] hover:text-[#525252] transition-colors rounded">
+            <LayoutGrid size={14} />
+          </button>
         </div>
+
+        {rightTab === "elements" ? (
+          showLibrary ? (
+            /* ── Furniture Library View ── */
+            <>
+              {/* ── Library Header ── */}
+              <div className="flex items-center justify-between px-3 pt-1 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-[26px] h-[26px] bg-[#eaf8f4] rounded-[8px] flex items-center justify-center text-[#003832]">
+                    <Sofa size={14} />
+                  </div>
+                  <span className="text-[13px] font-semibold text-[#0a0a0a]">Furniture Library</span>
+                </div>
+                <button
+                  onClick={() => setShowLibrary(false)}
+                  className="w-6 h-6 flex items-center justify-center text-[#a3a3a3] hover:text-[#525252] rounded transition-colors"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              {/* ── Search ── */}
+              <div className="px-3 pb-2">
+                <div className="flex items-center gap-2 bg-[#f5f5f5] rounded-[8px] px-3 h-[34px]">
+                  <Search className="w-[13px] h-[13px] text-[#a3a3a3] shrink-0" />
+                  <input
+                    value={librarySearchQuery}
+                    onChange={(e) => setLibrarySearchQuery(e.target.value)}
+                    placeholder="Search elements..."
+                    className="flex-1 bg-transparent text-[12px] text-[#0a0a0a] placeholder:text-[#a3a3a3] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* ── Filter chips ── */}
+              <div className="px-3 pb-2">
+                <div className="flex gap-1.5 overflow-x-auto scrollbar-hide py-0.5">
+                  {["All", "Seating", "Tables", "Storage", "Beds"].map((chip) => (
+                    <button
+                      key={chip}
+                      onClick={() => setActiveFilterChip(chip)}
+                      className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all shrink-0 ${
+                        activeFilterChip === chip
+                          ? "bg-[#003832] text-white"
+                          : "bg-[#f5f5f5] text-[#737373] hover:text-[#0a0a0a]"
+                      }`}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Library List ── */}
+              <div className="flex-1 overflow-y-auto scrollbar-hide px-3 pb-4">
+                {LIBRARY_SECTIONS.map((section) => {
+                  const filteredItems = section.items.filter((item) =>
+                    item.name.toLowerCase().includes(librarySearchQuery.toLowerCase())
+                  );
+                  if (section.items.length > 0 && filteredItems.length === 0) return null;
+                  
+                  return (
+                    <div key={section.name} className="mb-4">
+                      <div className="flex items-center justify-between pt-2 pb-1.5">
+                        <span className="text-[11px] font-bold text-[#a3a3a3] uppercase tracking-[0.05em]">{section.name}</span>
+                        <span className="text-[11px] text-[#a3a3a3]">{section.count}</span>
+                      </div>
+                      
+                      {section.items.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-[10px]">
+                          {filteredItems.map((item, idx) => (
+                            <button
+                              key={idx}
+                              className="flex flex-col text-left bg-white border border-[#e5e5e5] rounded-[14px] overflow-hidden hover:border-[#003832] transition-all group"
+                            >
+                              <div className="w-full aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
+                                <img
+                                  src={item.img}
+                                  alt={item.name}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                              </div>
+                              <div className="p-2 flex flex-col gap-0.5">
+                                <span className="text-[11px] font-bold text-[#171717] truncate leading-tight group-hover:text-[#003832] transition-colors">{item.name}</span>
+                                <span className="text-[10px] text-[#a3a3a3] font-medium leading-none">{item.size}</span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="h-[34px] bg-[#f5f5f5] rounded-[10px] flex items-center justify-center text-[11px] text-[#a3a3a3] border border-dashed border-[#e5e5e5]">
+                          No items loaded
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* ── Search ── */}
+              <div className="px-3 pb-2">
+                <div className="flex items-center gap-2 bg-[#f5f5f5] rounded-[8px] px-3 h-[34px]">
+                  <Search className="w-[13px] h-[13px] text-[#a3a3a3] shrink-0" />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search elements..."
+                    className="flex-1 bg-transparent text-[12px] text-[#0a0a0a] placeholder:text-[#a3a3a3] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* ── Assets / Layers toggle ── */}
+              <div className="px-3 pb-2">
+                <div className="flex bg-[#f5f5f5] rounded-[20px] p-[3px]">
+                  {(["assets", "layers"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveSubTab(tab)}
+                      className={`flex-1 text-[12px] font-medium py-[5px] rounded-[18px] transition-all ${
+                        activeSubTab === tab
+                          ? "bg-white text-[#0a0a0a] shadow-sm"
+                          : "text-[#a3a3a3] hover:text-[#525252]"
+                      }`}
+                    >
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+            {/* ── Category Icon Row ── */}
+            <div className="px-3 pb-2">
+              <div className="flex bg-[#f5f5f5] rounded-full p-[3px]">
+                {[
+                  <LayoutGrid size={14} key="grid" />,
+                  <Layers size={14} key="layers" />,
+                  <Palette size={14} key="palette" />,
+                ].map((icon, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setActiveCategoryIcon(i)}
+                    className={`flex-1 h-[28px] flex items-center justify-center rounded-full transition-all ${
+                      activeCategoryIcon === i
+                        ? "bg-white text-[#0a0a0a] shadow-sm"
+                        : "text-[#737373] hover:text-[#0a0a0a]"
+                    }`}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Furniture Categories + Grid ── */}
+            <div className="flex-1 overflow-y-auto scrollbar-hide px-3">
+              {filteredElements.map((cat) => (
+                <div key={cat.name} className="mb-4">
+                  <p className="text-[12px] font-medium text-[#737373] pt-2 pb-1.5">
+                    {cat.name}
+                  </p>
+                  <div className="grid grid-cols-2 gap-[10px] pb-1">
+                    {cat.items.map((item) => (
+                      <button
+                        key={item.id}
+                        draggable
+                        onClick={() => setShowLibrary(true)}
+                        className="flex flex-col items-center justify-center gap-1.5 p-3.5 bg-white border border-[#e5e5e5] rounded-[12px] hover:border-[#003832] hover:bg-[#f0f7f6] transition-all group"
+                      >
+                        <div className="text-[#525252] group-hover:text-[#003832] transition-colors">
+                          <FurnitureIcon type={item.icon} size={18} />
+                        </div>
+                        <span className="text-[11px] font-medium text-[#171717] group-hover:text-[#003832] text-center leading-tight transition-colors">
+                          {item.name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="h-4" />
+            </div>
+          </>
+          )
+        ) : (
+          /* ── Edit Tab Content ── */
+          <>
+            {/* ── Edit Sub-tab Pill ── */}
+            <div className="px-3 pb-3 pt-1">
+              <div className="flex bg-[#f5f5f5] rounded-full p-[3px]">
+                {[
+                  { id: "settings", icon: <SlidersHorizontal size={14} /> },
+                  { id: "layers", icon: <Layers size={14} /> },
+                  { id: "palette", icon: <Palette size={14} /> },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveEditSubTab(tab.id as any)}
+                    className={`flex-1 h-[28px] flex items-center justify-center rounded-full transition-all ${
+                      activeEditSubTab === tab.id
+                        ? "bg-white text-[#0a0a0a] shadow-sm"
+                        : "text-[#737373] hover:text-[#0a0a0a]"
+                    }`}
+                  >
+                    {tab.icon}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto scrollbar-hide">
+              {activeEditSubTab === "layers" ? (
+                <>
+                  {/* ── Alignment Row ── */}
+                  <div className="flex items-center justify-between px-3 pb-4 pt-1">
+                    {[
+                      {
+                        name: "Align Left",
+                        svg: (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 2v20M8 5h12v4H8V5zm0 8h8v4H8v-4z"/>
+                          </svg>
+                        )
+                      },
+                      {
+                        name: "Align Center",
+                        svg: (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2v20M6 6h12v4H6V6zm2 8h8v4H8v-4z"/>
+                          </svg>
+                        )
+                      },
+                      {
+                        name: "Align Right",
+                        svg: (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M20 2v20M4 5h12v4H4V5zm4 8h8v4H8v-4z"/>
+                          </svg>
+                        )
+                      },
+                      {
+                        name: "Align Top",
+                        svg: (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2 4h20M5 8h4v12H5V8zm8 0h4v8h-4V8z"/>
+                          </svg>
+                        )
+                      },
+                      {
+                        name: "Align Middle",
+                        svg: (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2 12h20M5 6h4v12H5V6zm8 2h4v8h-4V8z"/>
+                          </svg>
+                        )
+                      },
+                      {
+                        name: "Align Bottom",
+                        svg: (
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2 20h20M5 4h4v12H5V4zm8 4h4v8h-4V8z"/>
+                          </svg>
+                        )
+                      },
+                    ].map((btn, idx) => (
+                      <button
+                        key={idx}
+                        title={btn.name}
+                        className="w-[32px] h-[32px] flex items-center justify-center border border-[#e5e5e5] rounded-[8px] bg-white text-[#737373] hover:text-[#0a0a0a] hover:bg-gray-50 transition-all"
+                      >
+                        {btn.svg}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* ── Coordinates Grid ── */}
+                  <div className="grid grid-cols-2 gap-2 px-3 pb-3">
+                    {[
+                      { label: "X", value: 120 },
+                      { label: "Y", value: 350 },
+                      { label: "W", value: 240 },
+                      { label: "H", value: 85 },
+                      { label: "R", value: 0 },
+                      { label: "Z", value: 0 },
+                    ].map((item) => (
+                      <div key={item.label} className="flex items-center bg-[#f5f5f5] rounded-[8px] px-3 h-[34px] gap-2">
+                        <span className="text-[11px] font-medium text-[#a3a3a3] uppercase w-3">{item.label}</span>
+                        <input
+                          type="number"
+                          defaultValue={item.value}
+                          className="w-full bg-transparent text-[12px] text-[#0a0a0a] focus:outline-none font-medium"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ── Constrain proportions ── */}
+                  <div className="flex items-center gap-2 px-3 pb-4">
+                    <input
+                      type="checkbox"
+                      id="constrain"
+                      className="w-3.5 h-3.5 border border-[#d4d4d4] rounded bg-white checked:bg-[#003832]"
+                    />
+                    <label htmlFor="constrain" className="text-[11px] text-[#737373] cursor-pointer">
+                      Constrain proportions
+                    </label>
+                  </div>
+
+                  {/* ── Layers placeholder ── */}
+                  <div className="px-3 border-t border-[#e5e5e5] pt-3 pb-4">
+                    <h3 className="text-[13px] font-semibold text-[#0a0a0a]">Layers</h3>
+                    <p className="text-[11px] text-[#737373] mt-0.5">Manage all elements in your design</p>
+                    
+                    <div className="flex flex-col items-center justify-center py-8 border border-dashed border-[#e5e5e5] rounded-[12px] mt-3 bg-[#fafafa]">
+                      <Layers className="text-[#d4d4d4]" size={28} />
+                      <p className="text-[12px] font-semibold text-[#525252] mt-2">No elements yet</p>
+                      <p className="text-[11px] text-[#a3a3a3] mt-0.5">Add items from the left panel</p>
+                    </div>
+                  </div>
+
+                  {/* ── Layer Actions ── */}
+                  <div className="px-3 border-t border-[#e5e5e5] pt-3 pb-4">
+                    <h3 className="text-[13px] font-semibold text-[#0a0a0a] mb-2.5">Layer Actions</h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      {["Bring Forward", "Send Backward", "To Front", "To Back"].map((action) => (
+                        <button
+                          key={action}
+                          className="h-[32px] border border-[#e5e5e5] rounded-[8px] bg-white text-[11px] font-medium text-[#525252] hover:bg-gray-50 hover:text-[#0a0a0a] transition-all"
+                        >
+                          {action}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ── Materials ── */}
+                  <div className="px-3 border-t border-[#e5e5e5] pt-3 pb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-bold text-[#737373] tracking-[0.05em] uppercase">Materials</span>
+                      <button className="text-[#737373] hover:text-[#0a0a0a]">
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between text-[11px] font-medium py-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-[18px] h-[18px] rounded bg-[#e5e5e5] border border-black/5" />
+                          <span className="text-[#171717]">Fabric - Grey Linen</span>
+                        </div>
+                        <span className="text-[#a3a3a3]">100%</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] font-medium py-1">
+                        <div className="flex items-center gap-2">
+                          <div className="w-[18px] h-[18px] rounded bg-[#3d2f26] border border-black/5" />
+                          <span className="text-[#171717]">Wood - Dark Walnut</span>
+                        </div>
+                        <span className="text-[#a3a3a3]">100%</span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : activeEditSubTab === "palette" ? (
+                <>
+                  {/* ── Materials & Finishes Header ── */}
+                  <div className="px-3 pb-3">
+                    <h3 className="text-[13px] font-semibold text-[#0a0a0a]">Materials & Finishes</h3>
+                    <p className="text-[11px] text-[#737373] mt-0.5">Apply realistic materials to your elements</p>
+                  </div>
+
+                  {/* ── Material Presets ── */}
+                  <div className="px-3 pb-2">
+                    <p className="text-[12px] font-semibold text-[#0a0a0a] mb-2">Material Presets</p>
+                    <div className="flex flex-col gap-2">
+                      {[
+                        { name: "Wood - Oak", color: "#9c7b50" },
+                        { name: "Wood - Walnut", color: "#613d1d" },
+                        { name: "Wood - Mahogany", color: "#4d3227" },
+                        { name: "Metal - Steel", color: "#7f8082" },
+                        { name: "Metal - Black", color: "#2e3033" },
+                        { name: "Fabric - Beige", color: "#ab8265" },
+                        { name: "Fabric - Gray", color: "#a1a1a1" },
+                        { name: "Ceramic - White", color: "#f7f7f7" },
+                        { name: "Glass - Clear", color: "#e8f1f5" },
+                        { name: "Stone - Marble", color: "#ebdcd8" },
+                      ].map((preset, index) => (
+                        <button
+                          key={index}
+                          className="flex items-center justify-between p-2 bg-white border border-[#e5e5e5] rounded-[10px] hover:border-[#003832] transition-all text-left"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className="w-[20px] h-[20px] rounded-[5px] border border-black/5"
+                              style={{ backgroundColor: preset.color }}
+                            />
+                            <span className="text-[11px] font-medium text-[#171717]">{preset.name}</span>
+                          </div>
+                          <ChevronRight size={12} className="text-[#a3a3a3]" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ── Custom Color ── */}
+                  <div className="px-3 pt-3 pb-6 border-t border-[#e5e5e5] mt-3">
+                    <p className="text-[12px] font-semibold text-[#0a0a0a] mb-2">Custom Color</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        "#8a7156", "#5c3d24", "#4e3629", "#2d2d2d",
+                        "#808080", "#a6a6a6", "#ffffff", "#eaeaea",
+                        "#228b22", "#cd7f32", "#ffd700", "#87ceeb",
+                      ].map((color, index) => (
+                        <button
+                          key={index}
+                          className="aspect-square rounded-[8px] border border-black/5 hover:scale-105 transition-transform"
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="px-3 py-6 text-center text-[12px] text-[#a3a3a3]">
+                  Select the settings or layers sub-tab to edit properties.
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </aside>
+      
+      </div> {/* End of main layout container */}
 
       <style>{`
         .scrollbar-hide::-webkit-scrollbar { display: none; }
