@@ -23,7 +23,8 @@ interface Room {
   height: string;
   color: string;
   confidenceColor: string;
-  box?: RoomBox; // position on the floor plan image, as % (top/left/width/height)
+  box?: RoomBox; // current position on the floor plan image, as % (top/left/width/height)
+  originalBox?: RoomBox; // AI's original suggestion, kept so the user can reset after manual edits
 }
 
 interface CreateProjectModalProps {
@@ -40,11 +41,13 @@ type DragMode = 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
 function RoomOverlayBox({
   room,
   isSelected,
+  hasSelection,
   onSelect,
   onChange,
 }: {
   room: Room;
   isSelected: boolean;
+  hasSelection: boolean;
   onSelect: () => void;
   onChange: (box: RoomBox) => void;
 }) {
@@ -127,25 +130,35 @@ function RoomOverlayBox({
 
   const handleStyle = "absolute w-[10px] h-[10px] bg-white border-2 border-[#004643] rounded-full z-30 hover:scale-125 transition-transform";
 
+  // When another room is selected, fade this one to a thin outline so the
+  // selected room's true boundary is easy to see against the real floor plan.
+  const dimmed = hasSelection && !isSelected;
+
   return (
     <div
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       onPointerDown={(e) => isSelected && startDrag('move', e)}
-      className={`absolute flex items-center justify-center rounded-[3px] transition-colors border-2 ${
+      className={`absolute flex items-center justify-center rounded-[3px] transition-all border-2 ${
         isSelected
           ? 'border-[#004643] shadow-md z-20 cursor-move'
-          : 'border-transparent hover:border-[#004643]/50 z-10 cursor-pointer'
+          : dimmed
+            ? 'border-[#8e9493]/40 z-10 cursor-pointer hover:border-[#004643]/60'
+            : 'border-transparent hover:border-[#004643]/50 z-10 cursor-pointer'
       }`}
       style={{
         top:             `${box.top}%`,
         left:            `${box.left}%`,
         width:           `${box.width}%`,
         height:          `${box.height}%`,
-        backgroundColor: room.color + (isSelected ? '80' : '55'),
+        backgroundColor: dimmed ? 'transparent' : room.color + (isSelected ? '80' : '55'),
       }}
       title={room.name}
     >
-      <span className="text-[11px] font-semibold text-[#004643] text-center leading-tight line-clamp-2 bg-white/70 rounded px-1 pointer-events-none">
+      <span
+        className={`text-[11px] font-semibold text-center leading-tight line-clamp-2 rounded px-1 pointer-events-none ${
+          dimmed ? 'text-[#8e9493] bg-transparent' : 'text-[#004643] bg-white/70'
+        }`}
+      >
         {room.name}
       </span>
 
@@ -286,6 +299,12 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     setRooms(rooms.map(room => room.id === id ? { ...room, box } : room));
   };
 
+  const handleResetRoomBox = (id: string) => {
+    setRooms(rooms.map(room =>
+      room.id === id && room.originalBox ? { ...room, box: { ...room.originalBox } } : room
+    ));
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -367,6 +386,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               color:           room.color || "#e5e7eb",
               confidenceColor: room.confidence >= 85 ? "#b3b9b9" : "#9c7b31",
               box:             room.box || undefined,
+              originalBox:     room.box || undefined,
             }))
           );
         } else {
@@ -538,7 +558,10 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               {step === 3 && (
                 <div className="flex gap-[24px] h-full">
                   {/* Real floor plan image with colored room overlays */}
-                  <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden flex items-center justify-center">
+                  <div
+                    onClick={() => setSelectedRoomId(null)}
+                    className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden flex items-center justify-center"
+                  >
                     {floorPlanUrl ? (
                       floorPlanUrl.toLowerCase().endsWith('.pdf') ? (
                         <div className="flex flex-col items-center justify-center gap-3 text-center px-6">
@@ -585,6 +608,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                                   key={room.id}
                                   room={room}
                                   isSelected={selectedRoomId === room.id}
+                                  hasSelection={!!selectedRoomId}
                                   onSelect={() => setSelectedRoomId(room.id)}
                                   onChange={(box) => handleUpdateRoomBox(room.id, box)}
                                 />
@@ -605,9 +629,27 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                           )}
                           {rooms.some(r => r.box) && (
                             <div className="absolute top-2 left-1/2 -translate-x-1/2 text-gray-500 text-[10px] text-center px-2.5 py-1 bg-white/90 rounded-full shadow-sm whitespace-nowrap">
-                              Select a room, then drag to move or use corner handles to resize
+                              {selectedRoomId ? "Drag the box to move, or corner handles to resize" : "Click a room to select and adjust its outline"}
                             </div>
                           )}
+                          {(() => {
+                            const selRoom = rooms.find(r => r.id === selectedRoomId);
+                            const changed = selRoom?.box && selRoom?.originalBox && (
+                              selRoom.box.top !== selRoom.originalBox.top ||
+                              selRoom.box.left !== selRoom.originalBox.left ||
+                              selRoom.box.width !== selRoom.originalBox.width ||
+                              selRoom.box.height !== selRoom.originalBox.height
+                            );
+                            if (!changed) return null;
+                            return (
+                              <button
+                                onClick={() => handleResetRoomBox(selRoom!.id)}
+                                className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[11px] font-medium text-[#004643] bg-white border border-[#c3f4f0] hover:bg-[#eaf8f4] px-3 py-1.5 rounded-full shadow-sm transition-colors z-30"
+                              >
+                                Reset to AI suggestion
+                              </button>
+                            );
+                          })()}
                         </div>
                       )
                     ) : (
