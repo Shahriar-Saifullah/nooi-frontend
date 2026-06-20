@@ -348,7 +348,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               {/* ── Step 3 — Rooms from Gemini ── */}
               {step === 3 && (
                 <div className="flex gap-[24px] h-full">
-                  {/* Floor plan map */}
+                  {/* Floor plan map — responsive auto-grid, scales to any room count */}
                   <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden">
                     <div className="absolute border-[3px] border-[#343837] inset-[20px] pointer-events-none z-10" />
 
@@ -359,64 +359,33 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                         </p>
                       </div>
                     ) : (
-                      <div className="absolute inset-[28px] flex gap-[7px]">
-                        {/* Left column */}
-                        {rooms.length > 0 && (
-                          <div className="flex flex-col gap-[7px] w-[43%]">
-                            {rooms.slice(0, 1).map((room) => (
-                              <div
-                                key={room.id}
-                                onClick={() => setSelectedRoomId(room.id)}
-                                className={`border flex flex-col items-center justify-center relative rounded-[2px] flex-1 hover:opacity-80 transition-all cursor-pointer overflow-hidden ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
-                                style={{ backgroundColor: room.color + 'A6' }}
-                              >
-                                <p className="font-semibold text-[#004643] text-[13px] text-center px-1">{room.name}</p>
-                              </div>
-                            ))}
+                      <div
+                        className="absolute inset-[28px] grid gap-[7px] auto-rows-fr overflow-y-auto custom-scrollbar"
+                        style={{
+                          gridTemplateColumns: `repeat(${
+                            rooms.length <= 2 ? rooms.length
+                            : rooms.length <= 6 ? 3
+                            : rooms.length <= 9 ? 4
+                            : 5
+                          }, minmax(0, 1fr))`,
+                        }}
+                      >
+                        {rooms.map((room) => (
+                          <div
+                            key={room.id}
+                            onClick={() => setSelectedRoomId(room.id)}
+                            className={`border flex flex-col items-center justify-center relative rounded-[4px] hover:opacity-80 transition-all cursor-pointer overflow-hidden min-h-[60px] p-1 ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
+                            style={{ backgroundColor: room.color + 'A6' }}
+                          >
+                            <p className="font-semibold text-[#004643] text-[12px] text-center px-1 leading-tight line-clamp-2">
+                              {room.name}
+                            </p>
                           </div>
-                        )}
-                        {/* Middle column */}
-                        {rooms.length > 1 && (
-                          <div className="flex flex-col gap-[7px] w-[35%]">
-                            {rooms.slice(1, 4).map((room, idx, arr) => (
-                              <div
-                                key={room.id}
-                                onClick={() => setSelectedRoomId(room.id)}
-                                className={`border flex flex-col items-center justify-center relative rounded-[2px] hover:opacity-80 transition-all cursor-pointer overflow-hidden ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
-                                style={{
-                                  height: arr.length === 3 ? (idx === 0 ? '20%' : idx === 1 ? '37%' : 'auto') : 'auto',
-                                  flex: (arr.length < 3 || idx === 2) ? 1 : 'none',
-                                  backgroundColor: room.color + 'A6'
-                                }}
-                              >
-                                <p className="font-semibold text-[#004643] text-[13px] text-center px-1">{room.name}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {/* Right column */}
-                        {rooms.length > 4 && (
-                          <div className="flex flex-col gap-[7px] w-[22%]">
-                            {rooms.slice(4).map((room, idx, arr) => (
-                              <div
-                                key={room.id}
-                                onClick={() => setSelectedRoomId(room.id)}
-                                className={`border flex flex-col items-center justify-center relative rounded-[2px] hover:opacity-80 transition-all cursor-pointer overflow-hidden ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
-                                style={{
-                                  height: arr.length >= 3 ? (idx === 0 ? '43%' : idx === 1 ? '37%' : 'auto') : 'auto',
-                                  flex: (arr.length < 3 || idx >= 2) ? 1 : 'none',
-                                  backgroundColor: room.color + 'A6'
-                                }}
-                              >
-                                <p className="font-semibold text-[#004643] text-[13px] text-center px-1">{room.name}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        ))}
                       </div>
                     )}
 
-                    <p className="absolute text-gray-500 text-[12px] right-[20px] bottom-[2px] font-medium tracking-[0.4px]">
+                    <p className="absolute text-gray-500 text-[12px] right-[20px] bottom-[2px] font-medium tracking-[0.4px] bg-[#f7f8f8]/90 px-1 rounded">
                       Click a room to select
                     </p>
                   </div>
