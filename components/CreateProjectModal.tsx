@@ -3,13 +3,162 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, UploadCloud, AlertCircle, Plus, Trash2, Pencil, Loader2, RefreshCw } from "lucide-react";
+import { X, UploadCloud, AlertCircle, Trash2, Pencil, Loader2, RefreshCw } from "lucide-react";
 import { createProject, uploadFloorPlan } from "@/lib/api/projects";
 import { useProjectStore } from "@/lib/store";
+
+interface RoomBox {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface Room {
+  id: string;
+  name: string;
+  confidence: string;
+  length: string;
+  width: string;
+  height: string;
+  color: string;
+  confidenceColor: string;
+  box?: RoomBox; // position on the floor plan image, as % (top/left/width/height)
+}
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+// ── Draggable / resizable colored room overlay ──
+// Renders a room's bounding box on top of the floor plan image. When selected,
+// the whole box can be dragged to reposition it, and 4 corner handles let the
+// user resize it to better match the real room boundary.
+type DragMode = 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
+
+function RoomOverlayBox({
+  room,
+  isSelected,
+  onSelect,
+  onChange,
+}: {
+  room: Room;
+  isSelected: boolean;
+  onSelect: () => void;
+  onChange: (box: RoomBox) => void;
+}) {
+  const box = room.box!;
+  const dragState = useRef<{
+    mode: DragMode;
+    startX: number;
+    startY: number;
+    startBox: RoomBox;
+    parentW: number;
+    parentH: number;
+  } | null>(null);
+
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+  const handlePointerMove = (e: PointerEvent) => {
+    const state = dragState.current;
+    if (!state) return;
+
+    const dxPct = ((e.clientX - state.startX) / state.parentW) * 100;
+    const dyPct = ((e.clientY - state.startY) / state.parentH) * 100;
+
+    let next: RoomBox = { ...state.startBox };
+
+    if (state.mode === 'move') {
+      next.left = clamp(state.startBox.left + dxPct, 0, 100 - state.startBox.width);
+      next.top  = clamp(state.startBox.top + dyPct, 0, 100 - state.startBox.height);
+    } else {
+      // Resize from whichever corner was grabbed, keeping the opposite corner fixed
+      const minSize = 3; // minimum 3% box size so it never collapses to nothing
+      if (state.mode === 'resize-br') {
+        next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
+        next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
+      } else if (state.mode === 'resize-tr') {
+        next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
+        const newTop = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
+        next.height = state.startBox.height + (state.startBox.top - newTop);
+        next.top    = newTop;
+      } else if (state.mode === 'resize-bl') {
+        const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
+        next.width  = state.startBox.width + (state.startBox.left - newLeft);
+        next.left   = newLeft;
+        next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
+      } else if (state.mode === 'resize-tl') {
+        const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
+        const newTop  = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
+        next.width  = state.startBox.width + (state.startBox.left - newLeft);
+        next.height = state.startBox.height + (state.startBox.top - newTop);
+        next.left   = newLeft;
+        next.top    = newTop;
+      }
+    }
+
+    onChange(next);
+  };
+
+  const handlePointerUp = () => {
+    dragState.current = null;
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('pointerup', handlePointerUp);
+  };
+
+  const startDrag = (mode: DragMode, e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const parent = (e.currentTarget as HTMLElement).closest('[data-overlay-root]') as HTMLElement | null;
+    if (!parent) return;
+    const rect = parent.getBoundingClientRect();
+    dragState.current = {
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startBox: { ...box },
+      parentW: rect.width,
+      parentH: rect.height,
+    };
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
+  const handleStyle = "absolute w-[10px] h-[10px] bg-white border-2 border-[#004643] rounded-full z-30 hover:scale-125 transition-transform";
+
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); onSelect(); }}
+      onPointerDown={(e) => isSelected && startDrag('move', e)}
+      className={`absolute flex items-center justify-center rounded-[3px] transition-colors border-2 ${
+        isSelected
+          ? 'border-[#004643] shadow-md z-20 cursor-move'
+          : 'border-transparent hover:border-[#004643]/50 z-10 cursor-pointer'
+      }`}
+      style={{
+        top:             `${box.top}%`,
+        left:            `${box.left}%`,
+        width:           `${box.width}%`,
+        height:          `${box.height}%`,
+        backgroundColor: room.color + (isSelected ? '80' : '55'),
+      }}
+      title={room.name}
+    >
+      <span className="text-[11px] font-semibold text-[#004643] text-center leading-tight line-clamp-2 bg-white/70 rounded px-1 pointer-events-none">
+        {room.name}
+      </span>
+
+      {isSelected && (
+        <>
+          <div onPointerDown={(e) => startDrag('resize-tl', e)} className={handleStyle} style={{ top: -5, left: -5, cursor: 'nwse-resize' }} />
+          <div onPointerDown={(e) => startDrag('resize-tr', e)} className={handleStyle} style={{ top: -5, right: -5, cursor: 'nesw-resize' }} />
+          <div onPointerDown={(e) => startDrag('resize-bl', e)} className={handleStyle} style={{ bottom: -5, left: -5, cursor: 'nesw-resize' }} />
+          <div onPointerDown={(e) => startDrag('resize-br', e)} className={handleStyle} style={{ bottom: -5, right: -5, cursor: 'nwse-resize' }} />
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function CreateProjectModal({ isOpen, onClose }: CreateProjectModalProps) {
@@ -24,7 +173,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   const [projectId, setProjectId] = useState<string | null>(null);
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
-  const roomIdCounter = useRef(7);
+  const roomIdCounter = useRef(100);
 
   // Step 4 state
   const [ceilingHeight, setCeilingHeight] = useState("2.4");
@@ -36,6 +185,51 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Rooms — empty by default, filled from Gemini API response ──
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [floorPlanUrl, setFloorPlanUrl] = useState<string | null>(null);
+  const floorPlanImgRef = useRef<HTMLImageElement>(null);
+  const [imgRenderBox, setImgRenderBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  // Recalculate the actual rendered image bounds (accounts for object-contain letterboxing)
+  const recalcImgBounds = () => {
+    const img = floorPlanImgRef.current;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    const containerW = img.clientWidth;
+    const containerH = img.clientHeight;
+    const naturalRatio = img.naturalWidth / img.naturalHeight;
+    const containerRatio = containerW / containerH;
+
+    let renderW: number, renderH: number, offsetX: number, offsetY: number;
+    if (naturalRatio > containerRatio) {
+      // image is wider — letterboxed top/bottom
+      renderW = containerW;
+      renderH = containerW / naturalRatio;
+      offsetX = 0;
+      offsetY = (containerH - renderH) / 2;
+    } else {
+      // image is taller — letterboxed left/right
+      renderH = containerH;
+      renderW = containerH * naturalRatio;
+      offsetY = 0;
+      offsetX = (containerW - renderW) / 2;
+    }
+
+    setImgRenderBox({
+      top:    (offsetY / containerH) * 100,
+      left:   (offsetX / containerW) * 100,
+      width:  (renderW / containerW) * 100,
+      height: (renderH / containerH) * 100,
+    });
+  };
+
+  useEffect(() => {
+    if (step !== 3 || !floorPlanUrl) return;
+    recalcImgBounds();
+    window.addEventListener('resize', recalcImgBounds);
+    return () => window.removeEventListener('resize', recalcImgBounds);
+  }, [step, floorPlanUrl]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -51,6 +245,10 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         setProjectId(null);
         setApiError(null);
         setApiLoading(false);
+        setRooms([]);
+        setSelectedRoomId(null);
+        setFloorPlanUrl(null);
+        setImgRenderBox(null);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -58,30 +256,20 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
   const projectTypes = ["Residential", "Commercial", "Hospitality", "Healthcare", "Education", "Industrial"];
 
-  const [rooms, setRooms] = useState([
-    { id: "1", name: "Living room", confidence: "97%", length: "7.0", width: "5.0", height: "2.4", color: "#c3f4f0", confidenceColor: "#b3b9b9" },
-    { id: "2", name: "Kitchen", confidence: "93%", length: "4.0", width: "3.0", height: "2.4", color: "#b9eac5", confidenceColor: "#b3b9b9" },
-    { id: "3", name: "Bedroom 1", confidence: "88%", length: "4.5", width: "3.5", height: "2.4", color: "#87ddd7", confidenceColor: "#b3b9b9" },
-    { id: "4", name: "Bathroom", confidence: "91%", length: "3.0", width: "2.0", height: "2.4", color: "#f7dfad", confidenceColor: "#b3b9b9" },
-    { id: "5", name: "Hallway", confidence: "79%", length: "5.0", width: "1.5", height: "2.4", color: "#d5dbda", confidenceColor: "#9c7b31" },
-    { id: "6", name: "Storage", confidence: "72%", length: "2.0", width: "1.5", height: "2.4", color: "#ffc9c0", confidenceColor: "#9c7b31" },
-  ]);
-
   const handleAddRoom = () => {
-    const newId = roomIdCounter.current.toString();
+    const newId = `manual-${roomIdCounter.current}`;
     roomIdCounter.current += 1;
     const colors = ["#e5e7eb", "#fde68a", "#bae6fd", "#fed7aa", "#c7d2fe", "#fbcfe8", "#a7f3d0"];
     const randomColor = colors[rooms.length % colors.length];
-    const newRoomNumber = rooms.length + 1;
     setRooms([...rooms, {
-      id: newId,
-      name: `New Room ${newRoomNumber}`,
-      confidence: "100%",
-      length: "3.0",
-      width: "3.0",
-      height: "2.4",
-      color: randomColor,
-      confidenceColor: "#b3b9b9"
+      id:              newId,
+      name:            `New Room ${rooms.length + 1}`,
+      confidence:      "100%",
+      length:          "3.0",
+      width:           "3.0",
+      height:          "2.4",
+      color:           randomColor,
+      confidenceColor: "#b3b9b9",
     }]);
   };
 
@@ -91,6 +279,11 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
   const handleDeleteRoom = (id: string) => {
     setRooms(rooms.filter(room => room.id !== id));
+    if (selectedRoomId === id) setSelectedRoomId(null);
+  };
+
+  const handleUpdateRoomBox = (id: string, box: RoomBox) => {
+    setRooms(rooms.map(room => room.id === id ? { ...room, box } : room));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -98,28 +291,32 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
+  const handleDragLeave = () => setIsDragging(false);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    if (e.dataTransfer.files?.[0]) {
       setFile(e.dataTransfer.files[0]);
+      setApiError(null);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
+    if (e.target.files?.[0]) {
       setFile(e.target.files[0]);
-      setApiError(null); // clear error when file is selected
+      setApiError(null);
     }
+  };
+
+  const applyCeilingHeight = () => {
+    setRooms(rooms.map(room => ({ ...room, height: ceilingHeight })));
   };
 
   const handleContinue = async () => {
     setApiError(null);
 
+    // Step 1 — Create project
     if (step === 1) {
       if (!projectName.trim()) {
         setHasError(true);
@@ -139,6 +336,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
       return;
     }
 
+    // Step 2 — Upload floor plan + Gemini detection
     if (step === 2) {
       if (!file) {
         setApiError("Please upload a floor plan to continue");
@@ -147,11 +345,35 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
       try {
         setApiLoading(true);
         const result = await uploadFloorPlan(projectId!, file);
+
         setProject({
-          id: projectId!,
-          name: projectName,
-          floorPlanUrl: result.floor_plan_url
+          id:           projectId!,
+          name:         projectName,
+          floorPlanUrl: result.floor_plan_url,
         });
+        setFloorPlanUrl(result.floor_plan_url);
+
+        // ── Use Gemini-detected rooms ──
+        if (result.detected_rooms && result.detected_rooms.length > 0) {
+          setRooms(
+            result.detected_rooms.map((room: any) => ({
+              id:              room.id,
+              name:            room.name,
+              confidence:      `${room.confidence}%`,
+              // Use dimensions extracted from the floor plan text if available, else blank for manual entry
+              length:          room.length ? String(room.length) : "",
+              width:           room.width ? String(room.width) : "",
+              height:          "2.4",
+              color:           room.color || "#e5e7eb",
+              confidenceColor: room.confidence >= 85 ? "#b3b9b9" : "#9c7b31",
+              box:             room.box || undefined,
+            }))
+          );
+        } else {
+          // AI detection returned nothing — give user a blank slate to add manually
+          setRooms([]);
+        }
+
         setStep(3);
       } catch (err: any) {
         setApiError(err.message || "Failed to upload floor plan");
@@ -161,9 +383,11 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
       return;
     }
 
+    // Step 3 → 4 → 5
     if (step < 5) {
       setStep(step + 1);
     } else {
+      // Step 5 — Create project → loader → navigate
       setIsCreating(true);
       setTimeout(() => {
         router.push("/canvas");
@@ -190,7 +414,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="bg-white rounded-[24px] w-full shadow-2xl flex flex-col overflow-hidden max-h-[90vh] transition-all duration-300 max-w-[860px]"
+            className="bg-white rounded-[24px] w-full shadow-2xl flex flex-col overflow-hidden max-h-[90vh] max-w-[860px]"
           >
             {/* Header */}
             <div className="flex justify-between items-start px-8 pt-8 pb-4">
@@ -205,7 +429,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                 <p className="text-[14px] text-[#525252] mt-1">
                   {step === 1 && "Name your project and tell us what kind of space it is."}
                   {step === 2 && "Our AI will detect rooms automatically. You can review and rename them next."}
-                  {step === 3 && "6 rooms found. Click a room to rename or remove it."}
+                  {step === 3 && `${rooms.length} room${rooms.length !== 1 ? "s" : ""} found. Click a room to rename or remove it.`}
                   {step === 4 && "Enter measurements in metres."}
                   {step === 5 && "Review everything before we save your project."}
                 </p>
@@ -215,17 +439,17 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               </button>
             </div>
 
-
-
-            {/* Body Content */}
+            {/* Body */}
             <div
               style={{
                 height: step === 5 ? 'auto' : '60vh',
                 minHeight: step === 5 ? 'auto' : '500px',
-                transition: 'height 0.4s cubic-bezier(0.4,0,0.2,1), min-height 0.4s cubic-bezier(0.4,0,0.2,1)',
+                transition: 'height 0.4s cubic-bezier(0.4,0,0.2,1)',
               }}
               className="px-8 py-4 overflow-y-auto custom-scrollbar"
             >
+
+              {/* ── Step 1 ── */}
               {step === 1 && (
                 <div className="flex flex-col gap-6">
                   <div>
@@ -235,12 +459,9 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                     <input
                       type="text"
                       value={projectName}
-                      onChange={(e) => {
-                        setProjectName(e.target.value);
-                        if (e.target.value) setHasError(false);
-                      }}
+                      onChange={(e) => { setProjectName(e.target.value); if (e.target.value) setHasError(false); }}
                       placeholder="e.g. Riverside Apartment 4B"
-                      className={`w-full h-[44px] px-4 rounded-xl border ${hasError ? 'border-red-500 bg-red-50' : 'border-gray-200'} focus:outline-none focus:ring-2 focus:ring-[#004643]/20 transition-all text-[14px] placeholder:text-gray-400`}
+                      className={`w-full h-[44px] px-4 rounded-xl border ${hasError ? 'border-red-500 bg-red-50' : 'border-gray-200'} focus:outline-none focus:ring-2 focus:ring-[#004643]/20 text-[14px] placeholder:text-gray-400`}
                     />
                     {hasError && <p className="text-red-500 text-[12px] mt-1">Project name is required</p>}
                   </div>
@@ -271,12 +492,13 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
                       placeholder="Street, city, postcode"
-                      className="w-full h-[44px] px-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#004643]/20 transition-all text-[14px] placeholder:text-gray-400"
+                      className="w-full h-[44px] px-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-[#004643]/20 text-[14px] placeholder:text-gray-400"
                     />
                   </div>
                 </div>
               )}
 
+              {/* ── Step 2 ── */}
               {step === 2 && (
                 <div className="flex flex-col gap-4 h-full">
                   <input
@@ -312,92 +534,118 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                 </div>
               )}
 
+              {/* ── Step 3 — Rooms from Gemini ── */}
               {step === 3 && (
                 <div className="flex gap-[24px] h-full">
-                  {/* Left side: Interactive map mock */}
-                  <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden group">
-                    <div className="absolute border-[3px] border-[#343837] inset-[20px] pointer-events-none z-10" />
-                    <div className="absolute inset-[28px] flex gap-[7px]">
-                      {rooms.length > 0 && (
-                        <div className="flex flex-col gap-[7px] w-[43%]">
-                          {rooms.slice(0, 1).map((room) => (
-                            <div
-                              key={room.id}
-                              onClick={() => setSelectedRoomId(room.id)}
-                              className={`border flex flex-col items-center justify-center relative rounded-[2px] flex-1 hover:opacity-80 transition-all cursor-pointer group/room overflow-hidden ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
-                              style={{ backgroundColor: room.color + 'A6' }}
-                            >
-                              <p className="font-semibold text-[#004643] text-[13px] text-center px-1">{room.name}</p>
-                            </div>
-                          ))}
+                  {/* Real floor plan image with colored room overlays */}
+                  <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden flex items-center justify-center">
+                    {floorPlanUrl ? (
+                      floorPlanUrl.toLowerCase().endsWith('.pdf') ? (
+                        <div className="flex flex-col items-center justify-center gap-3 text-center px-6">
+                          <div className="w-12 h-12 bg-white shadow-sm border border-gray-100 rounded-full flex items-center justify-center">
+                            <UploadCloud className="w-5 h-5 text-[#004643]" />
+                          </div>
+                          <p className="text-[13px] text-gray-500">
+                            PDF floor plan uploaded. Preview isn't shown here, but rooms were detected from it below.
+                          </p>
+                          <a
+                            href={floorPlanUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[13px] font-medium text-[#004643] hover:underline"
+                          >
+                            View original PDF
+                          </a>
                         </div>
-                      )}
-                      {rooms.length > 1 && (
-                        <div className="flex flex-col gap-[7px] w-[35%]">
-                          {rooms.slice(1, 4).map((room, idx, arr) => (
+                      ) : (
+                        <div className="relative w-full h-full">
+                          <img
+                            ref={floorPlanImgRef}
+                            src={floorPlanUrl}
+                            alt="Uploaded floor plan"
+                            className="w-full h-full object-contain p-3"
+                            onLoad={recalcImgBounds}
+                          />
+                          {/* Colored room overlays — positioned using Gemini bounding boxes,
+                              aligned to the actual rendered image bounds (accounts for object-contain letterboxing).
+                              Selected room can be dragged to move and resized via corner handles. */}
+                          {imgRenderBox && (
                             <div
-                              key={room.id}
-                              onClick={() => setSelectedRoomId(room.id)}
-                              className={`border flex flex-col items-center justify-center relative rounded-[2px] hover:opacity-80 transition-all cursor-pointer group/room overflow-hidden ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
+                              data-overlay-root
+                              className="absolute"
                               style={{
-                                height: arr.length === 3 ? (idx === 0 ? '20%' : idx === 1 ? '37%' : 'auto') : 'auto',
-                                flex: (arr.length < 3 || idx === 2) ? 1 : 'none',
-                                backgroundColor: room.color + 'A6'
+                                top:    `calc(${imgRenderBox.top}% + 12px)`,
+                                left:   `calc(${imgRenderBox.left}% + 12px)`,
+                                width:  `calc(${imgRenderBox.width}% - 24px)`,
+                                height: `calc(${imgRenderBox.height}% - 24px)`,
                               }}
                             >
-                              <p className="font-semibold text-[#004643] text-[13px] text-center px-1">{room.name}</p>
+                              {rooms.filter(r => r.box).map((room) => (
+                                <RoomOverlayBox
+                                  key={room.id}
+                                  room={room}
+                                  isSelected={selectedRoomId === room.id}
+                                  onSelect={() => setSelectedRoomId(room.id)}
+                                  onChange={(box) => handleUpdateRoomBox(room.id, box)}
+                                />
+                              ))}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                      {rooms.length > 4 && (
-                        <div className="flex flex-col gap-[7px] w-[22%]">
-                          {rooms.slice(4).map((room, idx, arr) => (
-                            <div
-                              key={room.id}
-                              onClick={() => setSelectedRoomId(room.id)}
-                              className={`border flex flex-col items-center justify-center relative rounded-[2px] hover:opacity-80 transition-all cursor-pointer group/room overflow-hidden ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
-                              style={{
-                                height: arr.length >= 3 ? (idx === 0 ? '43%' : idx === 1 ? '37%' : 'auto') : 'auto',
-                                flex: (arr.length < 3 || idx >= 2) ? 1 : 'none',
-                                backgroundColor: room.color + 'A6'
-                              }}
-                            >
-                              <p className="font-semibold text-[#004643] text-[13px] text-center px-1">{room.name}</p>
+                          )}
+                          {rooms.length === 0 && (
+                            <div className="absolute inset-0 flex items-end justify-center pb-6 bg-gradient-to-t from-white/90 via-white/10 to-transparent">
+                              <p className="text-gray-500 text-[13px] text-center px-4 bg-white/90 rounded-lg py-2 shadow-sm">
+                                No rooms detected. Add rooms manually using + Add.
+                              </p>
                             </div>
-                          ))}
+                          )}
+                          {rooms.length > 0 && rooms.every(r => !r.box) && (
+                            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-gray-500 text-[11px] text-center px-3 py-1 bg-white/90 rounded-full shadow-sm">
+                              Room positions unavailable — see list to the right
+                            </div>
+                          )}
+                          {rooms.some(r => r.box) && (
+                            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-gray-500 text-[10px] text-center px-2.5 py-1 bg-white/90 rounded-full shadow-sm whitespace-nowrap">
+                              Select a room, then drag to move or use corner handles to resize
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    <p className="absolute text-gray-500 text-[12px] right-[20px] bottom-[2px] font-medium tracking-[0.4px]">
-                      Click a room to select
-                    </p>
+                      )
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 text-center px-6">
+                        <p className="text-gray-400 text-[13px]">Floor plan preview unavailable.</p>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Right side: Room list */}
-                  <div className="bg-white border border-[#f1f4f4] h-full min-h-[350px] overflow-hidden relative rounded-[12px] w-[240px] shrink-0 flex flex-col">
+                  {/* Room list — primary review/edit interaction */}
+                  <div className="bg-white border border-[#f1f4f4] h-full min-h-[350px] overflow-hidden relative rounded-[12px] w-[280px] shrink-0 flex flex-col">
                     <div className="bg-white border-b border-[#f1f4f4] flex items-center justify-between h-[44px] shrink-0 px-[16px]">
-                      <p className="font-semibold text-[#101212] text-[13px]">{rooms.length} rooms</p>
+                      <p className="font-semibold text-[#101212] text-[13px]">{rooms.length} room{rooms.length !== 1 ? 's' : ''} detected</p>
                       <button onClick={handleAddRoom} className="font-semibold text-[#004643] text-[13px] hover:underline">+ Add</button>
                     </div>
                     <div className="overflow-y-auto flex-1 hide-scrollbar">
+                      {rooms.length === 0 && (
+                        <div className="flex items-center justify-center h-full">
+                          <p className="text-gray-400 text-[12px] text-center px-4">No rooms yet. Click + Add to add rooms manually.</p>
+                        </div>
+                      )}
                       {rooms.map((room, index) => (
                         <div
                           key={room.id}
                           onClick={() => setSelectedRoomId(room.id)}
-                          className={`h-[50px] relative flex items-center px-[16px] transition-colors cursor-pointer group/item ${index !== 0 ? 'border-t border-[#f1f4f4]' : ''} ${selectedRoomId === room.id ? 'bg-[#f4f7eb]' : 'bg-white hover:bg-gray-50'}`}
+                          className={`min-h-[50px] relative flex items-center px-[16px] py-2 transition-colors cursor-pointer group/item ${index !== 0 ? 'border-t border-[#f1f4f4]' : ''} ${selectedRoomId === room.id ? 'bg-[#f4f7eb]' : 'bg-white hover:bg-gray-50'}`}
                         >
-                          <div className="border border-[rgba(0,0,0,0.08)] rounded-[3px] w-[12px] h-[12px] shrink-0" style={{ backgroundColor: room.color }} />
-                          <div className="ml-[12px] flex flex-col justify-center flex-1 pr-2">
+                          <div className="border border-[rgba(0,0,0,0.08)] rounded-[4px] w-[14px] h-[14px] shrink-0" style={{ backgroundColor: room.color }} />
+                          <div className="ml-[12px] flex flex-col justify-center flex-1 pr-2 min-w-0">
                             <input
                               value={room.name}
                               onChange={(e) => handleRenameRoom(room.id, e.target.value)}
                               onClick={(e) => e.stopPropagation()}
-                              className="font-medium text-[#101212] text-[13px] leading-tight bg-transparent border-none outline-none focus:ring-1 focus:ring-[#004643] rounded px-1 -ml-1 w-full"
+                              className="font-medium text-[#101212] text-[13px] leading-tight bg-transparent border-none outline-none focus:ring-1 focus:ring-[#004643] rounded px-1 -ml-1 w-full truncate"
                             />
                           </div>
-                          <div className="flex items-center gap-1">
-                            <p className={`font-medium text-[12px] leading-tight ${selectedRoomId === room.id ? 'hidden' : 'group-hover/item:hidden'}`} style={{ color: room.confidenceColor }}>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <p className={`font-medium text-[11px] leading-tight ${selectedRoomId === room.id ? 'hidden' : 'group-hover/item:hidden'}`} style={{ color: room.confidenceColor }}>
                               {room.confidence}
                             </p>
                             <div className={`items-center gap-1 ${selectedRoomId === room.id ? 'flex' : 'hidden group-hover/item:flex'}`}>
@@ -424,6 +672,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                 </div>
               )}
 
+              {/* ── Step 4 — Dimensions ── */}
               {step === 4 && (
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center justify-between bg-[#fafafa] px-4 py-2 rounded-xl border border-gray-200">
@@ -441,7 +690,12 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                         />
                         <span className="text-[13px] text-gray-500 ml-1">m</span>
                       </div>
-                      <button className="bg-gray-100 hover:bg-gray-200 text-[#0a0a0a] text-[13px] font-medium px-4 h-8 rounded-[8px] transition-colors">Apply</button>
+                      <button
+                        onClick={applyCeilingHeight}
+                        className="bg-gray-100 hover:bg-gray-200 text-[#0a0a0a] text-[13px] font-medium px-4 h-8 rounded-[8px] transition-colors"
+                      >
+                        Apply
+                      </button>
                     </div>
                   </div>
 
@@ -453,25 +707,53 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                       <div className="text-[11px] font-bold text-gray-500 tracking-[0.05em] text-center uppercase">Height (m)</div>
                     </div>
                     <div className="overflow-y-auto divide-y divide-gray-100 custom-scrollbar">
-                      {rooms.map(room => (
+                      {rooms.map(room => {
+                        const autoFilled = room.length !== "" && room.width !== "";
+                        return (
                         <div key={room.id} className="grid grid-cols-4 gap-4 px-5 py-2.5 items-center hover:bg-gray-50 transition-colors">
-                          <div className="text-[13px] font-medium text-[#0a0a0a] truncate pr-2">{room.name}</div>
-                          <div className="flex justify-center">
-                            <input type="text" defaultValue={room.length} className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors" />
+                          <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                            <div className="text-[13px] font-medium text-[#0a0a0a] truncate">{room.name}</div>
+                            {autoFilled && (
+                              <span className="text-[9px] font-semibold text-[#004643] bg-[#eaf8f4] border border-[#c3f4f0] rounded-full px-1.5 py-0.5 shrink-0" title="Extracted from floor plan">
+                                AI
+                              </span>
+                            )}
                           </div>
                           <div className="flex justify-center">
-                            <input type="text" defaultValue={room.width} className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors" />
+                            <input
+                              type="text"
+                              value={room.length}
+                              placeholder="—"
+                              onChange={(e) => setRooms(rooms.map(r => r.id === room.id ? { ...r, length: e.target.value } : r))}
+                              className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors"
+                            />
                           </div>
                           <div className="flex justify-center">
-                            <input type="text" defaultValue={room.height} className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors" />
+                            <input
+                              type="text"
+                              value={room.width}
+                              placeholder="—"
+                              onChange={(e) => setRooms(rooms.map(r => r.id === room.id ? { ...r, width: e.target.value } : r))}
+                              className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors"
+                            />
+                          </div>
+                          <div className="flex justify-center">
+                            <input
+                              type="text"
+                              value={room.height}
+                              onChange={(e) => setRooms(rooms.map(r => r.id === room.id ? { ...r, height: e.target.value } : r))}
+                              className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors"
+                            />
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
               )}
 
+              {/* ── Step 5 — Confirm ── */}
               {step === 5 && (
                 <div className="flex flex-col gap-[24px] pb-4">
                   <div className="bg-white border border-[#f1f4f4] rounded-[8px] overflow-hidden shadow-[0px_2px_4px_rgba(0,0,0,0.02)]">
@@ -520,7 +802,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               )}
             </div>
 
-            {/* ── Error Toast — just above the footer ── */}
+            {/* Error toast — above footer */}
             <AnimatePresence>
               {apiError && (
                 <motion.div
@@ -567,14 +849,14 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                 }`}
               >
                 {apiLoading && <RefreshCw size={16} className="animate-spin" />}
-                {step === 5 ? "Create Project" : "Continue"}
+                {apiLoading && step === 2 ? "Analyzing floor plan..." : step === 5 ? "Create Project" : "Continue"}
               </button>
             </div>
           </motion.div>
         </div>
       </AnimatePresence>
 
-      {/* Full-screen creating overlay */}
+      {/* Creating overlay */}
       <AnimatePresence>
         {isCreating && (
           <motion.div
