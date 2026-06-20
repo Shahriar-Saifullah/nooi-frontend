@@ -50,6 +50,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
   // ── Rooms — empty by default, filled from Gemini API response ──
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [floorPlanUrl, setFloorPlanUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -67,6 +68,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         setApiLoading(false);
         setRooms([]);
         setSelectedRoomId(null);
+        setFloorPlanUrl(null);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -165,6 +167,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
           name:         projectName,
           floorPlanUrl: result.floor_plan_url,
         });
+        setFloorPlanUrl(result.floor_plan_url);
 
         // ── Use Gemini-detected rooms ──
         if (result.detected_rooms && result.detected_rooms.length > 0) {
@@ -348,52 +351,53 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               {/* ── Step 3 — Rooms from Gemini ── */}
               {step === 3 && (
                 <div className="flex gap-[24px] h-full">
-                  {/* Floor plan map — responsive auto-grid, scales to any room count */}
-                  <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden">
-                    <div className="absolute border-[3px] border-[#343837] inset-[20px] pointer-events-none z-10" />
-
-                    {rooms.length === 0 ? (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                        <p className="text-gray-400 text-[13px] text-center px-4">
-                          No rooms detected. Add rooms manually using the + Add button.
-                        </p>
-                      </div>
-                    ) : (
-                      <div
-                        className="absolute inset-[28px] grid gap-[7px] auto-rows-[minmax(70px,1fr)] content-start overflow-y-auto custom-scrollbar"
-                        style={{
-                          gridTemplateColumns: `repeat(${
-                            rooms.length <= 2 ? rooms.length
-                            : rooms.length <= 6 ? 3
-                            : rooms.length <= 9 ? 4
-                            : 5
-                          }, minmax(0, 1fr))`,
-                        }}
-                      >
-                        {rooms.map((room) => (
-                          <div
-                            key={room.id}
-                            onClick={() => setSelectedRoomId(room.id)}
-                            className={`border flex flex-col items-center justify-center relative rounded-[4px] hover:opacity-80 transition-all cursor-pointer overflow-hidden min-h-[60px] p-1 ${selectedRoomId === room.id ? 'border-[#004643] border-[2px] z-20 shadow-md scale-[1.02]' : 'border-[#8e9493]'}`}
-                            style={{ backgroundColor: room.color + 'A6' }}
-                          >
-                            <p className="font-semibold text-[#004643] text-[12px] text-center px-1 leading-tight line-clamp-2">
-                              {room.name}
-                            </p>
+                  {/* Real floor plan image preview */}
+                  <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden flex items-center justify-center">
+                    {floorPlanUrl ? (
+                      floorPlanUrl.toLowerCase().endsWith('.pdf') ? (
+                        <div className="flex flex-col items-center justify-center gap-3 text-center px-6">
+                          <div className="w-12 h-12 bg-white shadow-sm border border-gray-100 rounded-full flex items-center justify-center">
+                            <UploadCloud className="w-5 h-5 text-[#004643]" />
                           </div>
-                        ))}
+                          <p className="text-[13px] text-gray-500">
+                            PDF floor plan uploaded. Preview isn't shown here, but rooms were detected from it below.
+                          </p>
+                          <a
+                            href={floorPlanUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[13px] font-medium text-[#004643] hover:underline"
+                          >
+                            View original PDF
+                          </a>
+                        </div>
+                      ) : (
+                        <>
+                          <img
+                            src={floorPlanUrl}
+                            alt="Uploaded floor plan"
+                            className="w-full h-full object-contain p-3"
+                          />
+                          {rooms.length === 0 && (
+                            <div className="absolute inset-0 flex items-end justify-center pb-6 bg-gradient-to-t from-white/90 via-white/10 to-transparent">
+                              <p className="text-gray-500 text-[13px] text-center px-4 bg-white/90 rounded-lg py-2 shadow-sm">
+                                No rooms detected. Add rooms manually using + Add.
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      )
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 text-center px-6">
+                        <p className="text-gray-400 text-[13px]">Floor plan preview unavailable.</p>
                       </div>
                     )}
-
-                    <p className="absolute text-gray-500 text-[12px] right-[20px] bottom-[2px] font-medium tracking-[0.4px] bg-[#f7f8f8]/90 px-1 rounded">
-                      Click a room to select
-                    </p>
                   </div>
 
-                  {/* Room list */}
-                  <div className="bg-white border border-[#f1f4f4] h-full min-h-[350px] overflow-hidden relative rounded-[12px] w-[240px] shrink-0 flex flex-col">
+                  {/* Room list — primary review/edit interaction */}
+                  <div className="bg-white border border-[#f1f4f4] h-full min-h-[350px] overflow-hidden relative rounded-[12px] w-[280px] shrink-0 flex flex-col">
                     <div className="bg-white border-b border-[#f1f4f4] flex items-center justify-between h-[44px] shrink-0 px-[16px]">
-                      <p className="font-semibold text-[#101212] text-[13px]">{rooms.length} rooms</p>
+                      <p className="font-semibold text-[#101212] text-[13px]">{rooms.length} room{rooms.length !== 1 ? 's' : ''} detected</p>
                       <button onClick={handleAddRoom} className="font-semibold text-[#004643] text-[13px] hover:underline">+ Add</button>
                     </div>
                     <div className="overflow-y-auto flex-1 hide-scrollbar">
@@ -406,19 +410,19 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                         <div
                           key={room.id}
                           onClick={() => setSelectedRoomId(room.id)}
-                          className={`h-[50px] relative flex items-center px-[16px] transition-colors cursor-pointer group/item ${index !== 0 ? 'border-t border-[#f1f4f4]' : ''} ${selectedRoomId === room.id ? 'bg-[#f4f7eb]' : 'bg-white hover:bg-gray-50'}`}
+                          className={`min-h-[50px] relative flex items-center px-[16px] py-2 transition-colors cursor-pointer group/item ${index !== 0 ? 'border-t border-[#f1f4f4]' : ''} ${selectedRoomId === room.id ? 'bg-[#f4f7eb]' : 'bg-white hover:bg-gray-50'}`}
                         >
-                          <div className="border border-[rgba(0,0,0,0.08)] rounded-[3px] w-[12px] h-[12px] shrink-0" style={{ backgroundColor: room.color }} />
-                          <div className="ml-[12px] flex flex-col justify-center flex-1 pr-2">
+                          <div className="border border-[rgba(0,0,0,0.08)] rounded-[4px] w-[14px] h-[14px] shrink-0" style={{ backgroundColor: room.color }} />
+                          <div className="ml-[12px] flex flex-col justify-center flex-1 pr-2 min-w-0">
                             <input
                               value={room.name}
                               onChange={(e) => handleRenameRoom(room.id, e.target.value)}
                               onClick={(e) => e.stopPropagation()}
-                              className="font-medium text-[#101212] text-[13px] leading-tight bg-transparent border-none outline-none focus:ring-1 focus:ring-[#004643] rounded px-1 -ml-1 w-full"
+                              className="font-medium text-[#101212] text-[13px] leading-tight bg-transparent border-none outline-none focus:ring-1 focus:ring-[#004643] rounded px-1 -ml-1 w-full truncate"
                             />
                           </div>
-                          <div className="flex items-center gap-1">
-                            <p className={`font-medium text-[12px] leading-tight ${selectedRoomId === room.id ? 'hidden' : 'group-hover/item:hidden'}`} style={{ color: room.confidenceColor }}>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <p className={`font-medium text-[11px] leading-tight ${selectedRoomId === room.id ? 'hidden' : 'group-hover/item:hidden'}`} style={{ color: room.confidenceColor }}>
                               {room.confidence}
                             </p>
                             <div className={`items-center gap-1 ${selectedRoomId === room.id ? 'flex' : 'hidden group-hover/item:flex'}`}>
