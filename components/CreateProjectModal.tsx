@@ -7,6 +7,13 @@ import { X, UploadCloud, AlertCircle, Trash2, Pencil, Loader2, RefreshCw } from 
 import { createProject, uploadFloorPlan } from "@/lib/api/projects";
 import { useProjectStore } from "@/lib/store";
 
+interface RoomBox {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
 interface Room {
   id: string;
   name: string;
@@ -16,6 +23,7 @@ interface Room {
   height: string;
   color: string;
   confidenceColor: string;
+  box?: RoomBox; // position on the floor plan image, as % (top/left/width/height)
 }
 
 interface CreateProjectModalProps {
@@ -51,6 +59,47 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   // ── Rooms — empty by default, filled from Gemini API response ──
   const [rooms, setRooms] = useState<Room[]>([]);
   const [floorPlanUrl, setFloorPlanUrl] = useState<string | null>(null);
+  const floorPlanImgRef = useRef<HTMLImageElement>(null);
+  const [imgRenderBox, setImgRenderBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  // Recalculate the actual rendered image bounds (accounts for object-contain letterboxing)
+  const recalcImgBounds = () => {
+    const img = floorPlanImgRef.current;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    const containerW = img.clientWidth;
+    const containerH = img.clientHeight;
+    const naturalRatio = img.naturalWidth / img.naturalHeight;
+    const containerRatio = containerW / containerH;
+
+    let renderW: number, renderH: number, offsetX: number, offsetY: number;
+    if (naturalRatio > containerRatio) {
+      // image is wider — letterboxed top/bottom
+      renderW = containerW;
+      renderH = containerW / naturalRatio;
+      offsetX = 0;
+      offsetY = (containerH - renderH) / 2;
+    } else {
+      // image is taller — letterboxed left/right
+      renderH = containerH;
+      renderW = containerH * naturalRatio;
+      offsetY = 0;
+      offsetX = (containerW - renderW) / 2;
+    }
+
+    setImgRenderBox({
+      top:    (offsetY / containerH) * 100,
+      left:   (offsetX / containerW) * 100,
+      width:  (renderW / containerW) * 100,
+      height: (renderH / containerH) * 100,
+    });
+  };
+
+  useEffect(() => {
+    if (step !== 3 || !floorPlanUrl) return;
+    recalcImgBounds();
+    window.addEventListener('resize', recalcImgBounds);
+    return () => window.removeEventListener('resize', recalcImgBounds);
+  }, [step, floorPlanUrl]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -69,6 +118,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         setRooms([]);
         setSelectedRoomId(null);
         setFloorPlanUrl(null);
+        setImgRenderBox(null);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -181,6 +231,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               height:          "2.4",
               color:           room.color || "#e5e7eb",
               confidenceColor: room.confidence >= 85 ? "#b3b9b9" : "#9c7b31",
+              box:             room.box || undefined,
             }))
           );
         } else {
@@ -351,7 +402,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               {/* ── Step 3 — Rooms from Gemini ── */}
               {step === 3 && (
                 <div className="flex gap-[24px] h-full">
-                  {/* Real floor plan image preview */}
+                  {/* Real floor plan image with colored room overlays */}
                   <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden flex items-center justify-center">
                     {floorPlanUrl ? (
                       floorPlanUrl.toLowerCase().endsWith('.pdf') ? (
@@ -372,12 +423,51 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                           </a>
                         </div>
                       ) : (
-                        <>
+                        <div className="relative w-full h-full">
                           <img
+                            ref={floorPlanImgRef}
                             src={floorPlanUrl}
                             alt="Uploaded floor plan"
                             className="w-full h-full object-contain p-3"
+                            onLoad={recalcImgBounds}
                           />
+                          {/* Colored room overlays — positioned using Gemini bounding boxes,
+                              aligned to the actual rendered image bounds (accounts for object-contain letterboxing) */}
+                          {imgRenderBox && (
+                            <div
+                              className="absolute pointer-events-none"
+                              style={{
+                                top:    `calc(${imgRenderBox.top}% + 12px)`,
+                                left:   `calc(${imgRenderBox.left}% + 12px)`,
+                                width:  `calc(${imgRenderBox.width}% - 24px)`,
+                                height: `calc(${imgRenderBox.height}% - 24px)`,
+                              }}
+                            >
+                              {rooms.filter(r => r.box).map((room) => (
+                                <div
+                                  key={room.id}
+                                  onClick={() => setSelectedRoomId(room.id)}
+                                  className={`absolute flex items-center justify-center rounded-[3px] transition-all cursor-pointer pointer-events-auto border-2 ${
+                                    selectedRoomId === room.id
+                                      ? 'border-[#004643] shadow-md z-20'
+                                      : 'border-transparent hover:border-[#004643]/50 z-10'
+                                  }`}
+                                  style={{
+                                    top:             `${room.box!.top}%`,
+                                    left:            `${room.box!.left}%`,
+                                    width:           `${room.box!.width}%`,
+                                    height:          `${room.box!.height}%`,
+                                    backgroundColor: room.color + (selectedRoomId === room.id ? '80' : '55'),
+                                  }}
+                                  title={room.name}
+                                >
+                                  <span className="text-[11px] font-semibold text-[#004643] text-center leading-tight line-clamp-2 bg-white/70 rounded px-1">
+                                    {room.name}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           {rooms.length === 0 && (
                             <div className="absolute inset-0 flex items-end justify-center pb-6 bg-gradient-to-t from-white/90 via-white/10 to-transparent">
                               <p className="text-gray-500 text-[13px] text-center px-4 bg-white/90 rounded-lg py-2 shadow-sm">
@@ -385,7 +475,12 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                               </p>
                             </div>
                           )}
-                        </>
+                          {rooms.length > 0 && rooms.every(r => !r.box) && (
+                            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-gray-500 text-[11px] text-center px-3 py-1 bg-white/90 rounded-full shadow-sm">
+                              Room positions unavailable — see list to the right
+                            </div>
+                          )}
+                        </div>
                       )
                     ) : (
                       <div className="flex flex-col items-center justify-center gap-2 text-center px-6">
