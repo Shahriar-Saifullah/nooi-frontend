@@ -226,8 +226,9 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               id:              room.id,
               name:            room.name,
               confidence:      `${room.confidence}%`,
-              length:          "0",
-              width:           "0",
+              // Use dimensions extracted from the floor plan text if available, else blank for manual entry
+              length:          room.length ? String(room.length) : "",
+              width:           room.width ? String(room.width) : "",
               height:          "2.4",
               color:           room.color || "#e5e7eb",
               confidenceColor: room.confidence >= 85 ? "#b3b9b9" : "#9c7b31",
@@ -579,13 +580,23 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                       <div className="text-[11px] font-bold text-gray-500 tracking-[0.05em] text-center uppercase">Height (m)</div>
                     </div>
                     <div className="overflow-y-auto divide-y divide-gray-100 custom-scrollbar">
-                      {rooms.map(room => (
+                      {rooms.map(room => {
+                        const autoFilled = room.length !== "" && room.width !== "";
+                        return (
                         <div key={room.id} className="grid grid-cols-4 gap-4 px-5 py-2.5 items-center hover:bg-gray-50 transition-colors">
-                          <div className="text-[13px] font-medium text-[#0a0a0a] truncate pr-2">{room.name}</div>
+                          <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                            <div className="text-[13px] font-medium text-[#0a0a0a] truncate">{room.name}</div>
+                            {autoFilled && (
+                              <span className="text-[9px] font-semibold text-[#004643] bg-[#eaf8f4] border border-[#c3f4f0] rounded-full px-1.5 py-0.5 shrink-0" title="Extracted from floor plan">
+                                AI
+                              </span>
+                            )}
+                          </div>
                           <div className="flex justify-center">
                             <input
                               type="text"
                               value={room.length}
+                              placeholder="—"
                               onChange={(e) => setRooms(rooms.map(r => r.id === room.id ? { ...r, length: e.target.value } : r))}
                               className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors"
                             />
@@ -594,6 +605,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                             <input
                               type="text"
                               value={room.width}
+                              placeholder="—"
                               onChange={(e) => setRooms(rooms.map(r => r.id === room.id ? { ...r, width: e.target.value } : r))}
                               className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors"
                             />
@@ -607,7 +619,8 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                             />
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
