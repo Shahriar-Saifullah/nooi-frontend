@@ -31,6 +31,136 @@ interface CreateProjectModalProps {
   onClose: () => void;
 }
 
+// ── Draggable / resizable colored room overlay ──
+// Renders a room's bounding box on top of the floor plan image. When selected,
+// the whole box can be dragged to reposition it, and 4 corner handles let the
+// user resize it to better match the real room boundary.
+type DragMode = 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
+
+function RoomOverlayBox({
+  room,
+  isSelected,
+  onSelect,
+  onChange,
+}: {
+  room: Room;
+  isSelected: boolean;
+  onSelect: () => void;
+  onChange: (box: RoomBox) => void;
+}) {
+  const box = room.box!;
+  const dragState = useRef<{
+    mode: DragMode;
+    startX: number;
+    startY: number;
+    startBox: RoomBox;
+    parentW: number;
+    parentH: number;
+  } | null>(null);
+
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+  const handlePointerMove = (e: PointerEvent) => {
+    const state = dragState.current;
+    if (!state) return;
+
+    const dxPct = ((e.clientX - state.startX) / state.parentW) * 100;
+    const dyPct = ((e.clientY - state.startY) / state.parentH) * 100;
+
+    let next: RoomBox = { ...state.startBox };
+
+    if (state.mode === 'move') {
+      next.left = clamp(state.startBox.left + dxPct, 0, 100 - state.startBox.width);
+      next.top  = clamp(state.startBox.top + dyPct, 0, 100 - state.startBox.height);
+    } else {
+      // Resize from whichever corner was grabbed, keeping the opposite corner fixed
+      const minSize = 3; // minimum 3% box size so it never collapses to nothing
+      if (state.mode === 'resize-br') {
+        next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
+        next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
+      } else if (state.mode === 'resize-tr') {
+        next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
+        const newTop = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
+        next.height = state.startBox.height + (state.startBox.top - newTop);
+        next.top    = newTop;
+      } else if (state.mode === 'resize-bl') {
+        const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
+        next.width  = state.startBox.width + (state.startBox.left - newLeft);
+        next.left   = newLeft;
+        next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
+      } else if (state.mode === 'resize-tl') {
+        const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
+        const newTop  = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
+        next.width  = state.startBox.width + (state.startBox.left - newLeft);
+        next.height = state.startBox.height + (state.startBox.top - newTop);
+        next.left   = newLeft;
+        next.top    = newTop;
+      }
+    }
+
+    onChange(next);
+  };
+
+  const handlePointerUp = () => {
+    dragState.current = null;
+    window.removeEventListener('pointermove', handlePointerMove);
+    window.removeEventListener('pointerup', handlePointerUp);
+  };
+
+  const startDrag = (mode: DragMode, e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const parent = (e.currentTarget as HTMLElement).closest('[data-overlay-root]') as HTMLElement | null;
+    if (!parent) return;
+    const rect = parent.getBoundingClientRect();
+    dragState.current = {
+      mode,
+      startX: e.clientX,
+      startY: e.clientY,
+      startBox: { ...box },
+      parentW: rect.width,
+      parentH: rect.height,
+    };
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
+  const handleStyle = "absolute w-[10px] h-[10px] bg-white border-2 border-[#004643] rounded-full z-30 hover:scale-125 transition-transform";
+
+  return (
+    <div
+      onClick={(e) => { e.stopPropagation(); onSelect(); }}
+      onPointerDown={(e) => isSelected && startDrag('move', e)}
+      className={`absolute flex items-center justify-center rounded-[3px] transition-colors border-2 ${
+        isSelected
+          ? 'border-[#004643] shadow-md z-20 cursor-move'
+          : 'border-transparent hover:border-[#004643]/50 z-10 cursor-pointer'
+      }`}
+      style={{
+        top:             `${box.top}%`,
+        left:            `${box.left}%`,
+        width:           `${box.width}%`,
+        height:          `${box.height}%`,
+        backgroundColor: room.color + (isSelected ? '80' : '55'),
+      }}
+      title={room.name}
+    >
+      <span className="text-[11px] font-semibold text-[#004643] text-center leading-tight line-clamp-2 bg-white/70 rounded px-1 pointer-events-none">
+        {room.name}
+      </span>
+
+      {isSelected && (
+        <>
+          <div onPointerDown={(e) => startDrag('resize-tl', e)} className={handleStyle} style={{ top: -5, left: -5, cursor: 'nwse-resize' }} />
+          <div onPointerDown={(e) => startDrag('resize-tr', e)} className={handleStyle} style={{ top: -5, right: -5, cursor: 'nesw-resize' }} />
+          <div onPointerDown={(e) => startDrag('resize-bl', e)} className={handleStyle} style={{ bottom: -5, left: -5, cursor: 'nesw-resize' }} />
+          <div onPointerDown={(e) => startDrag('resize-br', e)} className={handleStyle} style={{ bottom: -5, right: -5, cursor: 'nwse-resize' }} />
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function CreateProjectModal({ isOpen, onClose }: CreateProjectModalProps) {
   const router = useRouter();
   const { setProject } = useProjectStore();
@@ -150,6 +280,10 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   const handleDeleteRoom = (id: string) => {
     setRooms(rooms.filter(room => room.id !== id));
     if (selectedRoomId === id) setSelectedRoomId(null);
+  };
+
+  const handleUpdateRoomBox = (id: string, box: RoomBox) => {
+    setRooms(rooms.map(room => room.id === id ? { ...room, box } : room));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -433,10 +567,12 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                             onLoad={recalcImgBounds}
                           />
                           {/* Colored room overlays — positioned using Gemini bounding boxes,
-                              aligned to the actual rendered image bounds (accounts for object-contain letterboxing) */}
+                              aligned to the actual rendered image bounds (accounts for object-contain letterboxing).
+                              Selected room can be dragged to move and resized via corner handles. */}
                           {imgRenderBox && (
                             <div
-                              className="absolute pointer-events-none"
+                              data-overlay-root
+                              className="absolute"
                               style={{
                                 top:    `calc(${imgRenderBox.top}% + 12px)`,
                                 left:   `calc(${imgRenderBox.left}% + 12px)`,
@@ -445,27 +581,13 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                               }}
                             >
                               {rooms.filter(r => r.box).map((room) => (
-                                <div
+                                <RoomOverlayBox
                                   key={room.id}
-                                  onClick={() => setSelectedRoomId(room.id)}
-                                  className={`absolute flex items-center justify-center rounded-[3px] transition-all cursor-pointer pointer-events-auto border-2 ${
-                                    selectedRoomId === room.id
-                                      ? 'border-[#004643] shadow-md z-20'
-                                      : 'border-transparent hover:border-[#004643]/50 z-10'
-                                  }`}
-                                  style={{
-                                    top:             `${room.box!.top}%`,
-                                    left:            `${room.box!.left}%`,
-                                    width:           `${room.box!.width}%`,
-                                    height:          `${room.box!.height}%`,
-                                    backgroundColor: room.color + (selectedRoomId === room.id ? '80' : '55'),
-                                  }}
-                                  title={room.name}
-                                >
-                                  <span className="text-[11px] font-semibold text-[#004643] text-center leading-tight line-clamp-2 bg-white/70 rounded px-1">
-                                    {room.name}
-                                  </span>
-                                </div>
+                                  room={room}
+                                  isSelected={selectedRoomId === room.id}
+                                  onSelect={() => setSelectedRoomId(room.id)}
+                                  onChange={(box) => handleUpdateRoomBox(room.id, box)}
+                                />
                               ))}
                             </div>
                           )}
@@ -479,6 +601,11 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                           {rooms.length > 0 && rooms.every(r => !r.box) && (
                             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-gray-500 text-[11px] text-center px-3 py-1 bg-white/90 rounded-full shadow-sm">
                               Room positions unavailable — see list to the right
+                            </div>
+                          )}
+                          {rooms.some(r => r.box) && (
+                            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-gray-500 text-[10px] text-center px-2.5 py-1 bg-white/90 rounded-full shadow-sm whitespace-nowrap">
+                              Select a room, then drag to move or use corner handles to resize
                             </div>
                           )}
                         </div>
