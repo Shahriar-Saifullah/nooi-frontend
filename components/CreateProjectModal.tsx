@@ -360,7 +360,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                       </div>
                     ) : (
                       <div
-                        className="absolute inset-[28px] grid gap-[7px] auto-rows-fr overflow-y-auto custom-scrollbar"
+                        className="absolute inset-[28px] grid gap-[7px] auto-rows-[minmax(70px,1fr)] content-start overflow-y-auto custom-scrollbar"
                         style={{
                           gridTemplateColumns: `repeat(${
                             rooms.length <= 2 ? rooms.length
