@@ -120,8 +120,12 @@ function relayoutGrid(rooms: Room[]): Room[] {
   if (withGrid.length === 0) return rooms;
 
   const maxRow = Math.max(...withGrid.map(r => r.gridRow!));
-  const rowGroups: Room[][] = Array.from({ length: maxRow + 1 }, () => []);
-  withGrid.forEach(r => rowGroups[r.gridRow!].push(r));
+  const rawRowGroups: Room[][] = Array.from({ length: maxRow + 1 }, () => []);
+  withGrid.forEach(r => rawRowGroups[r.gridRow!].push(r));
+
+  // Drop any empty rows (e.g. left behind after deleting the only room in a row)
+  // so the layout doesn't keep a blank gap where that row used to be.
+  const rowGroups = rawRowGroups.filter(row => row.length > 0);
   rowGroups.forEach(row => row.sort((a, b) => (a.gridCol ?? 0) - (b.gridCol ?? 0)));
 
   // Row heights — proportional to each row's max weight, with a floor so no row vanishes
@@ -423,16 +427,34 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     roomIdCounter.current += 1;
     const colors = ["#e5e7eb", "#fde68a", "#bae6fd", "#fed7aa", "#c7d2fe", "#fbcfe8", "#a7f3d0"];
     const randomColor = colors[rooms.length % colors.length];
-    setRooms([...rooms, {
-      id:              newId,
-      name:            `New Room ${rooms.length + 1}`,
-      confidence:      "100%",
-      length:          "3.0",
-      width:           "3.0",
-      height:          "2.4",
-      color:           randomColor,
-      confidenceColor: "#b3b9b9",
-    }]);
+
+    // Place the new room in its own row at the bottom of the grid, full width,
+    // so it appears immediately on the layout instead of floating with no position.
+    const existingRows = rooms
+      .map(r => r.gridRow)
+      .filter((r): r is number => r !== undefined);
+    const newGridRow = existingRows.length > 0 ? Math.max(...existingRows) + 1 : 0;
+
+    const newRoom: Room = {
+      id:               newId,
+      name:             `New Room ${rooms.length + 1}`,
+      confidence:       "100%",
+      length:           "3.0",
+      width:            "3.0",
+      height:           "2.4",
+      color:            randomColor,
+      confidenceColor:  "#b3b9b9",
+      gridRow:          newGridRow,
+      gridCol:          0,
+      rowWeight:        40, // reasonable default weight, relative to existing rooms
+      colWeight:        100,
+      initialGridRow:   newGridRow,
+      initialGridCol:   0,
+      initialRowWeight: 40,
+      initialColWeight: 100,
+    };
+
+    setRooms(relayoutGrid([...rooms, newRoom]));
   };
 
   const handleRenameRoom = (id: string, newName: string) => {
@@ -440,7 +462,8 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   };
 
   const handleDeleteRoom = (id: string) => {
-    setRooms(rooms.filter(room => room.id !== id));
+    const remaining = rooms.filter(room => room.id !== id);
+    setRooms(relayoutGrid(remaining));
     if (selectedRoomId === id) setSelectedRoomId(null);
   };
 
