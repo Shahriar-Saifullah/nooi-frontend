@@ -25,6 +25,14 @@ interface Room {
   confidenceColor: string;
   box?: RoomBox; // current position on the floor plan image, as % (top/left/width/height)
   originalBox?: RoomBox; // AI's original suggestion, kept so the user can reset after manual edits
+  gridRow?: number; // which row this room belongs to in the layout grid
+  gridCol?: number; // which column within that row
+  rowWeight?: number; // height weight used to compute this room's row height share
+  colWeight?: number; // width weight used to compute this room's column width share
+  initialGridRow?: number; // grid position right after layout, before any manual edits
+  initialGridCol?: number;
+  initialRowWeight?: number;
+  initialColWeight?: number;
 }
 
 interface CreateProjectModalProps {
@@ -32,24 +40,27 @@ interface CreateProjectModalProps {
   onClose: () => void;
 }
 
-// ── Arrange room boxes into a clean, aligned, non-overlapping layout ──
+const GRID_GAP = 1.5; // gap between boxes, in %
+
+interface GridAssignment {
+  gridRow: number;
+  gridCol: number;
+  rowSpanWeight: number; // this room's height weight within its row
+  colSpanWeight: number; // this room's width weight within its row
+}
+
+// ── Step 1: cluster raw Gemini boxes into rows/columns ──
 // Gemini's raw boxes are estimates with inconsistent edges — directly rendering
 // them (or just nudging overlaps apart) produces jagged gaps and a "broken" look.
-// Instead, we cluster rooms into rows based on their vertical center, then pack
-// each row's rooms left-to-right with even spacing and matching row heights —
-// similar to how the original fixed grid looked, but ordered using the real
-// detected layout (which room is roughly above/below/left/right of which).
-function arrangeRoomsAsGrid(boxes: RoomBox[]): RoomBox[] {
+// We cluster rooms into rows based on their vertical center, then assign each
+// room a row + column index. The actual pixel layout is computed separately by
+// relayoutGrid() so it can be re-run after resize/swap edits.
+function assignGridPositions(boxes: RoomBox[]): GridAssignment[] {
   if (boxes.length === 0) return [];
 
-  const GAP = 1.5; // gap between boxes, in %
-
-  // Sort by vertical center to establish row order
   const withIndex = boxes.map((b, i) => ({ box: b, index: i, centerY: b.top + b.height / 2 }));
   withIndex.sort((a, b) => a.centerY - b.centerY);
 
-  // Cluster into rows: a new row starts when the vertical gap from the previous
-  // room's center exceeds roughly half a typical room height
   const avgHeight = boxes.reduce((s, b) => s + b.height, 0) / boxes.length;
   const rowThreshold = Math.max(avgHeight * 0.6, 8);
 
@@ -68,73 +79,103 @@ function arrangeRoomsAsGrid(boxes: RoomBox[]): RoomBox[] {
   }
   if (currentRow.length > 0) rows.push(currentRow);
 
-  // Within each row, sort left-to-right by original horizontal position
   rows.forEach(row => row.sort((a, b) => a.box.left - b.box.left));
 
-  // Compute row heights proportional to the tallest room in that row,
-  // then lay out rows top-to-bottom filling the full 0-100 canvas height.
-  // Minimum weight floor prevents rows of small rooms from becoming too thin to read.
-  const rawRowWeights = rows.map(row => Math.max(...row.map(r => r.box.height)));
-  const maxRawRowWeight = Math.max(...rawRowWeights);
-  const rowWeights = rawRowWeights.map(w => Math.max(w, maxRawRowWeight * 0.35));
-  const totalWeight = rowWeights.reduce((s, w) => s + w, 0);
-  const totalGapY = GAP * (rows.length - 1);
-  const availableHeight = 100 - totalGapY;
-
-  const result: RoomBox[] = new Array(boxes.length);
-  let yCursor = 0;
-
+  const result: GridAssignment[] = new Array(boxes.length);
   rows.forEach((row, rowIdx) => {
-    const rowHeight = (rowWeights[rowIdx] / totalWeight) * availableHeight;
-
-    // Within the row, distribute width proportional to each box's original width,
-    // but enforce a minimum weight so tiny rooms (stairs, elevator, closets) still
-    // get a usable, clickable share of the row instead of being squeezed to nothing
-    const rawWidthWeights = row.map(r => r.box.width);
-    const maxRawWidth = Math.max(...rawWidthWeights);
-    const widthWeights = rawWidthWeights.map(w => Math.max(w, maxRawWidth * 0.22));
-    const totalWidthWeight = widthWeights.reduce((s, w) => s + w, 0);
-    const totalGapX = GAP * (row.length - 1);
-    const availableWidth = 100 - totalGapX;
-
-    let xCursor = 0;
     row.forEach((item, colIdx) => {
-      const boxWidth = (widthWeights[colIdx] / totalWidthWeight) * availableWidth;
       result[item.index] = {
-        top:    yCursor,
-        left:   xCursor,
-        width:  boxWidth,
-        height: rowHeight,
+        gridRow: rowIdx,
+        gridCol: colIdx,
+        rowSpanWeight: item.box.height,
+        colSpanWeight: item.box.width,
       };
-      xCursor += boxWidth + GAP;
     });
-
-    yCursor += rowHeight + GAP;
   });
 
   return result;
 }
 
+// ── Step 2: compute actual pixel-percent positions from row/col + weights ──
+// Re-run any time a room's weight changes (resize) or rooms swap row/col (drag-swap).
+// Guarantees a clean, gapless, non-overlapping grid every time.
+function relayoutGrid(rooms: Room[]): Room[] {
+  const withGrid = rooms.filter(r => r.gridRow !== undefined && r.gridCol !== undefined);
+  if (withGrid.length === 0) return rooms;
+
+  const maxRow = Math.max(...withGrid.map(r => r.gridRow!));
+  const rowGroups: Room[][] = Array.from({ length: maxRow + 1 }, () => []);
+  withGrid.forEach(r => rowGroups[r.gridRow!].push(r));
+  rowGroups.forEach(row => row.sort((a, b) => (a.gridCol ?? 0) - (b.gridCol ?? 0)));
+
+  // Row heights — proportional to each row's max weight, with a floor so no row vanishes
+  const rawRowWeights = rowGroups.map(row =>
+    row.length > 0 ? Math.max(...row.map(r => r.rowWeight ?? r.box?.height ?? 1)) : 1
+  );
+  const maxRawRowWeight = Math.max(...rawRowWeights, 1);
+  const rowWeights = rawRowWeights.map(w => Math.max(w, maxRawRowWeight * 0.35));
+  const totalRowWeight = rowWeights.reduce((s, w) => s + w, 0);
+  const totalGapY = GRID_GAP * (rowGroups.length - 1);
+  const availableHeight = 100 - totalGapY;
+
+  const updated = new Map<string, RoomBox>();
+  let yCursor = 0;
+
+  rowGroups.forEach((row, rowIdx) => {
+    const rowHeight = (rowWeights[rowIdx] / totalRowWeight) * availableHeight;
+    if (row.length === 0) { yCursor += rowHeight + GRID_GAP; return; }
+
+    const rawColWeights = row.map(r => r.colWeight ?? r.box?.width ?? 1);
+    const maxRawColWeight = Math.max(...rawColWeights, 1);
+    const colWeights = rawColWeights.map(w => Math.max(w, maxRawColWeight * 0.22));
+    const totalColWeight = colWeights.reduce((s, w) => s + w, 0);
+    const totalGapX = GRID_GAP * (row.length - 1);
+    const availableWidth = 100 - totalGapX;
+
+    let xCursor = 0;
+    row.forEach((r, colIdx) => {
+      const boxWidth = (colWeights[colIdx] / totalColWeight) * availableWidth;
+      updated.set(r.id, {
+        top:    yCursor,
+        left:   xCursor,
+        width:  boxWidth,
+        height: rowHeight,
+      });
+      xCursor += boxWidth + GRID_GAP;
+    });
+
+    yCursor += rowHeight + GRID_GAP;
+  });
+
+  return rooms.map(r => updated.has(r.id) ? { ...r, box: updated.get(r.id)! } : r);
+}
+
 // ── Draggable / resizable colored room overlay ──
-// Renders a room's bounding box on top of the floor plan image. When selected,
-// the whole box can be dragged to reposition it, and 4 corner handles let the
-// user resize it to better match the real room boundary.
-type DragMode = 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
+// Renders a room's box in the layout grid. When selected:
+//  - dragging the box itself drags it OVER another room and SWAPS positions on drop
+//    (rooms can never overlap, since swapping just exchanges two grid slots)
+//  - the 4 corner handles resize the room, which shrinks/grows neighboring rooms
+//    in the same row/column to compensate, via the parent's relayout
+type DragMode = 'swap' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
 
 function RoomOverlayBox({
   room,
   isSelected,
   hasSelection,
   onSelect,
-  onChange,
+  onResize,
+  onSwap,
 }: {
   room: Room;
   isSelected: boolean;
   hasSelection: boolean;
   onSelect: () => void;
-  onChange: (box: RoomBox) => void;
+  onResize: (box: RoomBox) => void;
+  onSwap: (targetId: string) => void;
 }) {
   const box = room.box!;
+  const elRef = useRef<HTMLDivElement>(null);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const dragState = useRef<{
     mode: DragMode;
     startX: number;
@@ -142,6 +183,7 @@ function RoomOverlayBox({
     startBox: RoomBox;
     parentW: number;
     parentH: number;
+    parentEl: HTMLElement;
   } | null>(null);
 
   const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -150,44 +192,83 @@ function RoomOverlayBox({
     const state = dragState.current;
     if (!state) return;
 
-    const dxPct = ((e.clientX - state.startX) / state.parentW) * 100;
-    const dyPct = ((e.clientY - state.startY) / state.parentH) * 100;
-
-    let next: RoomBox = { ...state.startBox };
-
-    if (state.mode === 'move') {
-      next.left = clamp(state.startBox.left + dxPct, 0, 100 - state.startBox.width);
-      next.top  = clamp(state.startBox.top + dyPct, 0, 100 - state.startBox.height);
-    } else {
-      // Resize from whichever corner was grabbed, keeping the opposite corner fixed
-      const minSize = 3; // minimum 3% box size so it never collapses to nothing
-      if (state.mode === 'resize-br') {
-        next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
-        next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
-      } else if (state.mode === 'resize-tr') {
-        next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
-        const newTop = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
-        next.height = state.startBox.height + (state.startBox.top - newTop);
-        next.top    = newTop;
-      } else if (state.mode === 'resize-bl') {
-        const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
-        next.width  = state.startBox.width + (state.startBox.left - newLeft);
-        next.left   = newLeft;
-        next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
-      } else if (state.mode === 'resize-tl') {
-        const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
-        const newTop  = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
-        next.width  = state.startBox.width + (state.startBox.left - newLeft);
-        next.height = state.startBox.height + (state.startBox.top - newTop);
-        next.left   = newLeft;
-        next.top    = newTop;
+    if (state.mode === 'swap') {
+      // Visually preview the drag with a floating ghost via CSS transform,
+      // and highlight whichever room box is currently under the pointer.
+      const el = elRef.current;
+      if (el) {
+        const dx = e.clientX - state.startX;
+        const dy = e.clientY - state.startY;
+        el.style.transform = `translate(${dx}px, ${dy}px)`;
+        el.style.zIndex = '40';
+        el.style.opacity = '0.85';
       }
+
+      const elemUnder = document.elementFromPoint(e.clientX, e.clientY);
+      const overBox = elemUnder?.closest('[data-room-box]') as HTMLElement | null;
+      document.querySelectorAll('[data-room-box]').forEach(elx => {
+        (elx as HTMLElement).style.outline = '';
+        (elx as HTMLElement).style.outlineOffset = '';
+      });
+      if (overBox && overBox.dataset.roomId !== room.id) {
+        overBox.style.outline = '3px dashed #004643';
+        overBox.style.outlineOffset = '2px';
+      }
+      return;
     }
 
-    onChange(next);
+    const dxPct = ((e.clientX - state.startX) / state.parentW) * 100;
+    const dyPct = ((e.clientY - state.startY) / state.parentH) * 100;
+    let next: RoomBox = { ...state.startBox };
+
+    // Resize from whichever corner was grabbed, keeping the opposite corner fixed
+    const minSize = 3; // minimum 3% box size so it never collapses to nothing
+    if (state.mode === 'resize-br') {
+      next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
+      next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
+    } else if (state.mode === 'resize-tr') {
+      next.width  = clamp(state.startBox.width + dxPct, minSize, 100 - state.startBox.left);
+      const newTop = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
+      next.height = state.startBox.height + (state.startBox.top - newTop);
+      next.top    = newTop;
+    } else if (state.mode === 'resize-bl') {
+      const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
+      next.width  = state.startBox.width + (state.startBox.left - newLeft);
+      next.left   = newLeft;
+      next.height = clamp(state.startBox.height + dyPct, minSize, 100 - state.startBox.top);
+    } else if (state.mode === 'resize-tl') {
+      const newLeft = clamp(state.startBox.left + dxPct, 0, state.startBox.left + state.startBox.width - minSize);
+      const newTop  = clamp(state.startBox.top + dyPct, 0, state.startBox.top + state.startBox.height - minSize);
+      next.width  = state.startBox.width + (state.startBox.left - newLeft);
+      next.height = state.startBox.height + (state.startBox.top - newTop);
+      next.left   = newLeft;
+      next.top    = newTop;
+    }
+
+    onResize(next);
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: PointerEvent) => {
+    const state = dragState.current;
+    if (state?.mode === 'swap') {
+      const el = elRef.current;
+      if (el) {
+        el.style.transform = '';
+        el.style.zIndex = '';
+        el.style.opacity = '';
+      }
+      const elemUnder = document.elementFromPoint(e.clientX, e.clientY);
+      const overBox = elemUnder?.closest('[data-room-box]') as HTMLElement | null;
+      document.querySelectorAll('[data-room-box]').forEach(elx => {
+        (elx as HTMLElement).style.outline = '';
+        (elx as HTMLElement).style.outlineOffset = '';
+      });
+      if (overBox && overBox.dataset.roomId && overBox.dataset.roomId !== room.id) {
+        onSwap(overBox.dataset.roomId);
+      }
+      setIsDraggingOver(false);
+    }
+
     dragState.current = null;
     window.removeEventListener('pointermove', handlePointerMove);
     window.removeEventListener('pointerup', handlePointerUp);
@@ -206,7 +287,9 @@ function RoomOverlayBox({
       startBox: { ...box },
       parentW: rect.width,
       parentH: rect.height,
+      parentEl: parent,
     };
+    if (mode === 'swap') setIsDraggingOver(true);
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
   };
@@ -219,11 +302,14 @@ function RoomOverlayBox({
 
   return (
     <div
+      ref={elRef}
+      data-room-box
+      data-room-id={room.id}
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
-      onPointerDown={(e) => isSelected && startDrag('move', e)}
+      onPointerDown={(e) => isSelected && startDrag('swap', e)}
       className={`absolute flex items-center justify-center rounded-[3px] transition-all border-2 ${
         isSelected
-          ? 'border-[#004643] shadow-md z-20 cursor-move'
+          ? 'border-[#004643] shadow-md z-20 cursor-grab active:cursor-grabbing'
           : dimmed
             ? 'border-[#8e9493]/40 z-10 cursor-pointer hover:border-[#004643]/60'
             : 'border-transparent hover:border-[#004643]/50 z-10 cursor-pointer'
@@ -234,6 +320,7 @@ function RoomOverlayBox({
         width:           `${box.width}%`,
         height:          `${box.height}%`,
         backgroundColor: dimmed ? 'transparent' : room.color + (isSelected ? '80' : '55'),
+        transition:      isDraggingOver ? 'none' : undefined,
       }}
       title={room.name}
     >
@@ -341,14 +428,87 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     if (selectedRoomId === id) setSelectedRoomId(null);
   };
 
-  const handleUpdateRoomBox = (id: string, box: RoomBox) => {
-    setRooms(rooms.map(room => room.id === id ? { ...room, box } : room));
+  // Resizing a room updates its weight (not its raw box directly), then the whole
+  // grid is relaid out from weights — so neighboring rooms automatically shrink/grow
+  // to fill the remaining space and nothing ever overlaps.
+  const handleResizeRoom = (id: string, box: RoomBox) => {
+    const target = rooms.find(r => r.id === id);
+    if (!target || target.gridRow === undefined) {
+      // No grid position (manually added room with a free-form box) — just move it directly
+      setRooms(rooms.map(room => room.id === id ? { ...room, box } : room));
+      return;
+    }
+
+    const updatedRooms = rooms.map(room =>
+      room.id === id
+        ? { ...room, rowWeight: box.height, colWeight: box.width }
+        : room
+    );
+    setRooms(relayoutGrid(updatedRooms));
+  };
+
+  // Dragging one room onto another swaps their row/col grid positions (and therefore
+  // their box, color stays with the room, size weight swaps too) — never free-form
+  // overlapping placement.
+  const handleSwapRooms = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    const dragged = rooms.find(r => r.id === draggedId);
+    const target  = rooms.find(r => r.id === targetId);
+    if (!dragged || !target || dragged.gridRow === undefined || target.gridRow === undefined) return;
+
+    const updatedRooms = rooms.map(room => {
+      if (room.id === draggedId) {
+        return { ...room, gridRow: target.gridRow, gridCol: target.gridCol, rowWeight: target.rowWeight, colWeight: target.colWeight };
+      }
+      if (room.id === targetId) {
+        return { ...room, gridRow: dragged.gridRow, gridCol: dragged.gridCol, rowWeight: dragged.rowWeight, colWeight: dragged.colWeight };
+      }
+      return room;
+    });
+    setRooms(relayoutGrid(updatedRooms));
   };
 
   const handleResetRoomBox = (id: string) => {
-    setRooms(rooms.map(room =>
-      room.id === id && room.originalBox ? { ...room, box: { ...room.originalBox } } : room
-    ));
+    const target = rooms.find(r => r.id === id);
+    if (!target) return;
+
+    if (target.initialGridRow === undefined) {
+      // Manually added room with no grid position — fall back to raw box reset
+      if (!target.originalBox) return;
+      setRooms(rooms.map(room => room.id === id ? { ...room, box: { ...room.originalBox! } } : room));
+      return;
+    }
+
+    // Find whichever room currently occupies this room's original grid slot,
+    // so resetting one room cleanly swaps back rather than leaving two rooms
+    // claiming the same slot.
+    const occupant = rooms.find(r =>
+      r.id !== id && r.gridRow === target.initialGridRow && r.gridCol === target.initialGridCol
+    );
+
+    const updatedRooms = rooms.map(room => {
+      if (room.id === id) {
+        return {
+          ...room,
+          gridRow:   target.initialGridRow,
+          gridCol:   target.initialGridCol,
+          rowWeight: target.initialRowWeight,
+          colWeight: target.initialColWeight,
+        };
+      }
+      if (occupant && room.id === occupant.id) {
+        return {
+          ...room,
+          gridRow:   target.gridRow,
+          gridCol:   target.gridCol,
+          rowWeight: target.rowWeight,
+          colWeight: target.colWeight,
+        };
+      }
+      return room;
+    });
+
+    setRooms(relayoutGrid(updatedRooms));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -434,13 +594,29 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
             originalBox:     room.box || undefined,
           }));
 
-          // Resolve any overlapping boxes so rooms render as clean, non-overlapping
-          // blocks while keeping their relative layout close to the real floor plan
-          const roomsWithBoxes = mapped.filter((r: Room) => r.box);
-          const roomsWithoutBoxes = mapped.filter((r: Room) => !r.box);
+          // Assign each room a row/column position based on its real detected layout,
+          // then compute clean, evenly-spaced, non-overlapping pixel positions from that.
+          const roomsWithBoxes: Room[] = mapped.filter((r: Room) => r.box);
+          const roomsWithoutBoxes: Room[] = mapped.filter((r: Room) => !r.box);
+
           if (roomsWithBoxes.length > 0) {
-            const resolvedBoxes = arrangeRoomsAsGrid(roomsWithBoxes.map((r: Room) => r.box!));
-            roomsWithBoxes.forEach((r: Room, i: number) => { r.box = resolvedBoxes[i]; });
+            const assignments = assignGridPositions(roomsWithBoxes.map((r: Room) => r.box!));
+            roomsWithBoxes.forEach((r: Room, i: number) => {
+              r.gridRow   = assignments[i].gridRow;
+              r.gridCol   = assignments[i].gridCol;
+              r.rowWeight = assignments[i].rowSpanWeight;
+              r.colWeight = assignments[i].colSpanWeight;
+            });
+            const laidOut = relayoutGrid(roomsWithBoxes);
+            laidOut.forEach((r, i) => {
+              roomsWithBoxes[i] = {
+                ...r,
+                initialGridRow:   r.gridRow,
+                initialGridCol:   r.gridCol,
+                initialRowWeight: r.rowWeight,
+                initialColWeight: r.colWeight,
+              };
+            });
           }
 
           setRooms([...roomsWithBoxes, ...roomsWithoutBoxes]);
@@ -632,7 +808,8 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                             isSelected={selectedRoomId === room.id}
                             hasSelection={!!selectedRoomId}
                             onSelect={() => setSelectedRoomId(room.id)}
-                            onChange={(box) => handleUpdateRoomBox(room.id, box)}
+                            onResize={(box) => handleResizeRoom(room.id, box)}
+                            onSwap={(targetId) => handleSwapRooms(room.id, targetId)}
                           />
                         ))}
                         {rooms.some(r => !r.box) && (
@@ -645,16 +822,16 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
                     {rooms.length > 0 && (
                       <div className="absolute top-2 left-1/2 -translate-x-1/2 text-gray-500 text-[10px] text-center px-2.5 py-1 bg-white/90 rounded-full shadow-sm whitespace-nowrap z-30">
-                        {selectedRoomId ? "Drag the box to move, or corner handles to resize" : "Click a room to select and adjust its outline"}
+                        {selectedRoomId ? "Drag onto another room to swap places, or use corner handles to resize" : "Click a room to select and adjust its outline"}
                       </div>
                     )}
                     {(() => {
                       const selRoom = rooms.find(r => r.id === selectedRoomId);
-                      const changed = selRoom?.box && selRoom?.originalBox && (
-                        selRoom.box.top !== selRoom.originalBox.top ||
-                        selRoom.box.left !== selRoom.originalBox.left ||
-                        selRoom.box.width !== selRoom.originalBox.width ||
-                        selRoom.box.height !== selRoom.originalBox.height
+                      const changed = selRoom && selRoom.initialGridRow !== undefined && (
+                        selRoom.gridRow   !== selRoom.initialGridRow ||
+                        selRoom.gridCol   !== selRoom.initialGridCol ||
+                        selRoom.rowWeight !== selRoom.initialRowWeight ||
+                        selRoom.colWeight !== selRoom.initialColWeight
                       );
                       if (!changed) return null;
                       return (
