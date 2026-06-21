@@ -141,3 +141,28 @@ export async function getProject(projectId: string) {
   if (!json.success) throw new Error(json.error || "Failed to load project");
   return json.data.project as Project;
 }
+
+// ─── Generate an AI render image from a prompt + current room layout ─────────
+
+export type AiModel = 'gemini' | 'dalle' | 'midjourney' | 'flux' | 'stable-diffusion';
+
+export const AI_MODEL_OPTIONS: { value: AiModel; label: string }[] = [
+  { value: 'gemini',            label: 'Gemini' },
+  { value: 'dalle',             label: 'DALL-E' },
+  { value: 'midjourney',        label: 'Midjourney' },
+  { value: 'flux',              label: 'Flux' },
+  { value: 'stable-diffusion',  label: 'Stable Diffusion' },
+];
+
+export async function generateRender(projectId: string, prompt: string, model: AiModel) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/generate-render`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ prompt, model }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "Failed to generate render");
+  return json.data as { image_url: string; model_requested: AiModel };
+}

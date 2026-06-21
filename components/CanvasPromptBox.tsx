@@ -1,17 +1,56 @@
 "use client";
 
 import React, { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
+import { generateRender, AI_MODEL_OPTIONS, type AiModel } from "@/lib/api/projects";
 
-export default function CanvasPromptBox() {
+interface CanvasPromptBoxProps {
+  projectId: string | undefined;
+  onGenerateStart?: () => void;
+  onGenerateSuccess?: (imageUrl: string) => void;
+  onGenerateError?: (message: string) => void;
+}
+
+export default function CanvasPromptBox({
+  projectId,
+  onGenerateStart,
+  onGenerateSuccess,
+  onGenerateError,
+}: CanvasPromptBoxProps) {
   const [designPrompt, setDesignPrompt] = useState("");
   const [attachedFile, setAttachedFile] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("Gemini 3.1 Pro");
+  const [selectedModel, setSelectedModel] = useState<AiModel>("gemini");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const isPromptActive = designPrompt.trim() !== "" || attachedFile !== null;
+  const selectedModelLabel = AI_MODEL_OPTIONS.find(m => m.value === selectedModel)?.label ?? "Gemini";
+
+  const handleGenerate = async () => {
+    if (!isPromptActive || isGenerating) return;
+
+    if (!projectId) {
+      onGenerateError?.("No project loaded yet — try again in a moment.");
+      return;
+    }
+
+    const promptToSend = designPrompt;
+    setDesignPrompt("");
+    setAttachedFile(null);
+    setIsGenerating(true);
+    onGenerateStart?.();
+
+    try {
+      const result = await generateRender(projectId, promptToSend, selectedModel);
+      onGenerateSuccess?.(result.image_url);
+    } catch (err: any) {
+      onGenerateError?.(err.message || "Failed to generate image. Please try again.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <div className="px-3 pb-4" style={{ position: "relative", zIndex: 50 }}>
@@ -26,6 +65,7 @@ export default function CanvasPromptBox() {
           placeholder="Describe your design vision..."
           className="w-full resize-none text-[12px] leading-[1.55] text-[#0a0a0a] placeholder:text-[#a3a3a3] focus:outline-none bg-transparent select-text"
           rows={2}
+          disabled={isGenerating}
         />
 
         {/* Attached file pill */}
@@ -66,7 +106,9 @@ export default function CanvasPromptBox() {
               />
             </label>
 
-            {/* Model Selector */}
+            {/* Model Selector — placeholder labels for now; every option routes to
+                the same Gemini image model on the backend until per-provider
+                routing is built (see generateRenderSchema comment) */}
             <div style={{ position: "relative" }}>
               <button
                 type="button"
@@ -80,7 +122,7 @@ export default function CanvasPromptBox() {
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
                   <path d="M12 2L9.09 9.09 2 12l7.09 2.91L12 22l2.91-7.09L22 12l-7.09-2.91L12 2z" fill="#004643"/>
                 </svg>
-                <span className="text-[11.5px] font-medium text-[#374151]">{selectedModel}</span>
+                <span className="text-[11.5px] font-medium text-[#374151]">{selectedModelLabel}</span>
                 <ChevronDown size={11} className={`text-[#a3a3a3] transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
               </button>
               {modelMenuOpen && (
@@ -88,18 +130,18 @@ export default function CanvasPromptBox() {
                   style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, width: 160, zIndex: 9999 }}
                   className="bg-white border border-[#e5e5e5] rounded-[8px] shadow-[0px_8px_24px_rgba(0,0,0,0.15)] overflow-hidden"
                 >
-                  {["Gemini 3.1 Pro", "Claude Sonnet 3.5", "GPT-4o"].map(model => (
+                  {AI_MODEL_OPTIONS.map(model => (
                     <button
-                      key={model}
+                      key={model.value}
                       type="button"
                       onMouseDown={(e) => {
                         e.preventDefault();
-                        setSelectedModel(model);
+                        setSelectedModel(model.value);
                         setModelMenuOpen(false);
                       }}
                       className="w-full text-left px-3 py-2 text-[11px] font-medium text-[#374151] hover:bg-[#f5f5f5] transition-colors border-b border-[#f5f5f5] last:border-0 cursor-pointer"
                     >
-                      {model}
+                      {model.label}
                     </button>
                   ))}
                 </div>
@@ -177,26 +219,27 @@ export default function CanvasPromptBox() {
             <button
               type="button"
               onMouseDown={(e) => {
-                if (!isPromptActive) return;
                 e.preventDefault();
-                console.log("Generating:", designPrompt, attachedFile);
-                setDesignPrompt("");
-                setAttachedFile(null);
+                handleGenerate();
               }}
-              disabled={!isPromptActive}
+              disabled={!isPromptActive || isGenerating}
               className={`w-[28px] h-[28px] rounded-full flex items-center justify-center text-white transition-all duration-300 shadow-sm ${
-                isPromptActive
+                isPromptActive && !isGenerating
                   ? "bg-[#004643] hover:bg-[#003330] cursor-pointer"
                   : "bg-[#e5e5e5] text-[#a3a3a3] cursor-not-allowed shadow-none"
               }`}
             >
-              <svg
-                width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                className={isPromptActive ? "" : "opacity-60"}
-              >
-                <path d="M5 12h14M12 5l7 7-7 7"/>
-              </svg>
+              {isGenerating ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <svg
+                  width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  className={isPromptActive ? "" : "opacity-60"}
+                >
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              )}
             </button>
           </div>
         </div>

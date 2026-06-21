@@ -22,6 +22,7 @@ import {
   ChevronRight,
   SlidersHorizontal,
   X,
+  Loader2,
 } from "lucide-react";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import { useProjectStore } from "@/lib/store";
@@ -237,6 +238,11 @@ export default function CanvasPage() {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
+  // ── AI design render state (from the prompt box) ──
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [isGeneratingRender, setIsGeneratingRender] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -397,17 +403,37 @@ export default function CanvasPage() {
           </button>
         </div>
 
-        {/* ── Chat bubble ── */}
-        <div className="px-4 pb-4">
+        {/* ── Chat area: welcome message + generated render result ── */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-4 flex flex-col gap-3">
           <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-3">
             <p className="text-[12px] leading-[1.55] text-[#404040]">
               Hi! I&apos;m your Nooi design assistant. Describe the room or style you want and I&apos;ll lay it out for you.
             </p>
           </div>
-        </div>
 
-        {/* ── Spacer (chat area) ── */}
-        <div className="flex-1" />
+          {isGeneratingRender && (
+            <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-4 flex items-center gap-2.5">
+              <Loader2 size={14} className="animate-spin text-[#004643]" />
+              <p className="text-[12px] text-[#404040]">Generating your design render…</p>
+            </div>
+          )}
+
+          {renderError && (
+            <div className="bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3.5 py-3">
+              <p className="text-[12px] leading-[1.55] text-[#b91c1c]">{renderError}</p>
+            </div>
+          )}
+
+          {generatedImageUrl && !isGeneratingRender && (
+            <div className="rounded-[10px] overflow-hidden border border-[#e5e5e5]">
+              <img
+                src={generatedImageUrl}
+                alt="AI-generated design render"
+                className="w-full h-auto block"
+              />
+            </div>
+          )}
+        </div>
 
         {/* ── DESIGN SETTINGS ── */}
         <div className="px-4 pb-3">
@@ -457,7 +483,21 @@ export default function CanvasPage() {
         </div>
 
         {/* ── Prompt Input ── */}
-        <CanvasPromptBox />
+        <CanvasPromptBox
+          projectId={currentProject?.id}
+          onGenerateStart={() => {
+            setIsGeneratingRender(true);
+            setRenderError(null);
+          }}
+          onGenerateSuccess={(imageUrl) => {
+            setGeneratedImageUrl(imageUrl);
+            setIsGeneratingRender(false);
+          }}
+          onGenerateError={(message) => {
+            setRenderError(message);
+            setIsGeneratingRender(false);
+          }}
+        />
       </aside>
 
 
