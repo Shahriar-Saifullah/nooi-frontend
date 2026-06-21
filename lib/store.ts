@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import type { Room } from "@/lib/api/projects";
 
 interface AuthState {
   signupData: {
@@ -45,9 +46,15 @@ interface ProjectState {
     id: string;
     name: string;
     floorPlanUrl: string | null;
+    // Rooms with their interactive grid layout (box/gridRow/gridCol/weights),
+    // set once the user finishes reviewing rooms in CreateProjectModal so the
+    // canvas page can render the same interactive blocks instead of the raw
+    // uploaded floor plan photo.
+    rooms?: Room[];
   } | null;
 
   setProject: (project: ProjectState["currentProject"]) => void;
+  setProjectRooms: (rooms: Room[]) => void;
   resetProject: () => void;
 }
 
@@ -58,6 +65,13 @@ export const useProjectStore = create<ProjectState>()(
 
       setProject: (project) => set({ currentProject: project }),
 
+      setProjectRooms: (rooms) =>
+        set((state) =>
+          state.currentProject
+            ? { currentProject: { ...state.currentProject, rooms } }
+            : state
+        ),
+
       resetProject: () => set({ currentProject: null }),
     }),
     {
@@ -66,4 +80,3 @@ export const useProjectStore = create<ProjectState>()(
     },
   ),
 );
-

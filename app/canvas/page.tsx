@@ -25,6 +25,12 @@ import {
 } from "lucide-react";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import { useProjectStore } from "@/lib/store";
+import { getProject } from "@/lib/api/projects";
+import {
+  RoomOverlayBox,
+  relayoutGrid,
+  type GridRoom,
+} from "@/components/RoomLayoutGrid";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -190,6 +196,25 @@ function FurnitureIcon({ type, size = 24 }: { type: string; size?: number }) {
   }
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// API rooms always have color as optional — give every room a fallback so the
+// grid never renders an unstyled/invisible block.
+const FALLBACK_COLORS = ["#c3f4f0", "#b9eac5", "#87ddd7", "#f7dfad", "#d5dbda", "#ffc9c0"];
+
+function toGridRoom(room: any, index: number): GridRoom {
+  return {
+    id:        room.id,
+    name:      room.name,
+    color:     room.color || FALLBACK_COLORS[index % FALLBACK_COLORS.length],
+    box:       room.box,
+    gridRow:   room.gridRow,
+    gridCol:   room.gridCol,
+    rowWeight: room.rowWeight,
+    colWeight: room.colWeight,
+  };
+}
+
 // ─── Main Canvas Page ─────────────────────────────────────────────────────────
 
 export default function CanvasPage() {
@@ -201,11 +226,16 @@ export default function CanvasPage() {
   const [zoom, setZoom] = useState(100);
   const [searchQuery, setSearchQuery] = useState("");
   const [mounted, setMounted] = useState(false);
-  const { currentProject } = useProjectStore();
+  const { currentProject, setProjectRooms } = useProjectStore();
   const [activeEditSubTab, setActiveEditSubTab] = useState<"settings" | "layers" | "palette">("layers");
   const [showLibrary, setShowLibrary] = useState(false);
   const [librarySearchQuery, setLibrarySearchQuery] = useState("");
   const [activeFilterChip, setActiveFilterChip] = useState("All");
+
+  // ── Room layout state (replaces the static floor plan image) ──
+  const [rooms, setRooms] = useState<GridRoom[]>([]);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [loadingRooms, setLoadingRooms] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -216,6 +246,62 @@ export default function CanvasPage() {
       console.log("Canvas mounted. Current Project:", currentProject);
     }
   }, [mounted, currentProject]);
+
+  // Load the room layout: prefer the store (set right after project creation,
+  // no network wait), fall back to fetching the project fresh — covers a
+  // direct page refresh or opening a saved project from the dashboard.
+  useEffect(() => {
+    if (!mounted) return;
+
+    if (currentProject?.rooms && currentProject.rooms.length > 0) {
+      setRooms(currentProject.rooms.map(toGridRoom).filter(r => r.box));
+      return;
+    }
+
+    if (currentProject?.id) {
+      setLoadingRooms(true);
+      getProject(currentProject.id)
+        .then((project) => {
+          const apiRooms = project.room_data?.rooms ?? [];
+          const gridRooms = apiRooms.map(toGridRoom).filter(r => r.box);
+          setRooms(gridRooms);
+          if (apiRooms.length > 0) setProjectRooms(apiRooms);
+        })
+        .catch((err) => {
+          console.error("Failed to load project rooms:", err);
+        })
+        .finally(() => setLoadingRooms(false));
+    }
+  }, [mounted, currentProject?.id]);
+
+  const handleResizeRoom = (id: string, box: GridRoom["box"]) => {
+    if (!box) return;
+    const target = rooms.find(r => r.id === id);
+    if (!target || target.gridRow === undefined) return;
+
+    const updated = rooms.map(r =>
+      r.id === id ? { ...r, rowWeight: box.height, colWeight: box.width } : r
+    );
+    setRooms(relayoutGrid(updated));
+  };
+
+  const handleSwapRooms = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    const dragged = rooms.find(r => r.id === draggedId);
+    const target  = rooms.find(r => r.id === targetId);
+    if (!dragged || !target || dragged.gridRow === undefined || target.gridRow === undefined) return;
+
+    const updated = rooms.map(r => {
+      if (r.id === draggedId) {
+        return { ...r, gridRow: target.gridRow, gridCol: target.gridCol, rowWeight: target.rowWeight, colWeight: target.colWeight };
+      }
+      if (r.id === targetId) {
+        return { ...r, gridRow: dragged.gridRow, gridCol: dragged.gridCol, rowWeight: dragged.rowWeight, colWeight: dragged.colWeight };
+      }
+      return r;
+    });
+    setRooms(relayoutGrid(updated));
+  };
 
   const filteredElements = ELEMENTS.map((cat) => ({
     ...cat,
@@ -458,6 +544,7 @@ export default function CanvasPage() {
             backgroundSize: `${zoom * 0.4}px ${zoom * 0.4}px`,
             backgroundPosition: "center center",
           }}
+          onClick={() => setSelectedRoomId(null)}
         >
           <div
             className="relative transition-transform duration-100 ease-out"
@@ -465,16 +552,30 @@ export default function CanvasPage() {
               transform: `scale(${zoom / 100})`,
             }}
           >
-            {/* White card container from Figma */}
-            <div className="bg-white border-2 border-[#d4d4d4] border-solid h-[460px] w-[680px] rounded-[14px] shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1),0px_1px_2px_-1px_rgba(0,0,0,0.1)] flex items-center justify-center p-[64px] relative overflow-hidden">
-              {mounted && currentProject?.floorPlanUrl ? (
-                <img
-                  src={currentProject.floorPlanUrl}
-                  alt="Floor Plan"
-                  className="max-w-full max-h-full object-contain opacity-80"
-                  onLoad={() => console.log("Floor plan image loaded successfully:", currentProject.floorPlanUrl)}
-                  onError={(e) => console.error("Failed to load floor plan image:", currentProject.floorPlanUrl, e)}
-                />
+            {/* White card container from Figma — now hosts the interactive room grid
+                instead of the static uploaded floor plan image */}
+            <div
+              className="bg-white border-2 border-[#d4d4d4] border-solid h-[460px] w-[680px] rounded-[14px] shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1),0px_1px_2px_-1px_rgba(0,0,0,0.1)] flex items-center justify-center p-[32px] relative overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {mounted && rooms.length > 0 ? (
+                <div data-overlay-root className="relative w-full h-full">
+                  {rooms.map((room) => (
+                    <RoomOverlayBox
+                      key={room.id}
+                      room={room}
+                      isSelected={selectedRoomId === room.id}
+                      hasSelection={!!selectedRoomId}
+                      onSelect={() => setSelectedRoomId(room.id)}
+                      onResize={(box) => handleResizeRoom(room.id, box)}
+                      onSwap={(targetId) => handleSwapRooms(room.id, targetId)}
+                    />
+                  ))}
+                </div>
+              ) : loadingRooms ? (
+                <div className="text-gray-300 text-sm font-medium flex flex-col items-center gap-2 select-none">
+                  <span>Loading floor plan…</span>
+                </div>
               ) : (
                 <div className="text-gray-300 text-sm font-medium flex flex-col items-center gap-2 select-none">
                   <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
