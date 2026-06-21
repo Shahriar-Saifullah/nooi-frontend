@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
+import LandingPromptBox from "@/components/LandingPromptBox";
 
 const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string }) => {
   return (
@@ -53,7 +54,6 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
 
 
 export default function LandingPage() {
-  const [prompt, setPrompt] = useState("");
   const [activeStep, setActiveStep] = useState(0);
   const [activeFilter, setActiveFilter] = useState(0);
 
@@ -61,33 +61,29 @@ export default function LandingPage() {
   const sectionRef = useRef<HTMLElement>(null);
   const isScrolling = useRef(false);
 
-  const handleWheel = useCallback((e: WheelEvent) => {
+  useEffect(() => {
     const section = sectionRef.current;
     if (!section) return;
 
-    const rect = section.getBoundingClientRect();
-    const inView = rect.top <= window.innerHeight / 2 && rect.bottom >= window.innerHeight / 2;
-    if (!inView) return;
+    const handleWheel = (e: WheelEvent) => {
+      if (isScrolling.current) return;
 
-    if (isScrolling.current) return;
+      if (e.deltaY > 0 && activeStep < 3) {
+        e.preventDefault();
+        isScrolling.current = true;
+        setActiveStep(prev => prev + 1);
+        setTimeout(() => { isScrolling.current = false; }, 700);
+      } else if (e.deltaY < 0 && activeStep > 0) {
+        e.preventDefault();
+        isScrolling.current = true;
+        setActiveStep(prev => prev - 1);
+        setTimeout(() => { isScrolling.current = false; }, 700);
+      }
+    };
 
-    if (e.deltaY > 0 && activeStep < 3) {
-      e.preventDefault();
-      isScrolling.current = true;
-      setActiveStep(prev => prev + 1);
-      setTimeout(() => { isScrolling.current = false; }, 700);
-    } else if (e.deltaY < 0 && activeStep > 0) {
-      e.preventDefault();
-      isScrolling.current = true;
-      setActiveStep(prev => prev - 1);
-      setTimeout(() => { isScrolling.current = false; }, 700);
-    }
+    section.addEventListener('wheel', handleWheel, { passive: false });
+    return () => section.removeEventListener('wheel', handleWheel);
   }, [activeStep]);
-
-  useEffect(() => {
-    window.addEventListener('wheel', handleWheel, { passive: false });
-    return () => window.removeEventListener('wheel', handleWheel);
-  }, [handleWheel]);
   // ───────────────────────────────────────────────────────────────────────────
 
   const steps = [
@@ -177,30 +173,7 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div className="bg-white border border-[#d8d9da] rounded-[18px] shadow-[0px_20px_60px_rgba(0,0,0,0.07),0px_4px_16px_rgba(0,0,0,0.04)] w-full max-w-[900px] min-h-[172px] pt-[20px] pb-[14px] px-[20px] flex flex-col justify-between">
-            <div className="w-full">
-              <textarea
-                placeholder="Describing your design ideas and see what magic happens"
-                className="w-full bg-transparent outline-none resize-none font-schibsted font-normal text-[18px] leading-[1.5] text-[#111d27] placeholder:text-[#a0a0a8] h-[68px]"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center justify-between w-full mt-2">
-              <button className="w-[44px] h-[44px] bg-[#f7f8f8] border border-[#d8d9da] rounded-[12px] flex items-center justify-center hover:bg-[#eef0f1] transition-colors">
-                <Image width={100} height={100} src="/assets/vector-1.svg" alt="Attach" className="w-[18px] h-[18px] opacity-60" />
-              </button>
-              <div className="flex items-center gap-[10px]">
-                <button className="w-[32px] h-[32px] flex items-center justify-center opacity-60 hover:opacity-100 transition-opacity">
-                  <Image width={100} height={100} src="/Logo/icon.svg" alt="Voice" className="w-[24px] h-[24px]" />
-                </button>
-                <button className="bg-[#004643] rounded-[10px] py-[10px] px-7 flex items-center gap-[7px] hover:bg-[#003330] transition-colors shadow-md group">
-                  <span className="font-schibsted font-semibold text-white text-[14px] leading-none whitespace-nowrap">Build Now</span>
-                  <Image width={100} height={100} src="/assets/icon.svg" alt="" className="w-[16px] h-[16px] brightness-[10] group-hover:translate-x-0.5 transition-transform" />
-                </button>
-              </div>
-            </div>
-          </div>
+          <LandingPromptBox />
         </div>
       </section>
 
