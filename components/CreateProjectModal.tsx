@@ -32,59 +32,85 @@ interface CreateProjectModalProps {
   onClose: () => void;
 }
 
-// ── Resolve overlapping room boxes ──
-// Gemini's boxes are estimates and can legitimately overlap when rendered standalone
-// (without a photo to visually "hide" small overlaps behind). This nudges/shrinks
-// boxes apart along whichever axis has the smallest overlap, preserving relative
-// layout as closely as possible while guaranteeing no two rooms visually collide.
-function resolveOverlaps(boxes: RoomBox[]): RoomBox[] {
-  const result = boxes.map(b => ({ ...b }));
-  const PAD = 0.4; // small gap between rooms, in %
+// ── Arrange room boxes into a clean, aligned, non-overlapping layout ──
+// Gemini's raw boxes are estimates with inconsistent edges — directly rendering
+// them (or just nudging overlaps apart) produces jagged gaps and a "broken" look.
+// Instead, we cluster rooms into rows based on their vertical center, then pack
+// each row's rooms left-to-right with even spacing and matching row heights —
+// similar to how the original fixed grid looked, but ordered using the real
+// detected layout (which room is roughly above/below/left/right of which).
+function arrangeRoomsAsGrid(boxes: RoomBox[]): RoomBox[] {
+  if (boxes.length === 0) return [];
 
-  const overlapAmount = (a: RoomBox, b: RoomBox) => {
-    const xOverlap = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
-    const yOverlap = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
-    return { xOverlap, yOverlap };
-  };
+  const GAP = 1.5; // gap between boxes, in %
 
-  const MAX_ITERATIONS = 40;
-  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    let anyOverlap = false;
+  // Sort by vertical center to establish row order
+  const withIndex = boxes.map((b, i) => ({ box: b, index: i, centerY: b.top + b.height / 2 }));
+  withIndex.sort((a, b) => a.centerY - b.centerY);
 
-    for (let i = 0; i < result.length; i++) {
-      for (let j = i + 1; j < result.length; j++) {
-        const a = result[i];
-        const b = result[j];
-        const { xOverlap, yOverlap } = overlapAmount(a, b);
+  // Cluster into rows: a new row starts when the vertical gap from the previous
+  // room's center exceeds roughly half a typical room height
+  const avgHeight = boxes.reduce((s, b) => s + b.height, 0) / boxes.length;
+  const rowThreshold = Math.max(avgHeight * 0.6, 8);
 
-        if (xOverlap > 0 && yOverlap > 0) {
-          anyOverlap = true;
-          // Push apart along whichever axis requires the smaller movement
-          if (xOverlap < yOverlap) {
-            const push = xOverlap / 2 + PAD / 2;
-            if (a.left < b.left) {
-              a.left = Math.max(0, a.left - push);
-              b.left = Math.min(100 - b.width, b.left + push);
-            } else {
-              b.left = Math.max(0, b.left - push);
-              a.left = Math.min(100 - a.width, a.left + push);
-            }
-          } else {
-            const push = yOverlap / 2 + PAD / 2;
-            if (a.top < b.top) {
-              a.top = Math.max(0, a.top - push);
-              b.top = Math.min(100 - b.height, b.top + push);
-            } else {
-              b.top = Math.max(0, b.top - push);
-              a.top = Math.min(100 - a.height, a.top + push);
-            }
-          }
-        }
-      }
+  const rows: typeof withIndex[] = [];
+  let currentRow: typeof withIndex = [];
+  let lastCenterY: number | null = null;
+
+  for (const item of withIndex) {
+    if (lastCenterY === null || item.centerY - lastCenterY <= rowThreshold) {
+      currentRow.push(item);
+    } else {
+      rows.push(currentRow);
+      currentRow = [item];
     }
-
-    if (!anyOverlap) break;
+    lastCenterY = item.centerY;
   }
+  if (currentRow.length > 0) rows.push(currentRow);
+
+  // Within each row, sort left-to-right by original horizontal position
+  rows.forEach(row => row.sort((a, b) => a.box.left - b.box.left));
+
+  // Compute row heights proportional to the tallest room in that row,
+  // then lay out rows top-to-bottom filling the full 0-100 canvas height.
+  // Minimum weight floor prevents rows of small rooms from becoming too thin to read.
+  const rawRowWeights = rows.map(row => Math.max(...row.map(r => r.box.height)));
+  const maxRawRowWeight = Math.max(...rawRowWeights);
+  const rowWeights = rawRowWeights.map(w => Math.max(w, maxRawRowWeight * 0.35));
+  const totalWeight = rowWeights.reduce((s, w) => s + w, 0);
+  const totalGapY = GAP * (rows.length - 1);
+  const availableHeight = 100 - totalGapY;
+
+  const result: RoomBox[] = new Array(boxes.length);
+  let yCursor = 0;
+
+  rows.forEach((row, rowIdx) => {
+    const rowHeight = (rowWeights[rowIdx] / totalWeight) * availableHeight;
+
+    // Within the row, distribute width proportional to each box's original width,
+    // but enforce a minimum weight so tiny rooms (stairs, elevator, closets) still
+    // get a usable, clickable share of the row instead of being squeezed to nothing
+    const rawWidthWeights = row.map(r => r.box.width);
+    const maxRawWidth = Math.max(...rawWidthWeights);
+    const widthWeights = rawWidthWeights.map(w => Math.max(w, maxRawWidth * 0.22));
+    const totalWidthWeight = widthWeights.reduce((s, w) => s + w, 0);
+    const totalGapX = GAP * (row.length - 1);
+    const availableWidth = 100 - totalGapX;
+
+    let xCursor = 0;
+    row.forEach((item, colIdx) => {
+      const boxWidth = (widthWeights[colIdx] / totalWidthWeight) * availableWidth;
+      result[item.index] = {
+        top:    yCursor,
+        left:   xCursor,
+        width:  boxWidth,
+        height: rowHeight,
+      };
+      xCursor += boxWidth + GAP;
+    });
+
+    yCursor += rowHeight + GAP;
+  });
 
   return result;
 }
@@ -211,13 +237,18 @@ function RoomOverlayBox({
       }}
       title={room.name}
     >
-      <span
-        className={`text-[11px] font-semibold text-center leading-tight line-clamp-2 rounded px-1 pointer-events-none ${
-          dimmed ? 'text-[#8e9493] bg-transparent' : 'text-[#004643] bg-white/70'
-        }`}
-      >
-        {room.name}
-      </span>
+      {(box.width >= 6 && box.height >= 6) ? (
+        <span
+          className={`text-[11px] font-semibold text-center leading-tight line-clamp-2 rounded px-1 pointer-events-none break-words ${
+            dimmed ? 'text-[#8e9493] bg-transparent' : 'text-[#004643] bg-white/70'
+          }`}
+        >
+          {room.name}
+        </span>
+      ) : (
+        // Box too small to fit readable text — show a small dot instead of truncating mid-word
+        <span className={`w-[6px] h-[6px] rounded-full pointer-events-none ${dimmed ? 'bg-[#8e9493]/50' : 'bg-[#004643]/60'}`} />
+      )}
 
       {isSelected && (
         <>
@@ -408,7 +439,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
           const roomsWithBoxes = mapped.filter((r: Room) => r.box);
           const roomsWithoutBoxes = mapped.filter((r: Room) => !r.box);
           if (roomsWithBoxes.length > 0) {
-            const resolvedBoxes = resolveOverlaps(roomsWithBoxes.map((r: Room) => r.box!));
+            const resolvedBoxes = arrangeRoomsAsGrid(roomsWithBoxes.map((r: Room) => r.box!));
             roomsWithBoxes.forEach((r: Room, i: number) => { r.box = resolvedBoxes[i]; });
           }
 
