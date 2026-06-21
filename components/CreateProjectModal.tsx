@@ -23,12 +23,96 @@ interface Room {
   height: string;
   color: string;
   confidenceColor: string;
-  box?: RoomBox; // position on the floor plan image, as % (top/left/width/height)
+  box?: RoomBox; // current position on the floor plan image, as % (top/left/width/height)
+  originalBox?: RoomBox; // AI's original suggestion, kept so the user can reset after manual edits
 }
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+// ── Arrange room boxes into a clean, aligned, non-overlapping layout ──
+// Gemini's raw boxes are estimates with inconsistent edges — directly rendering
+// them (or just nudging overlaps apart) produces jagged gaps and a "broken" look.
+// Instead, we cluster rooms into rows based on their vertical center, then pack
+// each row's rooms left-to-right with even spacing and matching row heights —
+// similar to how the original fixed grid looked, but ordered using the real
+// detected layout (which room is roughly above/below/left/right of which).
+function arrangeRoomsAsGrid(boxes: RoomBox[]): RoomBox[] {
+  if (boxes.length === 0) return [];
+
+  const GAP = 1.5; // gap between boxes, in %
+
+  // Sort by vertical center to establish row order
+  const withIndex = boxes.map((b, i) => ({ box: b, index: i, centerY: b.top + b.height / 2 }));
+  withIndex.sort((a, b) => a.centerY - b.centerY);
+
+  // Cluster into rows: a new row starts when the vertical gap from the previous
+  // room's center exceeds roughly half a typical room height
+  const avgHeight = boxes.reduce((s, b) => s + b.height, 0) / boxes.length;
+  const rowThreshold = Math.max(avgHeight * 0.6, 8);
+
+  const rows: typeof withIndex[] = [];
+  let currentRow: typeof withIndex = [];
+  let lastCenterY: number | null = null;
+
+  for (const item of withIndex) {
+    if (lastCenterY === null || item.centerY - lastCenterY <= rowThreshold) {
+      currentRow.push(item);
+    } else {
+      rows.push(currentRow);
+      currentRow = [item];
+    }
+    lastCenterY = item.centerY;
+  }
+  if (currentRow.length > 0) rows.push(currentRow);
+
+  // Within each row, sort left-to-right by original horizontal position
+  rows.forEach(row => row.sort((a, b) => a.box.left - b.box.left));
+
+  // Compute row heights proportional to the tallest room in that row,
+  // then lay out rows top-to-bottom filling the full 0-100 canvas height.
+  // Minimum weight floor prevents rows of small rooms from becoming too thin to read.
+  const rawRowWeights = rows.map(row => Math.max(...row.map(r => r.box.height)));
+  const maxRawRowWeight = Math.max(...rawRowWeights);
+  const rowWeights = rawRowWeights.map(w => Math.max(w, maxRawRowWeight * 0.35));
+  const totalWeight = rowWeights.reduce((s, w) => s + w, 0);
+  const totalGapY = GAP * (rows.length - 1);
+  const availableHeight = 100 - totalGapY;
+
+  const result: RoomBox[] = new Array(boxes.length);
+  let yCursor = 0;
+
+  rows.forEach((row, rowIdx) => {
+    const rowHeight = (rowWeights[rowIdx] / totalWeight) * availableHeight;
+
+    // Within the row, distribute width proportional to each box's original width,
+    // but enforce a minimum weight so tiny rooms (stairs, elevator, closets) still
+    // get a usable, clickable share of the row instead of being squeezed to nothing
+    const rawWidthWeights = row.map(r => r.box.width);
+    const maxRawWidth = Math.max(...rawWidthWeights);
+    const widthWeights = rawWidthWeights.map(w => Math.max(w, maxRawWidth * 0.22));
+    const totalWidthWeight = widthWeights.reduce((s, w) => s + w, 0);
+    const totalGapX = GAP * (row.length - 1);
+    const availableWidth = 100 - totalGapX;
+
+    let xCursor = 0;
+    row.forEach((item, colIdx) => {
+      const boxWidth = (widthWeights[colIdx] / totalWidthWeight) * availableWidth;
+      result[item.index] = {
+        top:    yCursor,
+        left:   xCursor,
+        width:  boxWidth,
+        height: rowHeight,
+      };
+      xCursor += boxWidth + GAP;
+    });
+
+    yCursor += rowHeight + GAP;
+  });
+
+  return result;
 }
 
 // ── Draggable / resizable colored room overlay ──
@@ -40,11 +124,13 @@ type DragMode = 'move' | 'resize-tl' | 'resize-tr' | 'resize-bl' | 'resize-br';
 function RoomOverlayBox({
   room,
   isSelected,
+  hasSelection,
   onSelect,
   onChange,
 }: {
   room: Room;
   isSelected: boolean;
+  hasSelection: boolean;
   onSelect: () => void;
   onChange: (box: RoomBox) => void;
 }) {
@@ -127,27 +213,42 @@ function RoomOverlayBox({
 
   const handleStyle = "absolute w-[10px] h-[10px] bg-white border-2 border-[#004643] rounded-full z-30 hover:scale-125 transition-transform";
 
+  // When another room is selected, fade this one to a thin outline so the
+  // selected room's true boundary is easy to see against the real floor plan.
+  const dimmed = hasSelection && !isSelected;
+
   return (
     <div
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
       onPointerDown={(e) => isSelected && startDrag('move', e)}
-      className={`absolute flex items-center justify-center rounded-[3px] transition-colors border-2 ${
+      className={`absolute flex items-center justify-center rounded-[3px] transition-all border-2 ${
         isSelected
           ? 'border-[#004643] shadow-md z-20 cursor-move'
-          : 'border-transparent hover:border-[#004643]/50 z-10 cursor-pointer'
+          : dimmed
+            ? 'border-[#8e9493]/40 z-10 cursor-pointer hover:border-[#004643]/60'
+            : 'border-transparent hover:border-[#004643]/50 z-10 cursor-pointer'
       }`}
       style={{
         top:             `${box.top}%`,
         left:            `${box.left}%`,
         width:           `${box.width}%`,
         height:          `${box.height}%`,
-        backgroundColor: room.color + (isSelected ? '80' : '55'),
+        backgroundColor: dimmed ? 'transparent' : room.color + (isSelected ? '80' : '55'),
       }}
       title={room.name}
     >
-      <span className="text-[11px] font-semibold text-[#004643] text-center leading-tight line-clamp-2 bg-white/70 rounded px-1 pointer-events-none">
-        {room.name}
-      </span>
+      {(box.width >= 6 && box.height >= 6) ? (
+        <span
+          className={`text-[11px] font-semibold text-center leading-tight line-clamp-2 rounded px-1 pointer-events-none break-words ${
+            dimmed ? 'text-[#8e9493] bg-transparent' : 'text-[#004643] bg-white/70'
+          }`}
+        >
+          {room.name}
+        </span>
+      ) : (
+        // Box too small to fit readable text — show a small dot instead of truncating mid-word
+        <span className={`w-[6px] h-[6px] rounded-full pointer-events-none ${dimmed ? 'bg-[#8e9493]/50' : 'bg-[#004643]/60'}`} />
+      )}
 
       {isSelected && (
         <>
@@ -189,47 +290,6 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   // ── Rooms — empty by default, filled from Gemini API response ──
   const [rooms, setRooms] = useState<Room[]>([]);
   const [floorPlanUrl, setFloorPlanUrl] = useState<string | null>(null);
-  const floorPlanImgRef = useRef<HTMLImageElement>(null);
-  const [imgRenderBox, setImgRenderBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
-
-  // Recalculate the actual rendered image bounds (accounts for object-contain letterboxing)
-  const recalcImgBounds = () => {
-    const img = floorPlanImgRef.current;
-    if (!img || !img.naturalWidth || !img.naturalHeight) return;
-    const containerW = img.clientWidth;
-    const containerH = img.clientHeight;
-    const naturalRatio = img.naturalWidth / img.naturalHeight;
-    const containerRatio = containerW / containerH;
-
-    let renderW: number, renderH: number, offsetX: number, offsetY: number;
-    if (naturalRatio > containerRatio) {
-      // image is wider — letterboxed top/bottom
-      renderW = containerW;
-      renderH = containerW / naturalRatio;
-      offsetX = 0;
-      offsetY = (containerH - renderH) / 2;
-    } else {
-      // image is taller — letterboxed left/right
-      renderH = containerH;
-      renderW = containerH * naturalRatio;
-      offsetY = 0;
-      offsetX = (containerW - renderW) / 2;
-    }
-
-    setImgRenderBox({
-      top:    (offsetY / containerH) * 100,
-      left:   (offsetX / containerW) * 100,
-      width:  (renderW / containerW) * 100,
-      height: (renderH / containerH) * 100,
-    });
-  };
-
-  useEffect(() => {
-    if (step !== 3 || !floorPlanUrl) return;
-    recalcImgBounds();
-    window.addEventListener('resize', recalcImgBounds);
-    return () => window.removeEventListener('resize', recalcImgBounds);
-  }, [step, floorPlanUrl]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -248,7 +308,6 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         setRooms([]);
         setSelectedRoomId(null);
         setFloorPlanUrl(null);
-        setImgRenderBox(null);
       }, 300);
       return () => clearTimeout(timer);
     }
@@ -284,6 +343,12 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
   const handleUpdateRoomBox = (id: string, box: RoomBox) => {
     setRooms(rooms.map(room => room.id === id ? { ...room, box } : room));
+  };
+
+  const handleResetRoomBox = (id: string) => {
+    setRooms(rooms.map(room =>
+      room.id === id && room.originalBox ? { ...room, box: { ...room.originalBox } } : room
+    ));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -355,20 +420,30 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
         // ── Use Gemini-detected rooms ──
         if (result.detected_rooms && result.detected_rooms.length > 0) {
-          setRooms(
-            result.detected_rooms.map((room: any) => ({
-              id:              room.id,
-              name:            room.name,
-              confidence:      `${room.confidence}%`,
-              // Use dimensions extracted from the floor plan text if available, else blank for manual entry
-              length:          room.length ? String(room.length) : "",
-              width:           room.width ? String(room.width) : "",
-              height:          "2.4",
-              color:           room.color || "#e5e7eb",
-              confidenceColor: room.confidence >= 85 ? "#b3b9b9" : "#9c7b31",
-              box:             room.box || undefined,
-            }))
-          );
+          const mapped = result.detected_rooms.map((room: any) => ({
+            id:              room.id,
+            name:            room.name,
+            confidence:      `${room.confidence}%`,
+            // Use dimensions extracted from the floor plan text if available, else blank for manual entry
+            length:          room.length ? String(room.length) : "",
+            width:           room.width ? String(room.width) : "",
+            height:          "2.4",
+            color:           room.color || "#e5e7eb",
+            confidenceColor: room.confidence >= 85 ? "#b3b9b9" : "#9c7b31",
+            box:             room.box || undefined,
+            originalBox:     room.box || undefined,
+          }));
+
+          // Resolve any overlapping boxes so rooms render as clean, non-overlapping
+          // blocks while keeping their relative layout close to the real floor plan
+          const roomsWithBoxes = mapped.filter((r: Room) => r.box);
+          const roomsWithoutBoxes = mapped.filter((r: Room) => !r.box);
+          if (roomsWithBoxes.length > 0) {
+            const resolvedBoxes = arrangeRoomsAsGrid(roomsWithBoxes.map((r: Room) => r.box!));
+            roomsWithBoxes.forEach((r: Room, i: number) => { r.box = resolvedBoxes[i]; });
+          }
+
+          setRooms([...roomsWithBoxes, ...roomsWithoutBoxes]);
         } else {
           // AI detection returned nothing — give user a blank slate to add manually
           setRooms([]);
@@ -537,84 +612,60 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               {/* ── Step 3 — Rooms from Gemini ── */}
               {step === 3 && (
                 <div className="flex gap-[24px] h-full">
-                  {/* Real floor plan image with colored room overlays */}
-                  <div className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden flex items-center justify-center">
-                    {floorPlanUrl ? (
-                      floorPlanUrl.toLowerCase().endsWith('.pdf') ? (
-                        <div className="flex flex-col items-center justify-center gap-3 text-center px-6">
-                          <div className="w-12 h-12 bg-white shadow-sm border border-gray-100 rounded-full flex items-center justify-center">
-                            <UploadCloud className="w-5 h-5 text-[#004643]" />
-                          </div>
-                          <p className="text-[13px] text-gray-500">
-                            PDF floor plan uploaded. Preview isn't shown here, but rooms were detected from it below.
-                          </p>
-                          <a
-                            href={floorPlanUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[13px] font-medium text-[#004643] hover:underline"
-                          >
-                            View original PDF
-                          </a>
-                        </div>
-                      ) : (
-                        <div className="relative w-full h-full">
-                          <img
-                            ref={floorPlanImgRef}
-                            src={floorPlanUrl}
-                            alt="Uploaded floor plan"
-                            className="w-full h-full object-contain p-3"
-                            onLoad={recalcImgBounds}
-                          />
-                          {/* Colored room overlays — positioned using Gemini bounding boxes,
-                              aligned to the actual rendered image bounds (accounts for object-contain letterboxing).
-                              Selected room can be dragged to move and resized via corner handles. */}
-                          {imgRenderBox && (
-                            <div
-                              data-overlay-root
-                              className="absolute"
-                              style={{
-                                top:    `calc(${imgRenderBox.top}% + 12px)`,
-                                left:   `calc(${imgRenderBox.left}% + 12px)`,
-                                width:  `calc(${imgRenderBox.width}% - 24px)`,
-                                height: `calc(${imgRenderBox.height}% - 24px)`,
-                              }}
-                            >
-                              {rooms.filter(r => r.box).map((room) => (
-                                <RoomOverlayBox
-                                  key={room.id}
-                                  room={room}
-                                  isSelected={selectedRoomId === room.id}
-                                  onSelect={() => setSelectedRoomId(room.id)}
-                                  onChange={(box) => handleUpdateRoomBox(room.id, box)}
-                                />
-                              ))}
-                            </div>
-                          )}
-                          {rooms.length === 0 && (
-                            <div className="absolute inset-0 flex items-end justify-center pb-6 bg-gradient-to-t from-white/90 via-white/10 to-transparent">
-                              <p className="text-gray-500 text-[13px] text-center px-4 bg-white/90 rounded-lg py-2 shadow-sm">
-                                No rooms detected. Add rooms manually using + Add.
-                              </p>
-                            </div>
-                          )}
-                          {rooms.length > 0 && rooms.every(r => !r.box) && (
-                            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-gray-500 text-[11px] text-center px-3 py-1 bg-white/90 rounded-full shadow-sm">
-                              Room positions unavailable — see list to the right
-                            </div>
-                          )}
-                          {rooms.some(r => r.box) && (
-                            <div className="absolute top-2 left-1/2 -translate-x-1/2 text-gray-500 text-[10px] text-center px-2.5 py-1 bg-white/90 rounded-full shadow-sm whitespace-nowrap">
-                              Select a room, then drag to move or use corner handles to resize
-                            </div>
-                          )}
-                        </div>
-                      )
+                  {/* Room layout — colored boxes only, positioned to mirror the real floor plan's layout */}
+                  <div
+                    onClick={() => setSelectedRoomId(null)}
+                    className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden"
+                  >
+                    {rooms.length === 0 ? (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <p className="text-gray-400 text-[13px] text-center px-4">
+                          No rooms detected. Add rooms manually using the + Add button.
+                        </p>
+                      </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center gap-2 text-center px-6">
-                        <p className="text-gray-400 text-[13px]">Floor plan preview unavailable.</p>
+                      <div data-overlay-root className="absolute inset-[16px]">
+                        {rooms.filter(r => r.box).map((room) => (
+                          <RoomOverlayBox
+                            key={room.id}
+                            room={room}
+                            isSelected={selectedRoomId === room.id}
+                            hasSelection={!!selectedRoomId}
+                            onSelect={() => setSelectedRoomId(room.id)}
+                            onChange={(box) => handleUpdateRoomBox(room.id, box)}
+                          />
+                        ))}
+                        {rooms.some(r => !r.box) && (
+                          <div className="absolute bottom-0 left-0 right-0 text-gray-400 text-[11px] text-center px-3 py-1">
+                            Some rooms have no position data — see list to the right
+                          </div>
+                        )}
                       </div>
                     )}
+
+                    {rooms.length > 0 && (
+                      <div className="absolute top-2 left-1/2 -translate-x-1/2 text-gray-500 text-[10px] text-center px-2.5 py-1 bg-white/90 rounded-full shadow-sm whitespace-nowrap z-30">
+                        {selectedRoomId ? "Drag the box to move, or corner handles to resize" : "Click a room to select and adjust its outline"}
+                      </div>
+                    )}
+                    {(() => {
+                      const selRoom = rooms.find(r => r.id === selectedRoomId);
+                      const changed = selRoom?.box && selRoom?.originalBox && (
+                        selRoom.box.top !== selRoom.originalBox.top ||
+                        selRoom.box.left !== selRoom.originalBox.left ||
+                        selRoom.box.width !== selRoom.originalBox.width ||
+                        selRoom.box.height !== selRoom.originalBox.height
+                      );
+                      if (!changed) return null;
+                      return (
+                        <button
+                          onClick={() => handleResetRoomBox(selRoom!.id)}
+                          className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[11px] font-medium text-[#004643] bg-white border border-[#c3f4f0] hover:bg-[#eaf8f4] px-3 py-1.5 rounded-full shadow-sm transition-colors z-30"
+                        >
+                          Reset to AI suggestion
+                        </button>
+                      );
+                    })()}
                   </div>
 
                   {/* Room list — primary review/edit interaction */}

@@ -148,7 +148,7 @@ const LIBRARY_SECTIONS = [
   }
 ];
 
-// ─── SVG Icons ────────────────────────────────────────────────────────────────
+// ─── SVG Icons ---────────────────────────────────────────────────────────────────
 
 function FurnitureIcon({ type, size = 24 }: { type: string; size?: number }) {
   const s = size;
