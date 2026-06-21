@@ -229,7 +229,7 @@ export default function CanvasPage() {
   })).filter((cat) => cat.items.length > 0);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#f5f5f5] overflow-hidden select-none" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div className="flex flex-col h-screen w-full bg-[#f5f5f5] overflow-hidden select-none" style={{ fontFamily: "'Inter', sans-serif" }}>
       {/* ── Navbar ── */}
       <header className="h-[56px] border-b border-[#e5e5e5] bg-white flex items-center justify-between px-4 shrink-0">
         {/* Left container */}
@@ -283,7 +283,7 @@ export default function CanvasPage() {
       </header>
 
       {/* Main layout container wrapping panels */}
-      <div className="flex flex-row flex-1 overflow-hidden p-3 gap-3 bg-[#f5f5f5]">
+      <div className="flex flex-row flex-1 overflow-hidden p-3 gap-3 bg-[#f5f5f5] min-w-0">
 
       {/* ══════════════════════════════════════════════════════════════════════
           LEFT PANEL: AI Design Assistant
@@ -453,7 +453,7 @@ export default function CanvasPage() {
       {/* ══════════════════════════════════════════════════════════════════════
           CENTER: Canvas
           ══════════════════════════════════════════════════════════════════════ */}
-      <main className="flex-1 flex flex-col overflow-hidden relative bg-white border border-[#e5e5e5] rounded-[16px] shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white border border-[#e5e5e5] rounded-[16px] shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
         {/* Top bar — 2D / 3D Switcher */}
         <div className="absolute top-[18px] left-1/2 -translate-x-1/2 z-10 bg-white border border-[#e5e5e5] rounded-full p-[5px] flex items-center gap-[4px] shadow-[0px_4px_6px_rgba(0,0,0,0.05),0px_2px_4px_rgba(0,0,0,0.05)]">
           {(["2d", "3d"] as const).map((mode) => {
