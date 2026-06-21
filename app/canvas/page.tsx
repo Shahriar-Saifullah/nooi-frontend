@@ -11,8 +11,6 @@ import {
   Sofa,
   Sun,
   Layers,
-  Send,
-  ImageIcon,
   Sparkles,
   ChevronDown,
   Settings2,
@@ -25,6 +23,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import CanvasPromptBox from "@/components/CanvasPromptBox";
 import { useProjectStore } from "@/lib/store";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -201,11 +200,8 @@ export default function CanvasPage() {
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [zoom, setZoom] = useState(100);
   const [searchQuery, setSearchQuery] = useState("");
-  const [designPrompt, setDesignPrompt] = useState("");
   const [mounted, setMounted] = useState(false);
   const { currentProject } = useProjectStore();
-  const [attachedFile, setAttachedFile] = useState<string | null>(null);
-  const isPromptActive = designPrompt.trim() !== "" || attachedFile !== null;
   const [activeEditSubTab, setActiveEditSubTab] = useState<"settings" | "layers" | "palette">("layers");
   const [showLibrary, setShowLibrary] = useState(false);
   const [librarySearchQuery, setLibrarySearchQuery] = useState("");
@@ -229,7 +225,7 @@ export default function CanvasPage() {
   })).filter((cat) => cat.items.length > 0);
 
   return (
-    <div className="flex flex-col h-screen w-full bg-[#f5f5f5] overflow-hidden select-none" style={{ fontFamily: "'Inter', sans-serif" }}>
+    <div className="flex flex-col h-screen w-full bg-[#f5f5f5] overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
       {/* ── Navbar ── */}
       <header className="h-[56px] border-b border-[#e5e5e5] bg-white flex items-center justify-between px-4 shrink-0">
         {/* Left container */}
@@ -289,7 +285,7 @@ export default function CanvasPage() {
           LEFT PANEL: AI Design Assistant
           ══════════════════════════════════════════════════════════════════════ */}
       <aside
-        className="shrink-0 bg-white flex flex-col overflow-hidden rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06),0_4px_12px_-2px_rgba(0,0,0,0.04)]"
+        className="shrink-0 bg-white flex flex-col overflow-visible rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06),0_4px_12px_-2px_rgba(0,0,0,0.04)]"
         style={{ width: 280 }}
       >
         {/* ── Header ── */}
@@ -365,14 +361,6 @@ export default function CanvasPage() {
             {SUGGESTION_CHIPS.map((chip) => (
               <button
                 key={chip}
-                onClick={() => {
-                  setDesignPrompt((prev) => {
-                    const base = prev.trim();
-                    if (base === "") return chip;
-                    if (base.endsWith(",") || base.endsWith(".")) return `${base} ${chip}`;
-                    return `${base}, ${chip}`;
-                  });
-                }}
                 className="flex items-center gap-1.5 text-left text-[11px] text-[#525252] hover:text-[#0a0a0a] transition-colors group"
               >
                 <span className="text-[#a3a3a3] group-hover:text-[#525252] transition-colors text-[11px]">+</span>
@@ -383,70 +371,7 @@ export default function CanvasPage() {
         </div>
 
         {/* ── Prompt Input ── */}
-        <div className="px-4 pb-3">
-          <div className="border border-[#e5e5e5] rounded-[10px] overflow-hidden">
-            <textarea
-              value={designPrompt}
-              onChange={(e) => setDesignPrompt(e.target.value)}
-              placeholder="Describe your design vision..."
-              className="w-full resize-none text-[12px] text-[#0a0a0a] placeholder:text-[#a3a3a3] focus:outline-none px-3 pt-2.5 pb-1 bg-transparent"
-              rows={2}
-            />
-            {attachedFile && (
-              <div className="flex items-center justify-between gap-1.5 px-2.5 py-1 text-[11px] text-[#004643] font-medium bg-[#eaf8f4] rounded-[6px] mx-3 mb-2 w-fit">
-                <span className="truncate max-w-[180px]">{attachedFile}</span>
-                <button
-                  type="button"
-                  onClick={() => setAttachedFile(null)}
-                  className="text-[#a3a3a3] hover:text-red-500 font-bold ml-1"
-                >
-                  ×
-                </button>
-              </div>
-            )}
-            <div className="flex items-center justify-between px-3 pb-2">
-              <label className="flex items-center gap-1.5 text-[11px] text-[#a3a3a3] hover:text-[#525252] transition-colors cursor-pointer">
-                <ImageIcon size={13} />
-                <span>Upload Inspo</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files.length > 0) {
-                      setAttachedFile(e.target.files[0].name);
-                    }
-                  }}
-                />
-              </label>
-              <button
-                disabled={!isPromptActive}
-                className={`w-[26px] h-[26px] rounded-full flex items-center justify-center text-white transition-all ${
-                  isPromptActive
-                    ? "bg-[#003832] hover:bg-[#004d44] cursor-pointer"
-                    : "bg-[#003832] opacity-40 cursor-not-allowed"
-                }`}
-              >
-                <Send size={11} />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Generate Button ── */}
-        <div className="px-4 pb-4">
-          <button
-            disabled={!isPromptActive}
-            className={`w-full h-[38px] text-white rounded-[10px] flex items-center justify-center gap-2 text-[13px] font-medium transition-all ${
-              isPromptActive
-                ? "bg-[#003832] hover:bg-[#004d44] cursor-pointer"
-                : "bg-[#003832] opacity-40 cursor-not-allowed"
-            }`}
-          >
-            <Sparkles size={14} />
-            <span>Generate design</span>
-          </button>
-        </div>
+        <CanvasPromptBox />
       </aside>
 
 
