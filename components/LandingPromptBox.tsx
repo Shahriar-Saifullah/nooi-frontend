@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { generatePreview } from "@/lib/api/ai";
@@ -12,6 +12,8 @@ export default function LandingPromptBox() {
   const [isRecording, setIsRecording] = useState(false);
   const [selectedModel, setSelectedModel] = useState<AiModel>("gemini");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [modelMenuOpensUp, setModelMenuOpensUp] = useState(false);
+  const modelButtonRef = useRef<HTMLButtonElement>(null);
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -96,9 +98,16 @@ export default function LandingPromptBox() {
                 the same Gemini image model on the backend for now */}
             <div style={{ position: "relative" }}>
               <button
+                ref={modelButtonRef}
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
+                  if (!modelMenuOpen && modelButtonRef.current) {
+                    const rect = modelButtonRef.current.getBoundingClientRect();
+                    const spaceBelow = window.innerHeight - rect.bottom;
+                    const estimatedMenuHeight = 220; // ~5 items at ~44px each
+                    setModelMenuOpensUp(spaceBelow < estimatedMenuHeight);
+                  }
                   setModelMenuOpen(v => !v);
                   setMentionMenuOpen(false);
                 }}
@@ -118,8 +127,18 @@ export default function LandingPromptBox() {
               </button>
               {modelMenuOpen && (
                 <div
-                  style={{ position: "absolute", top: "100%", left: 0, marginTop: 6, zIndex: 9999, width: 180 }}
-                  className="bg-white border border-[#d8d9da] rounded-[10px] shadow-[0px_4px_20px_rgba(0,0,0,0.1)] overflow-hidden"
+                  style={{
+                    position: "absolute",
+                    ...(modelMenuOpensUp
+                      ? { bottom: "100%", marginBottom: 6 }
+                      : { top: "100%", marginTop: 6 }),
+                    left: 0,
+                    zIndex: 9999,
+                    width: 180,
+                    maxHeight: "min(260px, 60vh)",
+                    overflowY: "auto",
+                  }}
+                  className="bg-white border border-[#d8d9da] rounded-[10px] shadow-[0px_4px_20px_rgba(0,0,0,0.1)]"
                 >
                   {AI_MODEL_OPTIONS.map(model => (
                     <button
