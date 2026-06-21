@@ -144,13 +144,13 @@ export async function getProject(projectId: string) {
 
 // ─── Generate an AI render image from a prompt + current room layout ─────────
 
-export type AiModel = 'gemini' | 'dalle' | 'midjourney' | 'flux' | 'stable-diffusion';
+export type AiModel = 'gemini' | 'dalle' | 'midjourney' | 'stable-diffusion';
 
 export const AI_MODEL_OPTIONS: { value: AiModel; label: string }[] = [
   { value: 'gemini',            label: 'Gemini' },
   { value: 'dalle',             label: 'DALL-E' },
   { value: 'midjourney',        label: 'Midjourney' },
-  { value: 'flux',              label: 'Flux' },
+  // { value: 'flux',              label: 'Flux' },
   { value: 'stable-diffusion',  label: 'Stable Diffusion' },
 ];
 
