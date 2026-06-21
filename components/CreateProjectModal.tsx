@@ -55,8 +55,19 @@ interface GridAssignment {
 // We cluster rooms into rows based on their vertical center, then assign each
 // room a row + column index. The actual pixel layout is computed separately by
 // relayoutGrid() so it can be re-run after resize/swap edits.
+//
+// A max-columns-per-row cap prevents all rooms collapsing into one long strip
+// when Gemini's boxes happen to share a similar vertical band (common on simple
+// single-floor plans) — rooms instead wrap into additional rows, similar to how
+// a card grid reflows, so it always reads as a comfortable multi-row layout.
 function assignGridPositions(boxes: RoomBox[]): GridAssignment[] {
   if (boxes.length === 0) return [];
+
+  const maxCols =
+    boxes.length <= 2 ? boxes.length
+    : boxes.length <= 6 ? 3
+    : boxes.length <= 9 ? 4
+    : 5;
 
   const withIndex = boxes.map((b, i) => ({ box: b, index: i, centerY: b.top + b.height / 2 }));
   withIndex.sort((a, b) => a.centerY - b.centerY);
@@ -69,11 +80,16 @@ function assignGridPositions(boxes: RoomBox[]): GridAssignment[] {
   let lastCenterY: number | null = null;
 
   for (const item of withIndex) {
-    if (lastCenterY === null || item.centerY - lastCenterY <= rowThreshold) {
-      currentRow.push(item);
-    } else {
-      rows.push(currentRow);
+    const startsNewRow =
+      lastCenterY === null ||
+      item.centerY - lastCenterY > rowThreshold ||
+      currentRow.length >= maxCols; // hard wrap once the row is full, regardless of vertical position
+
+    if (startsNewRow) {
+      if (currentRow.length > 0) rows.push(currentRow);
       currentRow = [item];
+    } else {
+      currentRow.push(item);
     }
     lastCenterY = item.centerY;
   }
