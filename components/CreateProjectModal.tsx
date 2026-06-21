@@ -346,7 +346,7 @@ function RoomOverlayBox({
     >
       {(box.width >= 6 && box.height >= 6) ? (
         <span
-          className={`text-[11px] font-semibold text-center leading-tight line-clamp-2 rounded px-1 pointer-events-none break-words ${
+          className={`text-[11px] font-semibold text-center leading-tight rounded px-1 pointer-events-none whitespace-nowrap overflow-hidden text-ellipsis block w-full ${
             dimmed ? 'text-[#8e9493] bg-transparent' : 'text-[#004643] bg-white/70'
           }`}
         >
@@ -942,6 +942,15 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
               {/* ── Step 4 — Dimensions ── */}
               {step === 4 && (
                 <div className="flex flex-col gap-4">
+                  {rooms.every(r => r.length === "" || r.width === "") && (
+                    <div className="flex items-start gap-2 bg-[#fff8ec] border border-[#fde68a]/60 rounded-xl px-4 py-2.5">
+                      <AlertCircle className="w-[16px] h-[16px] text-[#9c7b31] mt-[1px] shrink-0" />
+                      <p className="text-[12px] text-[#7a5f23] leading-snug">
+                        No room measurements were found printed on your floor plan, so all fields start blank — enter them manually below.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between bg-[#fafafa] px-4 py-2 rounded-xl border border-gray-200">
                     <div className="flex items-center gap-2">
                       <AlertCircle className="w-[18px] h-[18px] text-[#004643]" />
