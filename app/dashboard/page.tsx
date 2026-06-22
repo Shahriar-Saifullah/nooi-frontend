@@ -5,13 +5,15 @@ import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Home, Clock, FolderOpen, Crown, ChevronRight,
-  ArrowUpRight, Loader2, LogOut, User, Settings
+  ArrowUpRight, Loader2, LogOut, User, Settings, Languages
 } from "lucide-react";
 import Image from "next/image";
 import CreateProjectModal from "@/components/CreateProjectModal";
+import { useLanguage } from "@/lib/i18n/useTranslations";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { language, toggleLanguage } = useLanguage();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
@@ -145,6 +147,16 @@ export default function DashboardPage() {
                     >
                       <Settings className="w-4 h-4 text-[#737373]" />
                       Settings
+                    </button>
+                    {/* Switch language — toggles the site between English and
+                        Arabic. Currently only the Home page has translated
+                        content; the dashboard UI itself stays English for now. */}
+                    <button
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[#0a0a0a] hover:bg-[#f5f5f5] transition-colors"
+                      onClick={toggleLanguage}
+                    >
+                      <Languages className="w-4 h-4 text-[#737373]" />
+                      {language === "en" ? "العربية" : "English"}
                     </button>
                   </div>
 
