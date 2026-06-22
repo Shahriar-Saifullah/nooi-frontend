@@ -4,11 +4,14 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
+import { useHomeTranslations, useLanguage } from "@/lib/i18n/useTranslations";
 
 export default function Navbar() {
     const [productsOpen, setProductsOpen] = useState(false);
     const [aboutOpen, setAboutOpen] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const t = useHomeTranslations();
+    const { language, toggleLanguage } = useLanguage();
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -43,7 +46,7 @@ export default function Navbar() {
                             className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity"
                             onClick={() => { setProductsOpen(!productsOpen); setAboutOpen(false); }}
                         >
-                            <span className="font-schibsted font-normal text-[#003230] text-[14px]">Products</span>
+                            <span className="font-schibsted font-normal text-[#003230] text-[14px]">{t.nav.products}</span>
                             <Image
                                 width={100} height={100}
                                 src="/assets/arrow-down.svg" alt=""
@@ -84,7 +87,7 @@ export default function Navbar() {
                             className="flex items-center gap-[3px] px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity"
                             onClick={() => { setAboutOpen(!aboutOpen); setProductsOpen(false); }}
                         >
-                            <span className="font-schibsted font-normal text-[#003230] text-[14px]">About</span>
+                            <span className="font-schibsted font-normal text-[#003230] text-[14px]">{t.nav.about}</span>
                             <Image
                                 width={100} height={100}
                                 src="/assets/arrow-down.svg" alt=""
@@ -119,12 +122,22 @@ export default function Navbar() {
                     </div>
 
                     <button className="px-[10px] py-[4px] opacity-80 hover:opacity-100 transition-opacity">
-                        <span className="font-schibsted font-normal text-[#003230] text-[14px]">Pricing</span>
+                        <span className="font-schibsted font-normal text-[#003230] text-[14px]">{t.nav.pricing}</span>
                     </button>
                 </div>
 
                 {/* Actions & Hamburger */}
                 <div className="flex items-center gap-[8px] justify-end shrink-0">
+                    {/* Language toggle — switches the site between English and
+                        Arabic. Shares state with the same toggle in the
+                        dashboard's profile dropdown (lib/store.ts useLanguageStore). */}
+                    <button
+                        onClick={toggleLanguage}
+                        className="hidden lg:flex h-[40px] px-[14px] items-center justify-center gap-1.5 rounded-full border border-[#e6e6e8] bg-white hover:bg-neutral-50 transition-colors shrink-0 font-schibsted text-[13px] font-medium text-[#003230]"
+                        title={language === "en" ? "Switch to Arabic" : "التبديل إلى الإنجليزية"}
+                    >
+                        {language === "en" ? "العربية" : "English"}
+                    </button>
                     <button className="relative hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
                         <Image fill src="/assets/container-svg.svg" alt="Help" className="" />
                     </button>
@@ -133,13 +146,13 @@ export default function Navbar() {
                             href="/authpage/signin"
                             className="h-full px-4 md:px-[16px] flex items-center justify-center bg-[#f8f8f8] rounded-[6px] md:rounded-[8px] text-[#272e35] text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-neutral-100 transition-colors whitespace-nowrap"
                         >
-                            Log in
+                            {t.nav.login}
                         </Link>
                         <Link
                             href="/authpage/signup"
                             className="hidden md:flex h-full px-3 md:px-[16px] items-center justify-center bg-[#004643] rounded-[7px] md:rounded-[9px] text-white text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm whitespace-nowrap"
                         >
-                            Start for free
+                            {t.nav.startFree}
                         </Link>
                     </div>
                     <button
@@ -163,15 +176,21 @@ export default function Navbar() {
                         className="absolute top-[80px] left-0 w-full bg-[#f7fbfc] border border-[#e2eaf0] rounded-[22px] p-6 shadow-2xl flex flex-col gap-4 md:hidden z-[60] backdrop-blur-xl"
                     >
                         <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-                            <span className="font-schibsted text-[16px] text-[#003230] font-medium">Products</span>
+                            <span className="font-schibsted text-[16px] text-[#003230] font-medium">{t.nav.products}</span>
                             <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
                         </button>
                         <button className="flex items-center justify-between p-2 hover:bg-black/5 rounded-lg">
-                            <span className="font-schibsted text-[16px] text-[#003230] font-medium">About</span>
+                            <span className="font-schibsted text-[16px] text-[#003230] font-medium">{t.nav.about}</span>
                             <Image width={100} height={100} src="/assets/arrow-down.svg" alt="" className="w-6 h-6 -rotate-90 opacity-40" />
                         </button>
                         <button className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium">
-                            Pricing
+                            {t.nav.pricing}
+                        </button>
+                        <button
+                            onClick={toggleLanguage}
+                            className="p-2 text-left hover:bg-black/5 rounded-lg font-schibsted text-[16px] text-[#003230] font-medium"
+                        >
+                            {language === "en" ? "العربية" : "English"}
                         </button>
                         <div className="h-px w-full bg-black/5 my-2" />
                         <Link
@@ -179,7 +198,7 @@ export default function Navbar() {
                             className="w-full py-3 flex items-center justify-center bg-[#004643] rounded-[10px] text-white text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm"
                             onClick={() => setIsMenuOpen(false)}
                         >
-                            Start for free
+                            {t.nav.startFree}
                         </Link>
                     </motion.div>
                 )}

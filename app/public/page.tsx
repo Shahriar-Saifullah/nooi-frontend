@@ -6,6 +6,7 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import LandingPromptBox from "@/components/LandingPromptBox";
+import { useHomeTranslations, useLanguage } from "@/lib/i18n/useTranslations";
 
 const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string }) => {
   return (
@@ -56,6 +57,8 @@ const PremiumFeatureContainer = ({ img1, img2 }: { img1: string, img2: string })
 export default function LandingPage() {
   const [activeStep, setActiveStep] = useState(0);
   const [activeFilter, setActiveFilter] = useState(0);
+  const t = useHomeTranslations();
+  const { isRtl } = useLanguage();
 
   // ─── Scroll to change step ──────────────────────────────────────────────────
   const sectionRef = useRef<HTMLElement>(null);
@@ -86,58 +89,44 @@ export default function LandingPage() {
   }, [activeStep]);
   // ───────────────────────────────────────────────────────────────────────────
 
-  const steps = [
+  // Visual/behavioral config (colors, images, flags) stays hardcoded — only
+  // the display text is pulled from the translation dictionary below, so
+  // each step's title/description/etc. switches with the active language.
+  const stepConfig = [
     {
-      title: "Start with your space",
-      description: "Bring in your own floor plan or sketch it quickly online no complex tools, just a clean starting point. Bring in your own floor plan or sketch it quickly online no complex tools, just a clean starting point.",
       img: "/assets/4th Draft 1.png",
-      miniTitle: "Upload or Sketch",
-      miniDesc: "Turn rough ideas into editable 2D/3D layouts instantly. Our AI cleans up drawings and prepares them for design.",
       accentColor: "#b3ed97",
       mainBg: "#0c1a17",
       miniCardBg: "#3d4a39",
-      btnText: "View All Step"
     },
     {
-      title: "Style in seconds",
-      description: "Let AI suggest layouts, furniture placement, and flow so you never start with a blank canvas.",
       img: "/assets/image 19.png",
-      miniTitle: "Smart AI Design",
-      miniDesc: "Generate layouts that fit your space and style in just a click. Edit and customize until it feels like home.",
       accentColor: "#c3b4fc",
       mainBg: "#1a0b3b",
       miniCardBg: "#4a3a6b",
-      btnText: "Try AI Design",
       showMiniBtn: true,
       showScanLine: true
     },
     {
-      title: "Shop the look you create",
-      description: "Drag in real furniture and décor, then order the exact items—straight from your design.",
       img: "/assets/image step3.png",
-      miniTitle: "Furnish With Confidence",
-      miniDesc: "Everything you see is a real product. No mismatches, no guesswork—just one click to bring it home.",
       accentColor: "#d18d53",
       mainBg: "#2b1b11",
       miniCardBg: "#82614a",
-      btnText: "Browse Furnitures"
     },
     {
-      title: "From screen to doorstep",
-      description: "Your design isn't just virtual—we deliver every piece straight to you",
       img: "/assets/image 19.png",
-      miniTitle: "Track Your Order",
-      miniDesc: "Follow your delivery in real-time, from checkout to doorstep. Designed, ordered, and received—without hassle.",
       accentColor: "#a5688e",
       mainBg: "#410948",
       miniCardBg: "#7C5A7D",
-      btnText: "Order from Design",
       showScanLine: true
     }
   ];
 
+  const stepText = [t.howItWorks.steps.step1, t.howItWorks.steps.step2, t.howItWorks.steps.step3, t.howItWorks.steps.step4];
+  const steps = stepConfig.map((cfg, i) => ({ ...cfg, ...stepText[i] }));
+
   return (
-    <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
+    <div dir={isRtl ? "rtl" : "ltr"} className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
 
       <Navbar />
 
@@ -151,25 +140,25 @@ export default function LandingPage() {
           <div className="bg-white/30 border border-[#548381]/20 rounded-full px-[14px] py-[7px] flex items-center gap-[8px] cursor-default backdrop-blur-sm">
             <Image width={100} height={100} src="/assets/stars.svg" alt="" className="w-[14px] h-[14px]" />
             <p className="text-[13px] font-medium tracking-tight flex gap-1">
-              <span className="text-[#b0b0b5] font-schibsted font-medium">New:</span>
-              <span className="text-[#555f6d] font-schibsted font-medium">Drag & drop workflow builder</span>
+              {!isRtl && <span className="text-[#b0b0b5] font-schibsted font-medium">New:</span>}
+              <span className="text-[#555f6d] font-schibsted font-medium">{t.hero.badge}</span>
             </p>
           </div>
 
           <div className="flex flex-col items-center gap-0">
             <h1 className="text-center max-w-[960px] flex flex-col items-center">
               <span className="block font-schibsted font-semibold text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27]" style={{ letterSpacing: "0px" }}>
-                Design, Plan, Furniture get
+                {t.hero.headlineLine1}
               </span>
               <span
-                className="block italic font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] -mt-1"
-                style={{ fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", fontStyle: "italic", letterSpacing: "0.5px" }}
+                className={`block ${isRtl ? "" : "italic"} font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] -mt-1`}
+                style={{ fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", fontStyle: isRtl ? "normal" : "italic", letterSpacing: "0.5px" }}
               >
-                All in One Platform.
+                {t.hero.headlineLine2}
               </span>
             </h1>
             <p className="font-schibsted font-normal text-[17px] sm:text-[19px] leading-[1.6] text-[#393945]/70 text-center max-w-[580px] mt-7">
-              NOOI makes stunning 2D/3D visuals, accurate floor plans, and seamless logistics simple for architects, designers, and developers.
+              {t.hero.subtext}
             </p>
           </div>
 
@@ -180,17 +169,17 @@ export default function LandingPage() {
       {/* PRODUCT */}
       <section className="py-[50px] lg:py-[60px] px-4 bg-white flex flex-col items-center">
         <div className="max-w-[752px] text-center mb-[60px]">
-          <h2 className="text-[48px] font-semibold text-[#272e35] leading-[1.2] mb-[16px] font-schibsted">Our Product Features</h2>
+          <h2 className="text-[48px] font-semibold text-[#272e35] leading-[1.2] mb-[16px] font-schibsted">{t.productFeatures.sectionLabel}</h2>
           <p className="text-[20px] text-[#555f6d] leading-[1.5] font-schibsted">
-            From sketch to furniture delivery, Nooi's AI tools help you design, visualize, and build dream spaces—effortlessly turning ideas into reality with simplicity.
+            {t.productFeatures.description}
           </p>
         </div>
 
         <div className="w-full max-w-[1240px] grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[24px] mb-[60px]">
           {[
-            { name: "Room Planner", img: "/assets/video-pic-1.png" },
-            { name: "AI Home Planner", img: "/assets/video-pic-2.png" },
-            { name: "Kitchen Planner", img: "/assets/video-pic-1.png" },
+            { name: t.productFeatures.cards.roomPlanner, img: "/assets/video-pic-1.png" },
+            { name: t.productFeatures.cards.aiHomePlanner, img: "/assets/video-pic-2.png" },
+            { name: t.productFeatures.cards.kitchenPlanner, img: "/assets/video-pic-1.png" },
           ].map((feature, i) => (
             <motion.div
               key={i}
@@ -203,7 +192,7 @@ export default function LandingPage() {
               <div className="flex items-center justify-between">
                 <h3 className="text-[28px] font-bold text-[#272e35] leading-[1.2] font-scada">{feature.name}</h3>
                 <button className="w-[46px] h-[46px] bg-[#142d25] rounded-[8px] flex items-center justify-center hover:bg-[#003330] transition-colors shadow-sm shrink-0">
-                  <Image width={100} height={100} src="/assets/arrow-outward.svg" alt="Go" className="w-[24px] h-[24px] brightness-[10]" />
+                  <Image width={100} height={100} src="/assets/arrow-outward.svg" alt="Go" className={`w-[24px] h-[24px] brightness-[10] ${isRtl ? "scale-x-[-1]" : ""}`} />
                 </button>
               </div>
             </motion.div>
@@ -211,9 +200,9 @@ export default function LandingPage() {
         </div>
 
         <button className="bg-[#004643] text-white pl-[24px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
-          <span className="text-[20px] font-schibsted font-normal">View All Design</span>
+          <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
           <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-            <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px]" />
+            <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
           </div>
         </button>
       </section>
@@ -222,9 +211,9 @@ export default function LandingPage() {
       <section className="py-[50px] lg:py-[60px] px-4 bg-white">
         <div className="max-w-[1240px] mx-auto">
           <div className="max-w-[762px] mx-auto text-center mb-[80px]">
-            <h2 className="text-[48px] font-semibold text-[#111d27] leading-[1.2] mb-[16px] font-schibsted">Key Features</h2>
+            <h2 className="text-[48px] font-semibold text-[#111d27] leading-[1.2] mb-[16px] font-schibsted">{t.keyFeatures.sectionLabel}</h2>
             <p className="text-[20px] text-[#374551] leading-[1.5] font-schibsted">
-              Drag and drop furniture, décor, and finishes. Instantly adjust lighting, colors, and textures with a real-time interface that makes interior design feel truly effortless.
+              {t.keyFeatures.description}
             </p>
           </div>
 
@@ -232,18 +221,18 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  <span className="text-[#deb01d]">New: </span>
-                  <span className="text-[#6b7780]">Drag & drop workflow builder</span>
+                  {!isRtl && <span className="text-[#deb01d]">New: </span>}
+                  <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
-              <h3 className="text-[36px] font-bold text-[#111d27] leading-[1.2] mb-6 font-schibsted">AI Floor and Home Planner</h3>
+              <h3 className="text-[36px] font-bold text-[#111d27] leading-[1.2] mb-6 font-schibsted">{t.keyFeatures.items.aiFloorPlanner.heading}</h3>
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
-                Upload an image, sketch from scratch, or let our AI do the heavy lifting. Instantly turn a rough idea into clean, editable floor plans in 2D or 3D.
+                {t.keyFeatures.items.aiFloorPlanner.copy}
               </p>
               <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
-                <span className="text-[20px] font-schibsted font-normal">View All Design</span>
+                <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px]" />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
                 </div>
               </button>
             </div>
@@ -256,18 +245,18 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  <span className="text-[#deb01d]">New: </span>
-                  <span className="text-[#6b7780]">Drag & drop workflow builder</span>
+                  {!isRtl && <span className="text-[#deb01d]">New: </span>}
+                  <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
-              <h3 className="text-[36px] font-bold text-[#111d27] leading-[1.2] mb-6 font-schibsted">Real-Time Interior Design</h3>
+              <h3 className="text-[36px] font-bold text-[#111d27] leading-[1.2] mb-6 font-schibsted">{t.keyFeatures.items.realTimeDesign.heading}</h3>
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
-                Upload an image, sketch from scratch, or let our AI do the heavy lifting. Instantly turn a rough idea into clean, editable floor plans in 2D or 3D.
+                {t.keyFeatures.items.realTimeDesign.copy}
               </p>
               <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
-                <span className="text-[20px] font-schibsted font-normal">View All Design</span>
+                <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px]" />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
                 </div>
               </button>
             </div>
@@ -280,18 +269,18 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  <span className="text-[#deb01d]">New: </span>
-                  <span className="text-[#6b7780]">Drag & drop workflow builder</span>
+                  {!isRtl && <span className="text-[#deb01d]">New: </span>}
+                  <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
-              <h3 className="text-[36px] font-bold text-[#111d27] leading-[1.2] mb-6 font-schibsted">Order from Design</h3>
+              <h3 className="text-[36px] font-bold text-[#111d27] leading-[1.2] mb-6 font-schibsted">{t.keyFeatures.items.orderFromDesign.heading}</h3>
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
-                Upload an image, sketch from scratch, or let our AI do the heavy lifting. Instantly turn a rough idea into clean, editable floor plans in 2D or 3D.
+                {t.keyFeatures.items.orderFromDesign.copy}
               </p>
               <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
-                <span className="text-[20px] font-schibsted font-normal">View All Design</span>
+                <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className="w-[24px] h-[24px]" />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
                 </div>
               </button>
             </div>
@@ -305,9 +294,9 @@ export default function LandingPage() {
       {/* HOW */}
       <section ref={sectionRef} className="py-[50px] lg:py-[60px] px-4 bg-white flex flex-col items-center">
         <div className="max-w-[700px] text-center mb-16">
-          <h2 className="text-[52px] font-bold text-[#111d27] leading-[1.1] mb-5 tracking-tight font-schibsted">How it Works</h2>
+          <h2 className="text-[52px] font-bold text-[#111d27] leading-[1.1] mb-5 tracking-tight font-schibsted">{t.howItWorks.sectionLabel}</h2>
           <p className="text-[20px] text-[#555f6d] leading-[1.5] font-schibsted">
-            Automated floor plan generation with AI with Realistic 3D rendering & design visualization.
+            {t.howItWorks.description}
           </p>
         </div>
 
@@ -321,14 +310,14 @@ export default function LandingPage() {
           <div className="flex-1 w-full max-w-[500px] flex flex-col mx-auto lg:mx-0 py-5">
             <div className="flex items-center border border-white/10 rounded-lg p-1 mb-[40px] md:mb-[80px] w-full sm:w-fit mx-auto lg:mx-0 overflow-hidden">
               <div className="flex items-center justify-between sm:justify-start w-full sm:w-auto">
-                {["Step 1", "Step 2", "Step 3", "Step 4"].map((step, i) => (
+                {[1, 2, 3, 4].map((stepNum, i) => (
                   <button
                     key={i}
                     onClick={() => setActiveStep(i)}
                     className={`cursor-pointer px-[8px] min-[375px]:px-[12px] sm:px-[16px] py-[8px] text-[13px] min-[375px]:text-[14px] sm:text-[18px] font-medium transition-all relative whitespace-nowrap shrink-0 rounded-md flex-1 sm:flex-none text-center ${activeStep === i ? "bg-white/5" : "text-[#859c80] hover:text-white/60"}`}
                     style={{ color: activeStep === i ? steps[activeStep].accentColor : undefined }}
                   >
-                    {step}
+                    {t.howItWorks.stepLabel} {stepNum}
                     {activeStep === i && (
                       <motion.div
                         layoutId="activeStepUnderline"
@@ -434,15 +423,22 @@ export default function LandingPage() {
         <div className="max-w-[1240px] mx-auto">
           <div className="max-w-[800px] mx-auto text-center mb-[40px]">
             <h2 className="text-[36px] sm:text-[48px] lg:text-[56px] font-bold text-[#111D27] leading-[1.1] mb-[16px] tracking-tight">
-              Explore Our Gallery
+              {t.gallery.sectionLabel}
             </h2>
             <p className="text-[16px] sm:text-[18px] text-[#556370] leading-[1.6]">
-              Automated floor plan generation with AI with Realistic 3D rendering & design visualization.
+              {t.gallery.description}
             </p>
           </div>
 
           <div className="flex flex-wrap justify-center gap-[12px] mb-[50px]">
-            {["All", "Living room", "Dining Room", "Kitchen", "Furniture", "Others"].map((f, i) => (
+            {[
+              t.gallery.filters.all,
+              t.gallery.filters.livingRoom,
+              t.gallery.filters.diningRoom,
+              t.gallery.filters.kitchen,
+              t.gallery.filters.furniture,
+              t.gallery.filters.others,
+            ].map((f, i) => (
               <button
                 key={i}
                 onClick={() => setActiveFilter(i)}
@@ -459,14 +455,14 @@ export default function LandingPage() {
                 <Image fill src="/assets/gallery-1.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
                   <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
-                  <span className="text-[12px] text-[#556370] font-medium">View more [4]</span>
+                  <span className="text-[12px] text-[#556370] font-medium">{t.gallery.viewMore} [4]</span>
                 </div>
               </div>
               <div className="relative w-full h-[280px] rounded-[20px] overflow-hidden group">
                 <Image fill src="/assets/gallery-2.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
                   <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
-                  <span className="text-[12px] text-[#556370] font-medium">View more [7]</span>
+                  <span className="text-[12px] text-[#556370] font-medium">{t.gallery.viewMore} [7]</span>
                 </div>
               </div>
             </div>
@@ -476,14 +472,14 @@ export default function LandingPage() {
                 <Image fill src="/assets/gallery-3.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
                   <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
-                  <span className="text-[12px] text-[#556370] font-medium">View more [3]</span>
+                  <span className="text-[12px] text-[#556370] font-medium">{t.gallery.viewMore} [3]</span>
                 </div>
               </div>
               <div className="relative w-full h-[380px] rounded-[20px] overflow-hidden group">
                 <Image fill src="/assets/gallery-4.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
                   <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
-                  <span className="text-[12px] text-[#556370] font-medium">View more [6]</span>
+                  <span className="text-[12px] text-[#556370] font-medium">{t.gallery.viewMore} [6]</span>
                 </div>
               </div>
             </div>
@@ -493,14 +489,14 @@ export default function LandingPage() {
                 <Image fill src="/assets/gallery-5.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
                   <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
-                  <span className="text-[12px] text-[#556370] font-medium">View more [10]</span>
+                  <span className="text-[12px] text-[#556370] font-medium">{t.gallery.viewMore} [10]</span>
                 </div>
               </div>
               <div className="relative w-full sm:w-1/2 lg:w-full h-[280px] sm:h-[380px] lg:h-[280px] rounded-[20px] overflow-hidden group">
                 <Image fill src="/assets/gallery-6.png" alt="Gallery" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                 <div className="absolute top-[16px] left-[16px] bg-white/90 backdrop-blur-sm px-[12px] py-[6px] rounded-[6px] flex items-center gap-[6px] shadow-sm">
                   <Image width={100} height={100} src="/assets/image-svg-1.svg" className="w-[14px] h-[14px] opacity-70" alt="" />
-                  <span className="text-[12px] text-[#556370] font-medium">View more [17]</span>
+                  <span className="text-[12px] text-[#556370] font-medium">{t.gallery.viewMore} [17]</span>
                 </div>
               </div>
             </div>
@@ -512,20 +508,20 @@ export default function LandingPage() {
       <section className="py-[60px] lg:py-[100px] px-4 bg-[#f8fafc]">
         <div className="max-w-[1240px] mx-auto">
           <div className="max-w-[800px] mx-auto text-center mb-[60px]">
-            <h2 className="text-[36px] sm:text-[48px] lg:text-[56px] font-bold text-[#111D27] leading-[1.1] mb-[16px] tracking-tight">Why Choose NOOI</h2>
+            <h2 className="text-[36px] sm:text-[48px] lg:text-[56px] font-bold text-[#111D27] leading-[1.1] mb-[16px] tracking-tight">{t.whyChoose.sectionLabel}</h2>
             <p className="text-[16px] sm:text-[18px] text-[#556370] leading-[1.6]">
-              Automated floor plan generation with AI with Realistic 3D rendering & design visualization.
+              {t.whyChoose.description}
             </p>
           </div>
 
           <div className="flex flex-col lg:flex-row items-center lg:items-start gap-[40px] lg:gap-[80px]">
             <div className="flex-1 w-full flex flex-col">
               {[
-                { title: "Expert-Level Tools, Beginner-Friendly Interface", desc: "Powerful enough for professionals, intuitive enough for beginners. Nooi's clean interface makes advanced design tools easy to use from day one.", icon: "/assets/image-svg-2.svg", active: true },
-                { title: "All-in-One Platform", icon: "/assets/arrows-output.svg", active: false },
-                { title: "Real-World Integration", icon: "/assets/icon.svg", active: false },
-                { title: "Trusted by Professionals", icon: "/assets/verified-user.svg", active: false },
-                { title: "Accuracy & Speed", icon: "/assets/vector-1.svg", active: false },
+                { title: t.whyChoose.reasons.expertTools.title, desc: t.whyChoose.reasons.expertTools.desc, icon: "/assets/image-svg-2.svg", active: true },
+                { title: t.whyChoose.reasons.allInOne.title, icon: "/assets/arrows-output.svg", active: false },
+                { title: t.whyChoose.reasons.realWorld.title, icon: "/assets/icon.svg", active: false },
+                { title: t.whyChoose.reasons.trusted.title, icon: "/assets/verified-user.svg", active: false },
+                { title: t.whyChoose.reasons.accuracySpeed.title, icon: "/assets/vector-1.svg", active: false },
               ].map((item, i, arr) => (
                 <div
                   key={i}
@@ -536,7 +532,7 @@ export default function LandingPage() {
                   </div>
                   <div className="flex-1 min-w-0 pt-[10px]">
                     <h4 className="text-[18px] sm:text-[20px] font-medium text-[#111D27] leading-snug mb-[8px]">{item.title}</h4>
-                    {item.active && (
+                    {item.active && item.desc && (
                       <p className="text-[#64748b] leading-relaxed text-[15px] sm:text-[16px] pr-4">{item.desc}</p>
                     )}
                   </div>
@@ -584,17 +580,17 @@ export default function LandingPage() {
         </div>
         <div className="relative z-10 max-w-[860px] mx-auto text-center">
           <h2 className="text-[48px] sm:text-[64px] lg:text-[80px] font-bold text-white leading-[1.05] mb-7 tracking-tight">
-            Unlock Your Dream<br />Home Today!
+            {t.unlockCta.headlineLine1}<br />{t.unlockCta.headlineLine2}
           </h2>
           <p className="text-[15px] sm:text-[18px] text-white/60 max-w-[580px] mx-auto mb-12 leading-[1.65]">
-            Now design, visualize, and build your dream home/rooms with just few clicks.
+            {t.unlockCta.subtext}
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <button className="w-full sm:w-auto bg-[#8bec5c] text-[#142d26] px-9 py-3.5 rounded-full text-[15px] font-bold hover:bg-[#a3f37e] transition-colors shadow-xl shadow-[#8bec5c]/20">
-              Start Free Trial
+              {t.unlockCta.startTrial}
             </button>
             <button className="w-full sm:w-auto bg-white/10 backdrop-blur-md border border-white/20 text-white px-9 py-3.5 rounded-full text-[15px] font-bold hover:bg-white/20 transition-colors">
-              Book a Demo
+              {t.unlockCta.bookDemo}
             </button>
           </div>
         </div>
@@ -610,11 +606,11 @@ export default function LandingPage() {
                 <span className="font-inter font-bold text-[20px] text-neutral-900 tracking-tight">NOOI</span>
               </Link>
               <p className="text-[#6b7280] mb-7 text-[14px] sm:text-[15px] leading-relaxed max-w-[320px]">
-                Empowering the next generation of interior designers with AI-driven tools for visionaries.
+                {t.footer.tagline}
               </p>
               <div className="relative max-w-[340px] mb-7">
-                <input type="email" placeholder="Enter your email" className="w-full h-[48px] bg-[#f5f7f8] border border-[#e8eaec] rounded-full px-5 outline-none text-[13px] pr-[110px] placeholder:text-[#9ca3af]" />
-                <button className="absolute right-1.5 top-1.5 h-[36px] bg-[#004643] text-white px-5 rounded-full text-[12px] font-bold hover:bg-[#003330] transition-colors">Subscribe</button>
+                <input type="email" placeholder={t.footer.emailPlaceholder} className="w-full h-[48px] bg-[#f5f7f8] border border-[#e8eaec] rounded-full px-5 outline-none text-[13px] pr-[110px] placeholder:text-[#9ca3af]" />
+                <button className="absolute right-1.5 top-1.5 h-[36px] bg-[#004643] text-white px-5 rounded-full text-[12px] font-bold hover:bg-[#003330] transition-colors">{t.footer.subscribe}</button>
               </div>
               <div className="flex items-center gap-4">
                 <Image width={100} height={100} src="/assets/windows.svg" alt="Windows" className="w-[18px] h-[18px] opacity-30 hover:opacity-70 transition-opacity cursor-pointer" />
@@ -623,28 +619,38 @@ export default function LandingPage() {
             </div>
 
             <div>
-              <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">Product</h5>
+              <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">{t.footer.productHeading}</h5>
               <ul className="space-y-3.5 text-[14px] text-[#6b7280]">
-                {["Room Planner", "AI Home Planner", "Kitchen Planner", "Pricing"].map((l) => (
+                {[
+                  t.footer.productLinks.roomPlanner,
+                  t.footer.productLinks.aiHomePlanner,
+                  t.footer.productLinks.kitchenPlanner,
+                  t.footer.productLinks.pricing,
+                ].map((l) => (
                   <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors">{l}</li>
                 ))}
               </ul>
             </div>
 
             <div>
-              <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">Company</h5>
+              <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">{t.footer.companyHeading}</h5>
               <ul className="space-y-3.5 text-[14px] text-[#6b7280]">
-                <li className="hover:text-[#004643] cursor-pointer transition-colors"><Link href="/about">About Us</Link></li>
-                {["Blog", "Careers", "Privacy"].map((l) => (
+                <li className="hover:text-[#004643] cursor-pointer transition-colors"><Link href="/about">{t.footer.companyLinks.aboutUs}</Link></li>
+                {[t.footer.companyLinks.blog, t.footer.companyLinks.careers, t.footer.companyLinks.privacy].map((l) => (
                   <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors">{l}</li>
                 ))}
               </ul>
             </div>
 
             <div>
-              <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">Resources</h5>
+              <h5 className="text-[14px] font-bold text-[#111D27] mb-5 tracking-tight">{t.footer.resourcesHeading}</h5>
               <ul className="space-y-3.5 text-[14px] text-[#6b7280]">
-                {["Documentation", "Community", "Support", "Blog"].map((l) => (
+                {[
+                  t.footer.resourcesLinks.documentation,
+                  t.footer.resourcesLinks.community,
+                  t.footer.resourcesLinks.support,
+                  t.footer.resourcesLinks.blog,
+                ].map((l) => (
                   <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors">{l}</li>
                 ))}
               </ul>
@@ -652,13 +658,12 @@ export default function LandingPage() {
           </div>
 
           <div className="pt-6 border-t border-[#f0f0f0] flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-[#9ca3af] text-[12px]">© 2026 NOOI Inc. All rights reserved.</p>
+            <p className="text-[#9ca3af] text-[12px]">{t.footer.legal}</p>
             <div className="flex items-center gap-6">
-              <div className="flex items-center gap-1.5 text-[#9ca3af] text-[12px] font-medium cursor-pointer hover:text-neutral-700 transition-colors">
-                <Image width={100} height={100} src="/assets/language-circle.svg" alt="" className="w-[14px] h-[14px]" />
-                <span>English</span>
-                <Image width={100} height={100} src="/assets/arrow-down-01.svg" alt="" className="w-3 h-3 opacity-50" />
-              </div>
+              {/* Language toggle — switches the whole site between English and
+                  Arabic. Shares state with the same toggle in the dashboard's
+                  profile dropdown (lib/store.ts useLanguageStore). */}
+              <LanguageToggle />
               <div className="flex gap-2.5">
                 <div className="w-8 h-8 rounded-full bg-[#f5f5f5] border border-neutral-100 flex items-center justify-center hover:bg-[#004643] group transition-all cursor-pointer">
                   <Image width={100} height={100} src="/assets/group.svg" alt="Social" className="w-3.5 h-3.5 group-hover:brightness-[10] transition-all" />
@@ -675,5 +680,24 @@ export default function LandingPage() {
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}} />
     </div>
+  );
+}
+
+// ─── Footer language toggle ────────────────────────────────────────────────
+// Replaces the old static "English" label + dropdown chevron with a real,
+// working toggle between English and Arabic.
+function LanguageToggle() {
+  const { language, toggleLanguage } = useLanguage();
+  const t = useHomeTranslations();
+
+  return (
+    <button
+      onClick={toggleLanguage}
+      className="flex items-center gap-1.5 text-[#9ca3af] text-[12px] font-medium cursor-pointer hover:text-neutral-700 transition-colors"
+    >
+      <Image width={100} height={100} src="/assets/language-circle.svg" alt="" className="w-[14px] h-[14px]" />
+      <span>{t.footer.language}</span>
+      <span className="text-[10px] opacity-60">({language === "en" ? "AR" : "EN"})</span>
+    </button>
   );
 }

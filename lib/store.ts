@@ -80,3 +80,34 @@ export const useProjectStore = create<ProjectState>()(
     },
   ),
 );
+
+// ─── Language ──────────────────────────────────────────────────────────────
+// Site-wide language toggle. Shared by the logged-out Navbar and the
+// dashboard's profile dropdown, so switching in either place applies
+// everywhere. Persisted so the choice survives navigation within the session.
+// Currently only English/Arabic marketing-page copy is translated (see
+// lib/i18n/translations.ts) — this store just tracks which one is active.
+
+export type Language = "en" | "ar";
+
+interface LanguageState {
+  language: Language;
+  setLanguage: (language: Language) => void;
+  toggleLanguage: () => void;
+}
+
+export const useLanguageStore = create<LanguageState>()(
+  persist(
+    (set, get) => ({
+      language: "en",
+
+      setLanguage: (language) => set({ language }),
+
+      toggleLanguage: () => set({ language: get().language === "en" ? "ar" : "en" }),
+    }),
+    {
+      name: "language-store",
+      storage: createJSONStorage(() => sessionStorage),
+    },
+  ),
+);
