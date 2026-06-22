@@ -1,7 +1,7 @@
 "use client";
 
 import { useLanguageStore } from "@/lib/store";
-import { homeTranslations } from "./translations";
+import { homeTranslations, aboutTranslations, marketplaceTranslations, homePlannerTranslations, designStudioTranslations } from "./translations";
 
 // Small accessor hook — components call useHomeTranslations() and read
 // t.hero.headlineLine1 etc., already resolved to the active language string.
@@ -29,9 +29,27 @@ function resolve<T>(node: T, lang: "en" | "ar"): DeepResolve<T> {
 
 export function useHomeTranslations() {
   const language = useLanguageStore((s) => s.language);
-  // Re-resolved on every render when language changes; the dictionary is
-  // small enough that memoizing this isn't worth the complexity yet.
   return resolve(homeTranslations, language);
+}
+
+export function useAboutTranslations() {
+  const language = useLanguageStore((s) => s.language);
+  return resolve(aboutTranslations, language);
+}
+
+export function useMarketplaceTranslations() {
+  const language = useLanguageStore((s) => s.language);
+  return resolve(marketplaceTranslations, language);
+}
+
+export function useHomePlannerTranslations() {
+  const language = useLanguageStore((s) => s.language);
+  return resolve(homePlannerTranslations, language);
+}
+
+export function useDesignStudioTranslations() {
+  const language = useLanguageStore((s) => s.language);
+  return resolve(designStudioTranslations, language);
 }
 
 export function useLanguage() {
