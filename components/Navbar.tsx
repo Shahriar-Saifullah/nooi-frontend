@@ -63,9 +63,9 @@ export default function Navbar() {
                                     className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 bg-white border border-[#e2eaf0] rounded-[16px] shadow-[0_8px_32px_rgba(0,0,0,0.08)] py-2 min-w-[180px] z-50"
                                 >
                                     {[
-                                        { label: "Furniture", href: "/marketplace" },
-                                        { label: "Home Planner", href: "/homeplanner" },
-                                        { label: "Design Studio", href: "/design-studio" },
+                                        { label: language === "ar" ? "الأثاث" : "Furniture", href: "/marketplace" },
+                                        { label: language === "ar" ? "مخطط المنزل" : "Home Planner", href: "/homeplanner" },
+                                        { label: language === "ar" ? "استوديو التصميم" : "Design Studio", href: "/design-studio" },
                                     ].map((item) => (
                                         <Link
                                             key={item.label}
@@ -104,8 +104,8 @@ export default function Navbar() {
                                     className="absolute top-[calc(100%+12px)] left-1/2 -translate-x-1/2 bg-white border border-[#e2eaf0] rounded-[16px] shadow-[0_8px_32px_rgba(0,0,0,0.08)] py-2 min-w-[180px] z-50"
                                 >
                                     {[
-                                        { label: "About Us", href: "/about" },
-                                        { label: "How it Works", href: "/how-it-works" },
+                                        { label: language === "ar" ? "من نحن" : "About Us", href: "/about" },
+                                        { label: language === "ar" ? "آلية العمل" : "How it Works", href: "/how-it-works" },
                                     ].map((item) => (
                                         <Link
                                             key={item.label}
