@@ -35,10 +35,10 @@ function CheckItem({ label }: { label: string }) {
 export default function HowItWorksPage() {
   const t = useHowItWorksTranslations();
   const tf = useHomeTranslations();
-  const { isRtl } = useLanguage();
+  const { language } = useLanguage();
 
   return (
-    <div dir={isRtl ? "rtl" : "ltr"} className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
+    <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
 
       <Navbar />
 
@@ -51,7 +51,7 @@ export default function HowItWorksPage() {
         <h1 className="font-schibsted font-semibold text-[48px] sm:text-[58px] lg:text-[72px] leading-[1.1] text-[#111d27] tracking-[-2px] mb-4 max-w-[800px]">
           {t.hero.headlineLine1}
         </h1>
-        <h2 className={`${isRtl ? "" : "font-instrument italic"} font-normal text-[48px] sm:text-[58px] lg:text-[72px] leading-[1.1] text-[#111d27] tracking-[-1.5px] mb-6`}>
+        <h2 className={`font-instrument italic font-normal text-[48px] sm:text-[58px] lg:text-[72px] leading-[1.1] text-[#111d27] tracking-[-1.5px] mb-6`}>
           {t.hero.headlineLine2}
         </h2>
         <p className="text-[17px] sm:text-[19px] text-[#393945]/70 max-w-[560px] leading-[1.6] mb-10">
@@ -59,11 +59,11 @@ export default function HowItWorksPage() {
         </p>
         <Link
           href="/authpage/signup"
-          className={`bg-[#004643] text-white py-[8px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-lg ${isRtl ? "flex-row-reverse pl-[8px] pr-[24px]" : "pl-[24px] pr-[8px]"}`}
+          className={`bg-[#004643] text-white py-[8px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-lg pl-[24px] pr-[8px]`}
         >
           <span className="text-[16px] font-medium">{t.hero.cta}</span>
           <div className="bg-white p-[10px] rounded-[12px] flex items-center justify-center">
-            <Image width={20} height={20} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[16px] h-[16px] ${isRtl ? "scale-x-[-1]" : ""}`} />
+            <Image width={20} height={20} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[16px] h-[16px]`} />
           </div>
         </Link>
       </section>
@@ -74,7 +74,7 @@ export default function HowItWorksPage() {
           <motion.div initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} className="flex-1 max-w-[500px]">
             <div className="flex items-center gap-3 mb-6">
               <span className="w-7 h-7 rounded-full bg-[#004643] text-white text-[13px] font-bold flex items-center justify-center">
-                {isRtl ? "١" : "1"}
+                {language === "ar" ? "١" : "1"}
               </span>
               <span className="text-[13px] font-medium text-[#004643] tracking-wide uppercase">{t.step1.phase}</span>
             </div>
@@ -84,9 +84,9 @@ export default function HowItWorksPage() {
               <CheckItem label={t.step1.feat1} />
               <CheckItem label={t.step1.feat2} />
             </ul>
-            <button className={`flex items-center gap-3 bg-[#004643] text-white px-6 py-3 rounded-[12px] hover:bg-[#003330] transition-colors font-medium text-[15px] ${isRtl ? "flex-row-reverse" : ""}`}>
+            <button className={`flex items-center gap-3 bg-[#004643] text-white px-6 py-3 rounded-[12px] hover:bg-[#003330] transition-colors font-medium text-[15px] `}>
               {t.step1.cta}
-              <Image width={16} height={16} src="/assets/arrow-right-02-sharp.svg" alt="" className={`brightness-[10] ${isRtl ? "scale-x-[-1]" : ""}`} />
+              <Image width={16} height={16} src="/assets/arrow-right-02-sharp.svg" alt="" className={`brightness-[10]`} />
             </button>
           </motion.div>
 
@@ -110,7 +110,7 @@ export default function HowItWorksPage() {
           <motion.div initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} className="flex-1 max-w-[500px]">
             <div className="flex items-center gap-3 mb-6">
               <span className="w-7 h-7 rounded-full bg-[#004643] text-white text-[13px] font-bold flex items-center justify-center">
-                {isRtl ? "٢" : "2"}
+                {language === "ar" ? "٢" : "2"}
               </span>
               <span className="text-[13px] font-medium text-[#004643] tracking-wide uppercase">{t.step2.phase}</span>
             </div>
@@ -130,9 +130,9 @@ export default function HowItWorksPage() {
                 </div>
               ))}
             </div>
-            <button className={`flex items-center gap-3 bg-[#004643] text-white px-6 py-3 rounded-[12px] hover:bg-[#003330] transition-colors font-medium text-[15px] ${isRtl ? "flex-row-reverse" : ""}`}>
+            <button className={`flex items-center gap-3 bg-[#004643] text-white px-6 py-3 rounded-[12px] hover:bg-[#003330] transition-colors font-medium text-[15px] `}>
               {t.step2.cta}
-              <Image width={16} height={16} src="/assets/arrow-right-02-sharp.svg" alt="" className={`brightness-[10] ${isRtl ? "scale-x-[-1]" : ""}`} />
+              <Image width={16} height={16} src="/assets/arrow-right-02-sharp.svg" alt="" className={`brightness-[10]`} />
             </button>
           </motion.div>
 
@@ -157,7 +157,7 @@ export default function HowItWorksPage() {
           <motion.div initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} className="flex-1 max-w-[500px]">
             <div className="flex items-center gap-3 mb-6">
               <span className="w-7 h-7 rounded-full bg-[#004643] text-white text-[13px] font-bold flex items-center justify-center">
-                {isRtl ? "٣" : "3"}
+                {language === "ar" ? "٣" : "3"}
               </span>
               <span className="text-[13px] font-medium text-[#004643] tracking-wide uppercase">{t.step3.phase}</span>
             </div>
@@ -166,9 +166,9 @@ export default function HowItWorksPage() {
             <div className="bg-[#0c1a17] rounded-[20px] p-5 mb-10">
               <p className="text-white font-semibold text-[16px] mb-1">{t.step3.renderCard}</p>
               <p className="text-white/60 text-[13px] mb-4">{t.step3.renderDesc}</p>
-              <button className={`flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-[10px] transition-colors font-medium text-[14px] ${isRtl ? "flex-row-reverse" : ""}`}>
+              <button className={`flex items-center gap-3 bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-[10px] transition-colors font-medium text-[14px] `}>
                 {t.step3.renderCta}
-                <Image width={16} height={16} src="/assets/arrow-right-02-sharp.svg" alt="" className={`brightness-[10] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                <Image width={16} height={16} src="/assets/arrow-right-02-sharp.svg" alt="" className={`brightness-[10]`} />
               </button>
             </div>
           </motion.div>
@@ -195,7 +195,7 @@ export default function HowItWorksPage() {
           <div className="w-12 h-12 rounded-full bg-[#1e3a3a] overflow-hidden relative">
             <Image fill src="/assets/imgAvatar.png" alt={t.testimonial.name} className="object-cover" />
           </div>
-          <div className={`${isRtl ? "text-right" : "text-left"}`}>
+          <div >
             <p className="text-white font-semibold text-[15px]">{t.testimonial.name}</p>
             <p className="text-white/50 text-[13px]">{t.testimonial.role}</p>
           </div>

@@ -24,7 +24,7 @@ function LanguageToggle() {
 
 export default function MarketplacePage() {
   const t = useMarketplaceTranslations();
-  const { isRtl } = useLanguage();
+  const { language } = useLanguage();
 
   const categories = [
     { name: t.categories.seating,  img: "/assets/seating.png",  bg: "#f8f8f8" },
@@ -36,7 +36,7 @@ export default function MarketplacePage() {
   ];
 
   return (
-    <div dir={isRtl ? "rtl" : "ltr"} className="relative min-h-screen bg-white font-schibsted overflow-x-hidden antialiased">
+    <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden antialiased">
 
       <Navbar />
 
@@ -58,7 +58,7 @@ export default function MarketplacePage() {
           className="max-w-[1200px] font-schibsted font-semibold text-[48px] md:text-[84px] leading-[1.05] text-[#111d27] mb-8 tracking-[-3px]"
         >
           {t.hero.headlineLine1}<br />
-          <span className={`${isRtl ? "" : "font-instrument italic"} font-normal text-[#004643] tracking-normal`}>
+          <span className={`font-instrument italic font-normal text-[#004643] tracking-normal`}>
             {t.hero.headlineLine2}
           </span>
         </motion.h1>
@@ -85,7 +85,7 @@ export default function MarketplacePage() {
           <div className="hidden md:block w-px h-8 bg-[#E5E7EB] mx-2" />
           <button className="h-[52px] md:h-[60px] px-5 md:px-10 bg-[#004643] text-white rounded-[11px] font-bold text-[15px] md:text-[17px] hover:bg-[#003330] transition-all flex items-center gap-2 shrink-0">
             <span className="hidden md:inline">{t.hero.browseCatalog}</span>
-            <ArrowRight className={`w-5 h-5 ${isRtl ? "scale-x-[-1]" : ""}`} />
+            <ArrowRight className={`w-5 h-5`} />
           </button>
         </motion.div>
 
@@ -161,7 +161,7 @@ export default function MarketplacePage() {
               <button className="group relative h-[48px] pl-4 pr-1 bg-[#004643] text-white rounded-[16px] font-bold text-[15px] hover:bg-[#003330] transition-all flex items-center gap-3 shadow-[0_20px_40px_rgba(0,70,67,0.15)]">
                 {t.catalog.cta}
                 <div className="w-[40px] h-[40px] bg-white rounded-[12px] flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <ArrowRight className={`w-4 h-4 text-black ${isRtl ? "scale-x-[-1]" : ""}`} />
+                  <ArrowRight className={`w-4 h-4 text-black`} />
                 </div>
               </button>
             </div>
@@ -237,7 +237,7 @@ export default function MarketplacePage() {
                 <div className="flex items-center justify-between p-4 rounded-2xl hover:bg-[#f8fafc] transition-colors">
                   <div className="flex items-center gap-4">
                     <div className="w-2.5 h-2.5 border-2 border-[#e2eaf0] rounded-full" />
-                    <span className="text-[16px] font-medium text-[#555f6d]">{isRtl ? "موزّع محلي (نيويورك)" : "Local Dealer (NY)"}</span>
+                    <span className="text-[16px] font-medium text-[#555f6d]">{language === "ar" ? "موزّع محلي (نيويورك)" : "Local Dealer (NY)"}</span>
                   </div>
                   <span className="text-[16px] font-bold text-[#111d27] opacity-60">$6,250.00</span>
                 </div>
@@ -285,10 +285,10 @@ export default function MarketplacePage() {
                 </div>
               </div>
             </div>
-            <button className={`mt-10 md:mt-12 h-[52px] md:h-[56px] pr-1 bg-[#94A3B8]/30 hover:bg-[#94A3B8]/40 backdrop-blur-md text-white rounded-[18px] md:rounded-[20px] font-bold text-[14px] md:text-[15px] transition-all flex items-center gap-3 md:gap-4 border border-white/10 shadow-lg ${isRtl ? "flex-row-reverse pr-5 md:pr-6 pl-1" : "pl-5 md:pl-6 pr-1"}`}>
+            <button className={`mt-10 md:mt-12 h-[52px] md:h-[56px] pr-1 bg-[#94A3B8]/30 hover:bg-[#94A3B8]/40 backdrop-blur-md text-white rounded-[18px] md:rounded-[20px] font-bold text-[14px] md:text-[15px] transition-all flex items-center gap-3 md:gap-4 border border-white/10 shadow-lg pl-5 md:pl-6 pr-1`}>
               {t.checkout.startSourcing}
               <div className="w-[44px] h-[44px] md:w-[48px] md:h-[48px] bg-white rounded-[14px] md:rounded-[16px] flex items-center justify-center">
-                <ArrowRight className={`w-4 h-4 md:w-5 md:h-5 text-black ${isRtl ? "scale-x-[-1]" : ""}`} />
+                <ArrowRight className={`w-4 h-4 md:w-5 md:h-5 text-black`} />
               </div>
             </button>
           </div>

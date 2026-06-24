@@ -58,7 +58,7 @@ export default function LandingPage() {
   const [activeStep, setActiveStep] = useState(0);
   const [activeFilter, setActiveFilter] = useState(0);
   const t = useHomeTranslations();
-  const { isRtl } = useLanguage();
+  const { language } = useLanguage();
 
   // ─── Scroll to change step ──────────────────────────────────────────────────
   const sectionRef = useRef<HTMLElement>(null);
@@ -126,7 +126,7 @@ export default function LandingPage() {
   const steps = stepConfig.map((cfg, i) => ({ ...cfg, ...stepText[i] }));
 
   return (
-    <div dir={isRtl ? "rtl" : "ltr"} className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
+    <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
 
       <Navbar />
 
@@ -140,7 +140,7 @@ export default function LandingPage() {
           <div className="bg-white/30 border border-[#548381]/20 rounded-full px-[14px] py-[7px] flex items-center gap-[8px] cursor-default backdrop-blur-sm">
             <Image width={100} height={100} src="/assets/stars.svg" alt="" className="w-[14px] h-[14px]" />
             <p className="text-[13px] font-medium tracking-tight flex gap-1">
-              {!isRtl && <span className="text-[#b0b0b5] font-schibsted font-medium">New:</span>}
+              <span className="text-[#b0b0b5] font-schibsted font-medium">New:</span>
               <span className="text-[#555f6d] font-schibsted font-medium">{t.hero.badge}</span>
             </p>
           </div>
@@ -151,8 +151,8 @@ export default function LandingPage() {
                 {t.hero.headlineLine1}
               </span>
               <span
-                className={`block ${isRtl ? "" : "italic"} font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] -mt-1`}
-                style={{ fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", fontStyle: isRtl ? "normal" : "italic", letterSpacing: "0.5px" }}
+                className={`block italic font-normal text-[48px] sm:text-[58px] lg:text-[64px] leading-[1.15] text-[#111d27] -mt-1`}
+                style={{ fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", fontStyle: "italic", letterSpacing: "0.5px" }}
               >
                 {t.hero.headlineLine2}
               </span>
@@ -192,17 +192,17 @@ export default function LandingPage() {
               <div className="flex items-center justify-between">
                 <h3 className="text-[28px] font-bold text-[#272e35] leading-[1.2] font-scada">{feature.name}</h3>
                 <button className="w-[46px] h-[46px] bg-[#142d25] rounded-[8px] flex items-center justify-center hover:bg-[#003330] transition-colors shadow-sm shrink-0">
-                  <Image width={100} height={100} src="/assets/arrow-outward.svg" alt="Go" className={`w-[24px] h-[24px] brightness-[10] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                  <Image width={100} height={100} src="/assets/arrow-outward.svg" alt="Go" className={`w-[24px] h-[24px] brightness-[10]`} />
                 </button>
               </div>
             </motion.div>
           ))}
         </div>
 
-        <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[24px]" : "pl-[24px] pr-[4px]"}`}>
+        <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group pl-[24px] pr-[4px]`}>
           <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
           <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-            <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
+            <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px]`} />
           </div>
         </button>
       </section>
@@ -221,7 +221,7 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  {!isRtl && <span className="text-[#deb01d]">New: </span>}
+                  <span className="text-[#deb01d]">New: </span>
                   <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
@@ -229,10 +229,10 @@ export default function LandingPage() {
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
                 {t.keyFeatures.items.aiFloorPlanner.copy}
               </p>
-              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[16px]" : "pl-[16px] pr-[4px]"}`}>
+              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group pl-[16px] pr-[4px]`}>
                 <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px]`} />
                 </div>
               </button>
             </div>
@@ -245,7 +245,7 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  {!isRtl && <span className="text-[#deb01d]">New: </span>}
+                  <span className="text-[#deb01d]">New: </span>
                   <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
@@ -253,10 +253,10 @@ export default function LandingPage() {
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
                 {t.keyFeatures.items.realTimeDesign.copy}
               </p>
-              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[16px]" : "pl-[16px] pr-[4px]"}`}>
+              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group pl-[16px] pr-[4px]`}>
                 <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px]`} />
                 </div>
               </button>
             </div>
@@ -269,7 +269,7 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  {!isRtl && <span className="text-[#deb01d]">New: </span>}
+                  <span className="text-[#deb01d]">New: </span>
                   <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
@@ -277,10 +277,10 @@ export default function LandingPage() {
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
                 {t.keyFeatures.items.orderFromDesign.copy}
               </p>
-              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[16px]" : "pl-[16px] pr-[4px]"}`}>
+              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group pl-[16px] pr-[4px]`}>
                 <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
-                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                  <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px]`} />
                 </div>
               </button>
             </div>
@@ -317,7 +317,7 @@ export default function LandingPage() {
                     className={`cursor-pointer px-[8px] min-[375px]:px-[12px] sm:px-[16px] py-[8px] text-[13px] min-[375px]:text-[14px] sm:text-[18px] font-medium transition-all relative whitespace-nowrap shrink-0 rounded-md flex-1 sm:flex-none text-center ${activeStep === i ? "bg-white/5" : "text-[#859c80] hover:text-white/60"}`}
                     style={{ color: activeStep === i ? steps[activeStep].accentColor : undefined }}
                   >
-                    {t.howItWorks.stepLabel} {isRtl ? "٠١٢٣٤".split("")[stepNum] : stepNum}
+                    {t.howItWorks.stepLabel} {language === "ar" ? "٠١٢٣٤".split("")[stepNum] : stepNum}
                     {activeStep === i && (
                       <motion.div
                         layoutId="activeStepUnderline"

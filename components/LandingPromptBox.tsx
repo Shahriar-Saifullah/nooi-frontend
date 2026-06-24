@@ -27,7 +27,7 @@ export default function LandingPromptBox() {
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  const { isRtl } = useLanguage();
+  const { language } = useLanguage();
   const t = useHomeTranslations();
 
   const isPromptActive = prompt.trim() !== "" || attachedFile !== null;
@@ -69,12 +69,12 @@ export default function LandingPromptBox() {
         {/* Textarea */}
         <textarea
           placeholder={t.hero.promptPlaceholder}
-          className={`w-full bg-transparent outline-none resize-none font-schibsted font-normal text-[17px] leading-[1.55] text-[#111d27] placeholder:text-[#a8adb3] min-h-[56px] ${isRtl ? "text-right" : "text-left"}`}
+          className={`w-full bg-transparent outline-none resize-none font-schibsted font-normal text-[17px] leading-[1.55] text-[#111d27] placeholder:text-[#a8adb3] min-h-[56px]`}
           rows={2}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           disabled={isGenerating}
-          dir={isRtl ? "rtl" : "ltr"}
+         
         />
 
         {/* Attached file pill */}
@@ -202,8 +202,6 @@ export default function LandingPromptBox() {
               onClick={handleGenerate}
               disabled={!isPromptActive || isGenerating}
               className={`rounded-[10px] py-[9px] px-[14px] flex items-center gap-[8px] shadow-sm transition-colors ${
-                isRtl ? "flex-row-reverse" : ""
-              } ${
                 isPromptActive && !isGenerating
                   ? "bg-[#004643] hover:bg-[#003330] cursor-pointer"
                   : "bg-[#e5e5e5] cursor-not-allowed"
@@ -211,14 +209,14 @@ export default function LandingPromptBox() {
             >
               <span className={`font-schibsted font-semibold text-[14px] leading-none whitespace-nowrap ${isPromptActive && !isGenerating ? "text-white" : "text-[#a3a3a3]"}`}>
                 {isGenerating
-                  ? (isRtl ? "جارٍ الإنشاء…" : "Generating…")
+                  ? (language === "ar" ? "جارٍ الإنشاء…" : "Generating…")
                   : t.hero.buildNow}
               </span>
               {isGenerating ? (
                 <Loader2 size={16} className="animate-spin text-white" />
               ) : (
                 <svg
-                  className={`transition-transform ${isRtl ? "rotate-180" : "group-hover:translate-x-0.5"}`}
+                  className="transition-transform group-hover:translate-x-0.5"
                   width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke={isPromptActive ? "white" : "#a3a3a3"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
                 >
@@ -237,7 +235,7 @@ export default function LandingPromptBox() {
             <div className="bg-white border border-[#d8d9da] rounded-[18px] px-6 py-8 flex flex-col items-center gap-3">
               <Loader2 size={22} className="animate-spin text-[#004643]" />
               <p className="text-[14px] text-[#6b7280] font-schibsted">
-                {isRtl ? "جارٍ إنشاء معاينة تصميمك…" : "Generating your design preview…"}
+                {language === "ar" ? "جارٍ إنشاء معاينة تصميمك…" : "Generating your design preview…"}
               </p>
             </div>
           )}
@@ -249,12 +247,12 @@ export default function LandingPromptBox() {
           {generatedImageUrl && !isGenerating && (
             <div className="bg-white border border-[#d8d9da] rounded-[18px] overflow-hidden shadow-[0px_20px_60px_rgba(0,0,0,0.07)]">
               <img src={generatedImageUrl} alt="AI-generated design preview" className="w-full h-auto block" />
-              <div className={`p-4 flex items-center justify-between ${isRtl ? "flex-row-reverse" : ""}`}>
+              <div className={`p-4 flex items-center justify-between `}>
                 <p className="text-[13px] text-[#6b7280] font-schibsted">
-                  {isRtl ? "أعجبك ما ترى؟ سجّل للحفظ ومتابعة التعديل." : "Like what you see? Sign up to save and keep editing."}
+                  {language === "ar" ? "أعجبك ما ترى؟ سجّل للحفظ ومتابعة التعديل." : "Like what you see? Sign up to save and keep editing."}
                 </p>
                 <Link href="/signup" className="bg-[#004643] hover:bg-[#003330] text-white text-[13px] font-semibold font-schibsted px-4 py-2 rounded-full transition-colors whitespace-nowrap">
-                  {isRtl ? "سجّل مجانًا" : "Sign up free"}
+                  {language === "ar" ? "سجّل مجانًا" : "Sign up free"}
                 </Link>
               </div>
             </div>
