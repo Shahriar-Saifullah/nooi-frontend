@@ -25,7 +25,7 @@ function LanguageToggle() {
 export default function AboutPage() {
   const t = useAboutTranslations();
   const tf = useHomeTranslations(); // for shared footer strings
-  const { isRtl } = useLanguage();
+  const { language } = useLanguage();
 
   const stats = [
     { value: "50k+", label: t.stats.projects },
@@ -47,7 +47,7 @@ export default function AboutPage() {
   ];
 
   return (
-    <div dir={isRtl ? "rtl" : "ltr"} className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
+    <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden">
 
       <Navbar />
 
@@ -64,12 +64,12 @@ export default function AboutPage() {
               {t.hero.headlineLine1}
             </h1>
             <p
-              className={`${isRtl ? "" : "italic"} font-normal text-[56px] sm:text-[64px] lg:text-[72px] text-[#004643] text-center`}
+              className={`italic font-normal text-[56px] sm:text-[64px] lg:text-[72px] text-[#004643] text-center`}
               style={{
                 lineHeight: "72px",
                 letterSpacing: "0px",
                 fontFamily: "var(--font-playfair), 'Playfair Display', Georgia, serif",
-                fontStyle: isRtl ? "normal" : "italic",
+                fontStyle: "italic",
                 fontWeight: 400,
               }}
             >
@@ -103,7 +103,7 @@ export default function AboutPage() {
         <div className="max-w-[1240px] mx-auto flex flex-col lg:flex-row gap-[60px] lg:gap-[80px] items-start">
           <div className="w-full lg:w-[540px] shrink-0">
             <h2 className="font-schibsted font-bold text-[36px] sm:text-[42px] lg:text-[48px] leading-[1.1] text-[#004643] mb-8 tracking-[-1px]">
-              {isRtl ? t.founding.heading : (
+              {language === "ar" ? t.founding.heading : (
                 <>
                   From Sketch to{" "}
                   <span style={{ fontFamily: "var(--font-instrument), 'Instrument Serif', Georgia, serif", fontStyle: "italic", fontWeight: 400, letterSpacing: "0.3px", color: "#004643" }}>
@@ -172,7 +172,7 @@ export default function AboutPage() {
           <div className="flex flex-col items-center text-center mb-[72px]">
             <p className="text-[14px] font-semibold text-[#004643] uppercase tracking-[2.5px] mb-4 font-schibsted">{t.team.eyebrow}</p>
             <h2 className="font-schibsted font-bold text-[40px] sm:text-[48px] lg:text-[56px] leading-[1.1] text-[#111d27] tracking-[-1.5px]">
-              {isRtl ? t.team.heading : (
+              {language === "ar" ? t.team.heading : (
                 <>Meet the <span className="font-instrument italic font-normal text-[#004643]">Innovators.</span></>
               )}
             </h2>
@@ -235,7 +235,7 @@ export default function AboutPage() {
             <Link href="/authpage/signup" className="bg-[#8bec5c] text-[#142d26] px-8 py-4 rounded-full text-[15px] font-bold hover:bg-[#a3f37e] transition-colors shadow-xl shadow-[#8bec5c]/20 whitespace-nowrap flex items-center gap-3">
               {t.cta.getFree}
               <div className="bg-[#142d26]/20 rounded-full w-6 h-6 flex items-center justify-center">
-                <Image width={14} height={14} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[14px] h-[14px] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                <Image width={14} height={14} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[14px] h-[14px]`} />
               </div>
             </Link>
             <button className="bg-white/10 backdrop-blur-md border border-white/20 text-white px-8 py-4 rounded-full text-[15px] font-bold hover:bg-white/20 transition-colors whitespace-nowrap">

@@ -21,7 +21,7 @@ function LanguageToggle() {
 
 export default function HomePlannerPage() {
   const t = useHomePlannerTranslations();
-  const { isRtl } = useLanguage();
+  const { language } = useLanguage();
 
   const tools = [
     { title: t.tools.tool1.title, desc: t.tools.tool1.desc, icon: <Box className="w-6 h-6 text-[#2563eb]" />,    img: "/assets/blueprint.png" },
@@ -42,7 +42,7 @@ export default function HomePlannerPage() {
   ];
 
   return (
-    <div dir={isRtl ? "rtl" : "ltr"} className="relative min-h-screen bg-white font-schibsted overflow-x-hidden antialiased">
+    <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden antialiased">
 
       <Navbar />
 
@@ -60,7 +60,7 @@ export default function HomePlannerPage() {
           <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-[48px] sm:text-[64px] lg:text-[84px] font-bold text-[#004643] leading-[1] mb-2 tracking-[-2px] font-schibsted">
             {t.hero.title}
           </motion.h1>
-          <motion.h2 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className={`text-[36px] sm:text-[54px] lg:text-[72px] ${isRtl ? "" : "font-instrument italic"} text-[#555f6d] leading-[1.2] mb-10 tracking-[0.02em]`}>
+          <motion.h2 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className={`text-[36px] sm:text-[54px] lg:text-[72px] font-instrument italic text-[#555f6d] leading-[1.2] mb-10 tracking-[0.02em]`}>
             {t.hero.headline}
           </motion.h2>
 
@@ -77,7 +77,7 @@ export default function HomePlannerPage() {
             </div>
             <button className="h-[52px] px-8 bg-[#004643] text-white rounded-[14px] font-bold text-[15px] hover:bg-[#003330] transition-all flex items-center gap-3 shadow-lg">
               {t.hero.startDesign}
-              <ArrowRight className={`w-4 h-4 opacity-80 ${isRtl ? "scale-x-[-1]" : ""}`} />
+              <ArrowRight className={`w-4 h-4 opacity-80`} />
             </button>
           </motion.div>
         </div>
@@ -129,10 +129,10 @@ export default function HomePlannerPage() {
               ))}
             </div>
 
-            <button className={`h-[56px] bg-[#94A3B8]/40 hover:bg-[#94A3B8]/50 backdrop-blur-md text-white rounded-[16px] font-semibold text-[17px] transition-all flex items-center gap-6 border border-white/10 shadow-sm group ${isRtl ? "flex-row-reverse pr-6 pl-1.5" : "pl-6 pr-1.5"}`}>
+            <button className={`h-[56px] bg-[#94A3B8]/40 hover:bg-[#94A3B8]/50 backdrop-blur-md text-white rounded-[16px] font-semibold text-[17px] transition-all flex items-center gap-6 border border-white/10 shadow-sm group pl-6 pr-1.5`}>
               {t.workflow.startProject}
               <div className="w-[44px] h-[44px] bg-white rounded-[12px] flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-                <ArrowRight className={`w-4 h-4 text-[#004643] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                <ArrowRight className={`w-4 h-4 text-[#004643]`} />
               </div>
             </button>
           </div>
@@ -172,7 +172,7 @@ export default function HomePlannerPage() {
               <p className="text-[18px] text-[#555f6d] opacity-70">{t.layouts.subtext}</p>
             </div>
             <button className="text-[15px] font-bold text-[#004643] flex items-center gap-2 hover:gap-3 transition-all">
-              {t.layouts.viewAll} <ArrowRight className={`w-4 h-4 ${isRtl ? "scale-x-[-1]" : ""}`} />
+              {t.layouts.viewAll} <ArrowRight className={`w-4 h-4`} />
             </button>
           </div>
 
@@ -211,14 +211,14 @@ export default function HomePlannerPage() {
         <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-[#0ea5e9]/20 blur-[120px] rounded-full pointer-events-none" />
         <div className="relative z-10 flex flex-col justify-center items-center w-full max-w-[1280px] px-5 py-[80px] md:py-[100px] lg:px-[200px] bg-white/5 backdrop-blur-[12px] border border-white/20 rounded-[24px] shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
           <h2 className="mb-[16px] md:mb-[24px] text-[40px] md:text-[80px] font-medium text-white tracking-tight text-center leading-[1.1]">
-            {isRtl ? t.cta.heading : <>{t.cta.heading.split("your")[0]}<br /><span className="text-white/70">your {t.cta.heading.split("your")[1]}</span></>}
+            {language === "ar" ? t.cta.heading : <>{t.cta.heading.split("your")[0]}<br /><span className="text-white/70">your {t.cta.heading.split("your")[1]}</span></>}
           </h2>
           <p className="text-white/70 text-[16px] md:text-[18px] text-center leading-relaxed">{t.cta.body}</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-[16px] mt-[32px] md:mt-[48px]">
             <button className="h-[52px] pl-[20px] pr-[6px] bg-[#c4f4a3] hover:bg-[#b5eb92] text-[#004643] rounded-[12px] font-medium text-[15px] transition-all flex items-center gap-[12px] shadow-sm group">
               {t.cta.startTrial}
               <div className="w-[40px] h-[40px] bg-white rounded-[8px] flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-                <ArrowRight className={`w-4 h-4 text-[#004643] ${isRtl ? "scale-x-[-1]" : ""}`} />
+                <ArrowRight className={`w-4 h-4 text-[#004643]`} />
               </div>
             </button>
             <button className="h-[52px] px-[28px] border border-white/40 hover:bg-white/10 text-white rounded-[12px] font-medium text-[15px] transition-all">{t.cta.bookDemo}</button>
@@ -236,28 +236,28 @@ export default function HomePlannerPage() {
                 <span className="font-inter font-bold text-[20px] text-neutral-900 tracking-tight uppercase">NOOI</span>
               </Link>
               <p className="text-[#6b7280] mb-8 text-[14px] leading-relaxed max-w-[320px] font-schibsted opacity-80">
-                {isRtl ? "اشترك في نشرة Nooi الأسبوعية واستمتع بسبعة أيام من أخبار التصميم الداخلي في رسالة واحدة، مع توصيل عالمي." : "Subscribe to the nooi weekly and enjoy seven days of interior design news in one newsletter, with worldwide delivery."}
+                {language === "ar" ? "اشترك في نشرة Nooi الأسبوعية واستمتع بسبعة أيام من أخبار التصميم الداخلي في رسالة واحدة، مع توصيل عالمي." : "Subscribe to the nooi weekly and enjoy seven days of interior design news in one newsletter, with worldwide delivery."}
               </p>
               <div className="relative max-w-[340px] mb-8">
-                <input type="email" placeholder={isRtl ? "أدخل بريدك الإلكتروني" : "Enter your email"} className="w-full h-[52px] bg-white border border-[#e8eaec] rounded-[10px] px-5 outline-none focus:border-[#004643] transition-colors text-[14px] pr-[110px]" />
-                <button className="absolute right-1.5 top-1.5 h-[40px] bg-[#004643] text-white px-6 rounded-[8px] text-[13px] font-bold hover:bg-[#003330] transition-colors">{isRtl ? "اشترك" : "Subscribe"}</button>
+                <input type="email" placeholder={language === "ar" ? "أدخل بريدك الإلكتروني" : "Enter your email"} className="w-full h-[52px] bg-white border border-[#e8eaec] rounded-[10px] px-5 outline-none focus:border-[#004643] transition-colors text-[14px] pr-[110px]" />
+                <button className="absolute right-1.5 top-1.5 h-[40px] bg-[#004643] text-white px-6 rounded-[8px] text-[13px] font-bold hover:bg-[#003330] transition-colors">{language === "ar" ? "اشترك" : "Subscribe"}</button>
               </div>
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2 cursor-pointer opacity-60 hover:opacity-100 transition-opacity">
                   <div className="w-5 h-5 flex items-center justify-center border border-black rounded p-0.5"><Image width={16} height={16} src="/assets/windows.svg" alt="" className="w-full h-full grayscale" /></div>
-                  <span className="text-[12px] font-bold">{isRtl ? "تطبيق Nooi لويندوز" : "Nooi Windows App"}</span>
+                  <span className="text-[12px] font-bold">{language === "ar" ? "تطبيق Nooi لويندوز" : "Nooi Windows App"}</span>
                 </div>
                 <div className="flex items-center gap-2 cursor-pointer opacity-60 hover:opacity-100 transition-opacity">
                   <div className="w-5 h-5 flex items-center justify-center border border-black rounded p-0.5"><Image width={16} height={16} src="/assets/apple.svg" alt="" className="w-full h-full grayscale" /></div>
-                  <span className="text-[12px] font-bold">{isRtl ? "تطبيق Nooi لماك" : "Nooi Mac App"}</span>
+                  <span className="text-[12px] font-bold">{language === "ar" ? "تطبيق Nooi لماك" : "Nooi Mac App"}</span>
                 </div>
               </div>
             </div>
 
             {[
-              { heading: isRtl ? "المنتج" : "Product", items: isRtl ? ["مخطط الأرضيات", "التصميم الداخلي", "تصميم المطابخ والخزائن", "عارض ثلاثي الأبعاد", "أثاث مخصص"] : ["Floor planner", "Interior design", "Kitchen & Closet Design", "3D Viewer", "Custom Furniture"] },
-              { heading: isRtl ? "الشركة" : "Company",  items: isRtl ? ["من نحن", "اتصل بنا", "برنامج الشركاء", "الوظائف"] : ["About Us", "Contact us", "Affiliate program", "Careers"] },
-              { heading: isRtl ? "الموارد" : "Resources",items: isRtl ? ["أفكار تصميم المنزل", "الدروس التعليمية", "مركز المساعدة", "تطبيق Nooi"] : ["Home Design Ideas", "Tutorial", "Help center", "Nooi app"] },
+              { heading: language === "ar" ? "المنتج" : "Product", items: language === "ar" ? ["مخطط الأرضيات", "التصميم الداخلي", "تصميم المطابخ والخزائن", "عارض ثلاثي الأبعاد", "أثاث مخصص"] : ["Floor planner", "Interior design", "Kitchen & Closet Design", "3D Viewer", "Custom Furniture"] },
+              { heading: language === "ar" ? "الشركة" : "Company",  items: language === "ar" ? ["من نحن", "اتصل بنا", "برنامج الشركاء", "الوظائف"] : ["About Us", "Contact us", "Affiliate program", "Careers"] },
+              { heading: language === "ar" ? "الموارد" : "Resources",items: language === "ar" ? ["أفكار تصميم المنزل", "الدروس التعليمية", "مركز المساعدة", "تطبيق Nooi"] : ["Home Design Ideas", "Tutorial", "Help center", "Nooi app"] },
             ].map((col, i) => (
               <div key={i}>
                 <h5 className="text-[14px] font-bold text-[#111D27] mb-6 tracking-tight uppercase">{col.heading}</h5>
@@ -269,10 +269,10 @@ export default function HomePlannerPage() {
           </div>
 
           <div className="pt-8 border-t border-[#f0f0f0] flex flex-col sm:flex-row items-center justify-between gap-6">
-            <p className="text-[#9ca3af] text-[12px] font-schibsted">{isRtl ? "© 2026 شركة Nooi. جميع الحقوق محفوظة." : "2026 Nooi, Inc. All Rights Reserved."}</p>
+            <p className="text-[#9ca3af] text-[12px] font-schibsted">{language === "ar" ? "© 2026 شركة Nooi. جميع الحقوق محفوظة." : "2026 Nooi, Inc. All Rights Reserved."}</p>
             <div className="flex items-center gap-8 text-[12px] text-[#9ca3af] font-schibsted">
-              <span className="hover:text-[#111d27] cursor-pointer">{isRtl ? "الشروط والأحكام" : "Terms & Conditions"}</span>
-              <span className="hover:text-[#111d27] cursor-pointer">{isRtl ? "سياسة الخصوصية" : "Privacy Policy"}</span>
+              <span className="hover:text-[#111d27] cursor-pointer">{language === "ar" ? "الشروط والأحكام" : "Terms & Conditions"}</span>
+              <span className="hover:text-[#111d27] cursor-pointer">{language === "ar" ? "سياسة الخصوصية" : "Privacy Policy"}</span>
             </div>
             <div className="flex items-center gap-4">
               <div className="flex gap-4">
