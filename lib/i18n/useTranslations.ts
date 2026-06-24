@@ -1,7 +1,7 @@
 "use client";
 
 import { useLanguageStore } from "@/lib/store";
-import { homeTranslations, aboutTranslations, marketplaceTranslations, homePlannerTranslations, designStudioTranslations } from "./translations";
+import { homeTranslations, aboutTranslations, marketplaceTranslations, homePlannerTranslations, designStudioTranslations, howItWorksTranslations } from "./translations";
 
 // Small accessor hook — components call useHomeTranslations() and read
 // t.hero.headlineLine1 etc., already resolved to the active language string.
@@ -50,6 +50,11 @@ export function useHomePlannerTranslations() {
 export function useDesignStudioTranslations() {
   const language = useLanguageStore((s) => s.language);
   return resolve(designStudioTranslations, language);
+}
+
+export function useHowItWorksTranslations() {
+  const language = useLanguageStore((s) => s.language);
+  return resolve(howItWorksTranslations, language);
 }
 
 export function useLanguage() {

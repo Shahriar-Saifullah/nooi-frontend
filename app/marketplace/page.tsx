@@ -285,7 +285,7 @@ export default function MarketplacePage() {
                 </div>
               </div>
             </div>
-            <button className="mt-10 md:mt-12 h-[52px] md:h-[56px] pl-5 md:pl-6 pr-1 bg-[#94A3B8]/30 hover:bg-[#94A3B8]/40 backdrop-blur-md text-white rounded-[18px] md:rounded-[20px] font-bold text-[14px] md:text-[15px] transition-all flex items-center gap-3 md:gap-4 border border-white/10 shadow-lg">
+            <button className={`mt-10 md:mt-12 h-[52px] md:h-[56px] pr-1 bg-[#94A3B8]/30 hover:bg-[#94A3B8]/40 backdrop-blur-md text-white rounded-[18px] md:rounded-[20px] font-bold text-[14px] md:text-[15px] transition-all flex items-center gap-3 md:gap-4 border border-white/10 shadow-lg ${isRtl ? "flex-row-reverse pr-5 md:pr-6 pl-1" : "pl-5 md:pl-6 pr-1"}`}>
               {t.checkout.startSourcing}
               <div className="w-[44px] h-[44px] md:w-[48px] md:h-[48px] bg-white rounded-[14px] md:rounded-[16px] flex items-center justify-center">
                 <ArrowRight className={`w-4 h-4 md:w-5 md:h-5 text-black ${isRtl ? "scale-x-[-1]" : ""}`} />

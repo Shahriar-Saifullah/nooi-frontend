@@ -129,7 +129,7 @@ export default function HomePlannerPage() {
               ))}
             </div>
 
-            <button className="h-[56px] pl-6 pr-1.5 bg-[#94A3B8]/40 hover:bg-[#94A3B8]/50 backdrop-blur-md text-white rounded-[16px] font-semibold text-[17px] transition-all flex items-center gap-6 border border-white/10 shadow-sm group">
+            <button className={`h-[56px] bg-[#94A3B8]/40 hover:bg-[#94A3B8]/50 backdrop-blur-md text-white rounded-[16px] font-semibold text-[17px] transition-all flex items-center gap-6 border border-white/10 shadow-sm group ${isRtl ? "flex-row-reverse pr-6 pl-1.5" : "pl-6 pr-1.5"}`}>
               {t.workflow.startProject}
               <div className="w-[44px] h-[44px] bg-white rounded-[12px] flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
                 <ArrowRight className={`w-4 h-4 text-[#004643] ${isRtl ? "scale-x-[-1]" : ""}`} />

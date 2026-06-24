@@ -127,7 +127,7 @@ export default function DesignStudioPage() {
               <ul className="space-y-4 mb-10">
                 {[t.workflow.phase1.feat1, t.workflow.phase1.feat2, t.workflow.phase1.feat3].map((item) => <CheckItem key={item} label={item} />)}
               </ul>
-              <button className="bg-[#004643] text-white pl-[24px] pr-[8px] py-[8px] rounded-full flex items-center gap-[16px] hover:bg-[#003330] transition-colors font-medium text-[15px]">
+              <button className={`bg-[#004643] text-white py-[8px] rounded-full flex items-center gap-[16px] hover:bg-[#003330] transition-colors font-medium text-[15px] ${isRtl ? "flex-row-reverse pr-[24px] pl-[8px]" : "pl-[24px] pr-[8px]"}`}>
                 {t.workflow.phase1.cta}
                 <div className="bg-white/20 p-[10px] rounded-full flex items-center justify-center"><ArrowSvg /></div>
               </button>
@@ -160,7 +160,7 @@ export default function DesignStudioPage() {
               <ul className="space-y-4 mb-10">
                 {[t.workflow.phase2.feat1, t.workflow.phase2.feat2, t.workflow.phase2.feat3].map((item) => <CheckItem key={item} label={item} />)}
               </ul>
-              <button className="bg-[#004643] text-white pl-[24px] pr-[8px] py-[8px] rounded-full flex items-center gap-[16px] hover:bg-[#003330] transition-colors font-medium text-[15px]">
+              <button className={`bg-[#004643] text-white py-[8px] rounded-full flex items-center gap-[16px] hover:bg-[#003330] transition-colors font-medium text-[15px] ${isRtl ? "flex-row-reverse pr-[24px] pl-[8px]" : "pl-[24px] pr-[8px]"}`}>
                 {t.workflow.phase2.cta}
                 <div className="bg-white/20 p-[10px] rounded-full flex items-center justify-center"><ArrowSvg /></div>
               </button>

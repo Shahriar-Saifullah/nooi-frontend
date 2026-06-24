@@ -199,7 +199,7 @@ export default function LandingPage() {
           ))}
         </div>
 
-        <button className="bg-[#004643] text-white pl-[24px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
+        <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[24px]" : "pl-[24px] pr-[4px]"}`}>
           <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
           <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
             <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
@@ -229,7 +229,7 @@ export default function LandingPage() {
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
                 {t.keyFeatures.items.aiFloorPlanner.copy}
               </p>
-              <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
+              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[16px]" : "pl-[16px] pr-[4px]"}`}>
                 <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
                   <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
@@ -253,7 +253,7 @@ export default function LandingPage() {
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
                 {t.keyFeatures.items.realTimeDesign.copy}
               </p>
-              <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
+              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[16px]" : "pl-[16px] pr-[4px]"}`}>
                 <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
                   <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
@@ -277,7 +277,7 @@ export default function LandingPage() {
               <p className="text-[20px] text-[#4b5863] leading-[1.5] mb-10 font-schibsted">
                 {t.keyFeatures.items.orderFromDesign.copy}
               </p>
-              <button className="bg-[#004643] text-white pl-[16px] pr-[4px] py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group">
+              <button className={`bg-[#004643] text-white py-[4px] rounded-[16px] flex items-center gap-[16px] hover:bg-[#003330] transition-all shadow-[0px_19px_19px_rgba(0,0,0,0.09)] group ${isRtl ? "flex-row-reverse pl-[4px] pr-[16px]" : "pl-[16px] pr-[4px]"}`}>
                 <span className="text-[20px] font-schibsted font-normal">{t.productFeatures.viewAllDesign}</span>
                 <div className="bg-white p-[12px] rounded-[12px] flex items-center justify-center">
                   <Image width={100} height={100} src="/assets/arrow-right-02-sharp.svg" alt="" className={`w-[24px] h-[24px] ${isRtl ? "scale-x-[-1]" : ""}`} />
@@ -317,7 +317,7 @@ export default function LandingPage() {
                     className={`cursor-pointer px-[8px] min-[375px]:px-[12px] sm:px-[16px] py-[8px] text-[13px] min-[375px]:text-[14px] sm:text-[18px] font-medium transition-all relative whitespace-nowrap shrink-0 rounded-md flex-1 sm:flex-none text-center ${activeStep === i ? "bg-white/5" : "text-[#859c80] hover:text-white/60"}`}
                     style={{ color: activeStep === i ? steps[activeStep].accentColor : undefined }}
                   >
-                    {t.howItWorks.stepLabel} {stepNum}
+                    {t.howItWorks.stepLabel} {isRtl ? "٠١٢٣٤".split("")[stepNum] : stepNum}
                     {activeStep === i && (
                       <motion.div
                         layoutId="activeStepUnderline"
