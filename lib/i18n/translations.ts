@@ -249,7 +249,7 @@ export const designStudioTranslations = {
     body:    { en: "Our unified platform handles every stage of the design process, ensuring your vision is preserved from the first line to the final render.", ar: "تتولى منصتنا الموحّدة كل مرحلة من مراحل عملية التصميم لضمان الحفاظ على رؤيتك من أول خط إلى آخر تصيير." },
 
     phase1: {
-      tag:     { en: "Phase 01",              ar: "المرحلة 01" },
+      tag:     { en: "Phase 01",              ar: "المرحلة ٠١" },
       badge:   { en: "Auto-Dimension",        ar: "أبعاد تلقائية" },
       badgeSub:{ en: "Precise to 1mm",        ar: "دقة حتى 1 مم" },
       heading: { en: "Precision 2D Planning", ar: "تخطيط ثنائي الأبعاد دقيق" },
@@ -261,7 +261,7 @@ export const designStudioTranslations = {
     },
 
     phase2: {
-      tag:     { en: "Phase 02",                   ar: "المرحلة 02" },
+      tag:     { en: "Phase 02",                   ar: "المرحلة ٠٢" },
       badge:   { en: "AI Lighting",                ar: "إضاءة بالذكاء الاصطناعي" },
       badgeSub:{ en: "Auto-generated ambiance",    ar: "أجواء مولدة تلقائيًا" },
       heading: { en: "Immersive 3D Visualization", ar: "تصور ثلاثي الأبعاد غامر" },

@@ -140,7 +140,7 @@ export default function LandingPage() {
           <div className="bg-white/30 border border-[#548381]/20 rounded-full px-[14px] py-[7px] flex items-center gap-[8px] cursor-default backdrop-blur-sm">
             <Image width={100} height={100} src="/assets/stars.svg" alt="" className="w-[14px] h-[14px]" />
             <p className="text-[13px] font-medium tracking-tight flex gap-1">
-              <span className="text-[#b0b0b5] font-schibsted font-medium">New:</span>
+              {/* <span className="text-[#b0b0b5] font-schibsted font-medium">{language === "ar" ? "جديد:" : "New:"}</span> */}
               <span className="text-[#555f6d] font-schibsted font-medium">{t.hero.badge}</span>
             </p>
           </div>
@@ -221,7 +221,7 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  <span className="text-[#deb01d]">New: </span>
+                  {/* <span className="text-[#deb01d]">{language === "ar" ? "جديد: " : "New: "}</span> */}
                   <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
@@ -245,7 +245,7 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  <span className="text-[#deb01d]">New: </span>
+                  {/* <span className="text-[#deb01d]">{language === "ar" ? "جديد: " : "New: "}</span> */}
                   <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
@@ -269,7 +269,7 @@ export default function LandingPage() {
             <div className="flex-1 max-w-[519px]">
               <div className="bg-[#f8fafc] border border-[#e2eaf0] rounded-full px-4 py-1.5 w-fit mb-6">
                 <p className="text-[14px] font-medium font-inter">
-                  <span className="text-[#deb01d]">New: </span>
+                  {/* <span className="text-[#deb01d]">{language === "ar" ? "جديد: " : "New: "}</span> */}
                   <span className="text-[#6b7780]">{t.keyFeatures.badge}</span>
                 </p>
               </div>
@@ -547,13 +547,13 @@ export default function LandingPage() {
               <div className="absolute bottom-[20px] left-[20px] sm:bottom-[30px] sm:left-[30px] bg-white p-[24px] rounded-[24px] shadow-[0_20px_40px_rgba(0,0,0,0.08)] w-[260px] sm:w-[300px]">
                 <div className="flex justify-between items-start mb-[16px]">
                   <div>
-                    <p className="text-[12px] text-[#94a3b8] font-medium mb-[4px]">Current Balance</p>
-                    <p className="text-[20px] sm:text-[24px] font-bold text-[#111D27] leading-none">$ 250,560.0</p>
+                    <p className="text-[12px] text-[#94a3b8] font-medium mb-[4px]">{language === "ar" ? "الرصيد الحالي" : "Current Balance"}</p>
+                    <p className="text-[20px] sm:text-[24px] font-bold text-[#111D27] leading-none">{language === "ar" ? "$ ٢٥٠,٥٦٠.٠" : "$ 250,560.0"}</p>
                   </div>
                   <div className="flex gap-[8px]">
-                    <span className="text-[11px] text-[#94a3b8]">24h</span>
-                    <span className="text-[11px] text-[#94a3b8]">7d</span>
-                    <span className="text-[11px] text-[#94a3b8]">30d</span>
+                    <span className="text-[11px] text-[#94a3b8]">{language === "ar" ? "٢٤س" : "24h"}</span>
+                    <span className="text-[11px] text-[#94a3b8]">{language === "ar" ? "٧أ" : "7d"}</span>
+                    <span className="text-[11px] text-[#94a3b8]">{language === "ar" ? "٣٠أ" : "30d"}</span>
                   </div>
                 </div>
                 <div className="flex items-end justify-between h-[60px] gap-[8px] sm:gap-[12px] mb-[16px] px-1">
@@ -562,8 +562,11 @@ export default function LandingPage() {
                   ))}
                 </div>
                 <div className="flex justify-between items-center text-[10px] text-[#94a3b8] font-medium">
-                  {["Jan", "Feb", "Mar", "Apr", "May", "Jun"].map((label, i) => (
-                    <span key={i} className={`px-[8px] py-[4px] rounded-full transition-colors ${label === "Apr" ? "bg-[#1e3a3a] text-white" : ""}`}>{label}</span>
+                  {(language === "ar"
+                    ? ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو"]
+                    : ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+                  ).map((label, i) => (
+                    <span key={i} className={`px-[8px] py-[4px] rounded-full transition-colors ${i === 3 ? "bg-[#1e3a3a] text-white" : ""}`}>{label}</span>
                   ))}
                 </div>
               </div>
