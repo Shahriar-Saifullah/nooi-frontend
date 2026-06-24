@@ -29,6 +29,7 @@ export default function HomePlannerPage() {
     { title: t.tools.tool3.title, desc: t.tools.tool3.desc, icon: <Smartphone className="w-6 h-6 text-[#ea580c]" />, img: "/assets/tablet.png" },
   ];
 
+  const arabicNumerals: Record<string, string> = { "1": "١", "2": "٢", "3": "٣" };
   const steps = [
     { step: "1", title: t.workflow.step1.title, desc: t.workflow.step1.desc },
     { step: "2", title: t.workflow.step2.title, desc: t.workflow.step2.desc },
@@ -120,7 +121,7 @@ export default function HomePlannerPage() {
             <div className="space-y-10 mb-16">
               {steps.map((item, i) => (
                 <div key={i} className="flex gap-6 items-start">
-                  <div className="w-10 h-10 bg-white/10 border border-white/5 rounded-full flex items-center justify-center shrink-0 font-bold text-[14px]">{item.step}</div>
+                  <div className="w-10 h-10 bg-white/10 border border-white/5 rounded-full flex items-center justify-center shrink-0 font-bold text-[14px]">{language === "ar" ? arabicNumerals[item.step] : item.step}</div>
                   <div>
                     <h4 className="text-[20px] font-bold mb-2">{item.title}</h4>
                     <p className="text-white/60 text-[15px] leading-relaxed">{item.desc}</p>

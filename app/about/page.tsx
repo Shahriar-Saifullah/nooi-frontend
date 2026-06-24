@@ -28,10 +28,10 @@ export default function AboutPage() {
   const { language } = useLanguage();
 
   const stats = [
-    { value: "50k+", label: t.stats.projects },
-    { value: "120+", label: t.stats.countries },
-    { value: "2M+",  label: t.stats.delivery },
-    { value: "98%",  label: t.stats.satisfaction },
+    { value: "50k+", valueAr: "٥٠ألف+", label: t.stats.projects },
+    { value: "120+", valueAr: "١٢٠+",  label: t.stats.countries },
+    { value: "2M+",  valueAr: "٢م+",   label: t.stats.delivery },
+    { value: "98%",  valueAr: "٩٨٪",   label: t.stats.satisfaction },
   ];
 
   const team = [
@@ -159,7 +159,7 @@ export default function AboutPage() {
         <div className="max-w-[1240px] mx-auto grid grid-cols-2 lg:grid-cols-4 gap-y-12 gap-x-8">
           {stats.map((stat, i) => (
             <motion.div key={i} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.1 }} className="flex flex-col items-center text-center">
-              <p className="text-[48px] sm:text-[60px] font-bold text-white leading-none font-schibsted tracking-[-1.5px] mb-3">{stat.value}</p>
+              <p className="text-[48px] sm:text-[60px] font-bold text-white leading-none font-schibsted tracking-[-1.5px] mb-3">{language === "ar" ? stat.valueAr : stat.value}</p>
               <p className="text-[14px] text-white/50 font-schibsted uppercase tracking-[1px]">{stat.label}</p>
             </motion.div>
           ))}

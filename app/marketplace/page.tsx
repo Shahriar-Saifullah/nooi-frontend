@@ -116,7 +116,7 @@ export default function MarketplacePage() {
               <div className="absolute bottom-3 sm:bottom-6 left-3 sm:left-6 right-3 sm:right-6 h-[56px] sm:h-[80px] bg-white/90 backdrop-blur-xl border border-white rounded-[16px] md:rounded-[24px] shadow-lg flex items-center justify-between px-4 sm:px-8 z-20">
                 <div className="flex flex-col">
                   <span className="text-[10px] md:text-[12px] text-[#555f6d] font-medium tracking-tight">{t.hero.itemsAvailable}</span>
-                  <span className="text-[18px] md:text-[24px] font-bold text-[#111d27]">2.4 Million+</span>
+                  <span className="text-[18px] md:text-[24px] font-bold text-[#111d27]">{language === "ar" ? "٢.٤ مليون+" : "2.4 Million+"}</span>
                 </div>
                 <div className="w-[36px] md:w-[44px] h-[36px] md:h-[44px] bg-[#DFF8E6] rounded-full flex items-center justify-center">
                   <Image width={24} height={24} src="/assets/tickIcon.svg" alt="Tick" className="w-5 h-5 md:w-6 md:h-6" />
@@ -211,8 +211,8 @@ export default function MarketplacePage() {
                   <Image width={100} height={100} src="/assets/Furniture 4 3.png" alt="Chair" className="w-full h-auto object-contain" />
                 </div>
                 <div>
-                  <h4 className="text-[20px] font-bold text-[#111d27] mb-1">Eames Lounge Chair</h4>
-                  <p className="text-[14px] text-[#555f6d] mb-2">Walnut Wood, Black Leather</p>
+                  <h4 className="text-[20px] font-bold text-[#111d27] mb-1">{language === "ar" ? "كرسي Eames لاونج" : "Eames Lounge Chair"}</h4>
+                  <p className="text-[14px] text-[#555f6d] mb-2">{language === "ar" ? "خشب الجوز، جلد أسود" : "Walnut Wood, Black Leather"}</p>
                   <div className="flex items-center gap-2">
                     <span className="px-3 py-1 bg-[#f1f5f9] text-[11px] font-bold text-[#555f6d] rounded-full uppercase tracking-wider">Herman Miller</span>
                     <span className="px-3 py-1 bg-[#DFF8E6] text-[11px] font-bold text-[#10B981] rounded-full uppercase tracking-wider">{t.pricing.inStock}</span>
@@ -223,14 +223,14 @@ export default function MarketplacePage() {
                 <div className="flex items-center justify-between p-4 bg-[#F0FDF4] rounded-2xl border border-[#D1FAE5]">
                   <div className="flex items-center gap-4">
                     <div className="w-2.5 h-2.5 bg-[#10B981] rounded-full" />
-                    <span className="text-[16px] font-bold text-[#065F46]">Design Within Reach</span>
+                    <span className="text-[16px] font-bold text-[#065F46]">{language === "ar" ? "Design Within Reach" : "Design Within Reach"}</span>
                   </div>
                   <span className="text-[18px] font-bold text-[#065F46]">$6,495.00</span>
                 </div>
                 <div className="flex items-center justify-between p-4 rounded-2xl hover:bg-[#f8fafc] transition-colors">
                   <div className="flex items-center gap-4">
                     <div className="w-2.5 h-2.5 border-2 border-[#e2eaf0] rounded-full" />
-                    <span className="text-[16px] font-medium text-[#555f6d]">Herman Miller Direct</span>
+                    <span className="text-[16px] font-medium text-[#555f6d]">{language === "ar" ? "Herman Miller Direct" : "Herman Miller Direct"}</span>
                   </div>
                   <span className="text-[16px] font-bold text-[#111d27] opacity-60">$6,995.00</span>
                 </div>
@@ -311,7 +311,7 @@ export default function MarketplacePage() {
                   </div>
                   <div className="flex-1">
                     <div className="flex justify-between items-center">
-                      <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">Svelto Sofa</h5>
+                      <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">{language === "ar" ? "أريكة Svelto" : "Svelto Sofa"}</h5>
                       <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">$1,200</span>
                     </div>
                     <p className="text-[11px] md:text-[12px] text-[#94a3b8]">{t.checkout.vendor}: Article</p>
@@ -323,7 +323,7 @@ export default function MarketplacePage() {
                   </div>
                   <div className="flex-1">
                     <div className="flex justify-between items-center">
-                      <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">Akari Lamp 1A</h5>
+                      <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">{language === "ar" ? "مصباح Akari 1A" : "Akari Lamp 1A"}</h5>
                       <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">$350</span>
                     </div>
                     <p className="text-[11px] md:text-[12px] text-[#94a3b8]">{t.checkout.vendor}: Noguchi Shop</p>
