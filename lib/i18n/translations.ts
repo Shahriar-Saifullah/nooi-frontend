@@ -588,3 +588,69 @@ export const aboutTranslations = {
     demo:    { en: "Book a Demo",   ar: "احجز عرضًا توضيحيًا" },
   },
 } as const;
+
+// ─── How It Works page (/how-it-works) ────────────────────────────────────
+export const howItWorksTranslations = {
+  hero: {
+    badge:        { en: "Simple Workflow",                ar: "سير عمل بسيط" },
+    headlineLine1:{ en: "From Imagination to",            ar: "من الخيال إلى" },
+    headlineLine2:{ en: "Reality in Minutes.",            ar: "الواقع في دقائق." },
+    subtext:      { en: "Discover how Nooi transforms your rough sketches into breathtaking 3D visualizations and actionable floor plans through our seamless AI-powered process.", ar: "اكتشف كيف تحوّل Nooi رسوماتك الأولية إلى تصورات ثلاثية الأبعاد مذهلة ومخططات أرضية قابلة للتنفيذ من خلال عمليتنا السلسة المدعومة بالذكاء الاصطناعي." },
+    cta:          { en: "Start Your Journey",             ar: "ابدأ رحلتك" },
+  },
+
+  step1: {
+    phase:    { en: "Input Phase",                        ar: "مرحلة الإدخال" },
+    heading:  { en: "Upload or Sketch Your Idea",         ar: "ارفع فكرتك أو ارسمها" },
+    body:     { en: "Begin by uploading an existing 2D floor plan, a rough hand-drawn sketch, or simply describe your vision in text. Our AI understands spatial relationships instantly.", ar: "ابدأ برفع مخطط أرضي ثنائي الأبعاد موجود، أو رسم يدوي أولي، أو صِف رؤيتك بالنص. يفهم الذكاء الاصطناعي لدينا العلاقات المكانية فورًا." },
+    feat1:    { en: "Supports JPG, PNG, PDF, and hand-drawn sketches.", ar: "يدعم صيغ JPG وPNG وPDF والرسومات اليدوية." },
+    feat2:    { en: "AI auto-detects walls, windows, and doors.",        ar: "يكتشف الذكاء الاصطناعي الجدران والنوافذ والأبواب تلقائيًا." },
+    cta:      { en: "Try uploading a sketch",             ar: "جرّب رفع رسم" },
+    scanning: { en: "Scanning Sketch...",                 ar: "جارٍ مسح الرسم..." },
+  },
+
+  step2: {
+    phase:    { en: "Design Phase",                       ar: "مرحلة التصميم" },
+    heading:  { en: "Define Style & Atmosphere",          ar: "حدّد الأسلوب والأجواء" },
+    body:     { en: "Select from our curated library of interior styles—from Scandinavian Minimalist to Industrial Chic. Adjust lighting, mood, and color palettes with simple sliders.", ar: "اختر من مكتبتنا المنتقاة من أساليب التصميم الداخلي — من البساطة الإسكندنافية إلى الأناقة الصناعية. اضبط الإضاءة والأجواء وألوان الألوان بمنزلقات بسيطة." },
+    style:    { en: "Style Selection",                    ar: "اختيار الأسلوب" },
+    styleDesc:{ en: "30+ Preset Styles",                  ar: "أكثر من 30 أسلوبًا جاهزًا" },
+    lighting: { en: "Smart Lighting",                     ar: "إضاءة ذكية" },
+    lightDesc:{ en: "Time of Day Control",                ar: "التحكم في وقت اليوم" },
+    cta:      { en: "Explore design styles",              ar: "استكشف أساليب التصميم" },
+    styleLabel:{ en: "Style",                             ar: "الأسلوب" },
+    styleName: { en: "Modern Minimalist",                 ar: "الحداثة البسيطة" },
+  },
+
+  step3: {
+    phase:      { en: "Rendering Phase",                  ar: "مرحلة التصيير" },
+    heading:    { en: "Generate Photorealistic 3D",       ar: "أنشئ تصييرًا ثلاثي الأبعاد واقعيًا" },
+    body:       { en: "Watch as Nooi builds your space in seconds. Move furniture, change textures, and walk through your creation in high-fidelity 3D.", ar: "شاهد Nooi تبني مساحتك في ثوانٍ. حرّك الأثاث، وغيّر الخامات، وتجوّل في تصميمك بدقة ثلاثية الأبعاد عالية." },
+    renderCard: { en: "Ready to render?",                 ar: "مستعد للتصيير؟" },
+    renderDesc: { en: "Get high-resolution renderings suitable for client presentations.", ar: "احصل على تصييرات عالية الدقة مناسبة لعروض العملاء." },
+    renderCta:  { en: "Render Now",                       ar: "صيّر الآن" },
+  },
+
+  testimonial: {
+    quote:    { en: "Nooi simplified our design workflow completely. What used to take days of rendering now takes minutes, allowing us to focus on creativity.", ar: "بسّطت Nooi سير عمل التصميم لدينا بالكامل. ما كان يستغرق أيامًا من التصيير أصبح يستغرق دقائق، مما يتيح لنا التركيز على الإبداع." },
+    name:     { en: "Sarah Jenkins",                      ar: "سارة جينكينز" },
+    role:     { en: "Lead Architect, Studio One",         ar: "المهندسة المعمارية الرئيسية، Studio One" },
+  },
+
+  cta: {
+    heading:    { en: "Ready to transform your space?",   ar: "هل أنت مستعد لتحويل مساحتك؟" },
+    body:       { en: "Join thousands of architects and homeowners designing smarter with Nooi. No credit card required.", ar: "انضم إلى آلاف المهندسين المعماريين وأصحاب المنازل الذين يصمّمون بذكاء أكبر مع Nooi. لا بطاقة ائتمانية مطلوبة." },
+    startTrial: { en: "Start Free Trial",                 ar: "ابدأ التجربة المجانية" },
+    bookDemo:   { en: "Book a Demo",                      ar: "احجز عرضًا توضيحيًا" },
+  },
+
+  footer: {
+    tagline:   { en: "Empowering the next generation of interior designers with AI-driven tools for visionaries.", ar: "نمكّن الجيل القادم من مصممي التصميم الداخلي بأدوات مدعومة بالذكاء الاصطناعي لأصحاب الرؤى." },
+    emailPlaceholder: { en: "Enter your email",           ar: "أدخل بريدك الإلكتروني" },
+    subscribe: { en: "Subscribe",                         ar: "اشترك" },
+    terms:     { en: "Terms & Conditions",                ar: "الشروط والأحكام" },
+    privacy:   { en: "Privacy Policy",                    ar: "سياسة الخصوصية" },
+    legal:     { en: "© 2026 NOOI Inc. All rights reserved.", ar: "© 2026 شركة NOOI. جميع الحقوق محفوظة." },
+    language:  { en: "English",                           ar: "العربية" },
+  },
+} as const;
