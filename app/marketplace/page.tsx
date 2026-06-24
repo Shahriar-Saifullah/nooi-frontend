@@ -26,6 +26,9 @@ export default function MarketplacePage() {
   const t = useMarketplaceTranslations();
   const { language } = useLanguage();
 
+  // Convert price string digits to Arabic-Indic numerals
+  const arPrice = (p: string) => language === "ar" ? p.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[+d]) : p;
+
   const categories = [
     { name: t.categories.seating,  img: "/assets/seating.png",  bg: "#f8f8f8" },
     { name: t.categories.lighting, img: "/assets/lighting.png", bg: "#c2915b" },
@@ -225,21 +228,21 @@ export default function MarketplacePage() {
                     <div className="w-2.5 h-2.5 bg-[#10B981] rounded-full" />
                     <span className="text-[16px] font-bold text-[#065F46]">{language === "ar" ? "Design Within Reach" : "Design Within Reach"}</span>
                   </div>
-                  <span className="text-[18px] font-bold text-[#065F46]">$6,495.00</span>
+                  <span className="text-[18px] font-bold text-[#065F46]">{arPrice("$6,495.00")}</span>
                 </div>
                 <div className="flex items-center justify-between p-4 rounded-2xl hover:bg-[#f8fafc] transition-colors">
                   <div className="flex items-center gap-4">
                     <div className="w-2.5 h-2.5 border-2 border-[#e2eaf0] rounded-full" />
                     <span className="text-[16px] font-medium text-[#555f6d]">{language === "ar" ? "Herman Miller Direct" : "Herman Miller Direct"}</span>
                   </div>
-                  <span className="text-[16px] font-bold text-[#111d27] opacity-60">$6,995.00</span>
+                  <span className="text-[16px] font-bold text-[#111d27] opacity-60">{arPrice("$6,995.00")}</span>
                 </div>
                 <div className="flex items-center justify-between p-4 rounded-2xl hover:bg-[#f8fafc] transition-colors">
                   <div className="flex items-center gap-4">
                     <div className="w-2.5 h-2.5 border-2 border-[#e2eaf0] rounded-full" />
                     <span className="text-[16px] font-medium text-[#555f6d]">{language === "ar" ? "موزّع محلي (نيويورك)" : "Local Dealer (NY)"}</span>
                   </div>
-                  <span className="text-[16px] font-bold text-[#111d27] opacity-60">$6,250.00</span>
+                  <span className="text-[16px] font-bold text-[#111d27] opacity-60">{arPrice("$6,250.00")}</span>
                 </div>
               </div>
             </motion.div>
@@ -312,7 +315,7 @@ export default function MarketplacePage() {
                   <div className="flex-1">
                     <div className="flex justify-between items-center">
                       <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">{language === "ar" ? "أريكة Svelto" : "Svelto Sofa"}</h5>
-                      <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">$1,200</span>
+                      <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">{arPrice("$1,200")}</span>
                     </div>
                     <p className="text-[11px] md:text-[12px] text-[#94a3b8]">{t.checkout.vendor}: Article</p>
                   </div>
@@ -324,7 +327,7 @@ export default function MarketplacePage() {
                   <div className="flex-1">
                     <div className="flex justify-between items-center">
                       <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">{language === "ar" ? "مصباح Akari 1A" : "Akari Lamp 1A"}</h5>
-                      <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">$350</span>
+                      <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">{arPrice("$350")}</span>
                     </div>
                     <p className="text-[11px] md:text-[12px] text-[#94a3b8]">{t.checkout.vendor}: Noguchi Shop</p>
                   </div>
@@ -332,7 +335,7 @@ export default function MarketplacePage() {
               </div>
               <div className="pt-5 md:pt-6 border-t border-[#f1f5f9] mb-6 md:mb-8 flex justify-between items-center">
                 <span className="text-[14px] md:text-[15px] text-[#555f6d] font-medium">{t.checkout.total}</span>
-                <span className="text-[20px] md:text-[24px] font-bold text-[#004643]">$1,550.00</span>
+                <span className="text-[20px] md:text-[24px] font-bold text-[#004643]">{arPrice("$1,550.00")}</span>
               </div>
               <button className="w-full h-[52px] md:h-[56px] bg-[#004643] text-white rounded-[14px] md:rounded-[16px] font-bold text-[14px] md:text-[15px] hover:bg-[#003330] transition-all shadow-[0_15px_30px_rgba(0,70,67,0.15)]">
                 {t.checkout.proceedCheckout}
