@@ -2,10 +2,11 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
+import { listProjects, type Project } from "@/lib/api/projects";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Home, Clock, FolderOpen, Crown, ChevronRight,
-  ArrowUpRight, Loader2, LogOut, User, Settings, Languages
+  ArrowUpRight, Loader2, LogOut, User, Settings, Languages, ImageIcon
 } from "lucide-react";
 import Image from "next/image";
 import CreateProjectModal from "@/components/CreateProjectModal";
@@ -16,6 +17,8 @@ export default function DashboardPage() {
   const { language, toggleLanguage } = useLanguage();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -24,6 +27,8 @@ export default function DashboardPage() {
     getCurrentUser().then((res) => {
       if (res.success) {
         setUser(res.data.user);
+        // fetch projects once we know user is authed
+        listProjects(4).then(setProjects).catch(() => {}).finally(() => setProjectsLoading(false));
       } else {
         router.replace("/authpage/signin");
       }
@@ -257,58 +262,82 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {[
-                {
-                  title: 'Smart Render', time: 'Yesterday',
-                  imageContent: (
-                    <div className="relative w-full h-full overflow-hidden">
-                      <Image fill src="/assets/imgImage.png" className="absolute inset-0 object-cover" alt="Render" />
-                      <div className="absolute inset-y-0 left-0 w-1/2 border-r-2 border-white overflow-hidden">
-                        <Image width={800} height={800} src="/assets/imgImage1.png" className="absolute inset-y-0 left-0 w-[200%] h-full max-w-none object-cover" alt="Sketch" />
-                      </div>
+            {projectsLoading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                {[1,2,3,4].map(i => (
+                  <div key={i} className="border border-[#f0f0f0] rounded-[20px] p-2 animate-pulse">
+                    <div className="rounded-xl h-[100px] sm:h-[120px] mb-3 bg-gray-100" />
+                    <div className="px-1 sm:px-2 pb-1">
+                      <div className="h-3 bg-gray-200 rounded w-3/4 mb-2" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
                     </div>
-                  )
-                },
-                {
-                  title: 'Recolor', time: '2 days ago',
-                  imageContent: (
-                    <div className="relative w-full h-full bg-[#E5EAD7] overflow-hidden">
-                      <Image fill src="/assets/imgImage2.png" className="absolute inset-0 object-cover" alt="Recolor" />
-                      <div className="absolute inset-y-0 left-0 w-1/2 border-r-2 border-white overflow-hidden">
-                        <Image width={800} height={800} src="/assets/imgImage4.png" className="absolute inset-y-0 left-0 w-[200%] h-full max-w-none object-cover" alt="Original" />
-                      </div>
-                    </div>
-                  )
-                },
-                {
-                  title: 'Prompt Render', time: '3 weeks ago',
-                  imageContent: <Image fill src="/assets/imgImage5.png" className="object-cover" alt="Prompt Render" />
-                },
-                {
-                  title: 'Clear Room', time: '3 weeks ago',
-                  imageContent: (
-                    <div className="relative w-full h-full bg-[#F3F4F6] overflow-hidden">
-                      <Image fill src="/assets/imgImage6.png" className="absolute inset-0 object-cover" alt="Clear Room" />
-                      <div className="absolute inset-y-0 left-0 w-[45%] border-r-2 border-white overflow-hidden">
-                        <Image width={800} height={800} src="/assets/imgImage7.png" className="absolute inset-y-0 left-0 w-[222%] h-full max-w-none object-cover" alt="Original Room" />
-                      </div>
-                    </div>
-                  )
-                }
-              ].map((item, i) => (
-                <div key={i} className="border border-[#f0f0f0] rounded-[20px] p-2 flex flex-col group cursor-pointer hover:shadow-md transition-all">
-                  <div className="rounded-xl h-[100px] sm:h-[120px] mb-2 sm:mb-3 relative overflow-hidden bg-gray-100">
-                    {item.imageContent}
-                    <div className="absolute inset-0 bg-transparent group-hover:bg-black/5 transition-colors duration-300"></div>
                   </div>
-                  <div className="px-1 sm:px-2 pb-1 flex flex-col self-stretch">
-                    <h4 className="text-[12px] font-[700] leading-[1.5] tracking-[-0.36px] text-[#0a0a0a] mb-0.5 truncate">{item.title}</h4>
-                    <p className="text-[12px] font-normal leading-[1.5] tracking-[-0.36px] text-[#737373]">{item.time}</p>
-                  </div>
+                ))}
+              </div>
+            ) : projects.length === 0 ? (
+              <div className="border border-dashed border-[#e5e5e5] rounded-[20px] p-10 flex flex-col items-center justify-center gap-3 text-center">
+                <div className="w-12 h-12 rounded-full bg-[#f5f5f5] flex items-center justify-center">
+                  <FolderOpen className="w-5 h-5 text-[#a3a3a3]" />
                 </div>
-              ))}
-            </div>
+                <p className="text-[13px] font-medium text-[#737373]">No projects yet</p>
+                <button
+                  onClick={() => setCreateModalOpen(true)}
+                  className="text-[12px] font-semibold text-[#004643] hover:underline"
+                >
+                  Create your first project →
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                {projects.map((project) => {
+                  const imgSrc = project.thumbnail_url || project.floor_plan_url;
+                  const createdAt = new Date(project.created_at);
+                  const now = new Date();
+                  const diffMs = now.getTime() - createdAt.getTime();
+                  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                  const timeAgo = diffDays === 0
+                    ? 'Today'
+                    : diffDays === 1
+                    ? 'Yesterday'
+                    : diffDays < 7
+                    ? `${diffDays} days ago`
+                    : diffDays < 30
+                    ? `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`
+                    : `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
+
+                  return (
+                    <div
+                      key={project.id}
+                      onClick={() => router.push(`/dashboard/canvas?projectId=${project.id}`)}
+                      className="border border-[#f0f0f0] rounded-[20px] p-2 flex flex-col group cursor-pointer hover:shadow-md transition-all"
+                    >
+                      <div className="rounded-xl h-[100px] sm:h-[120px] mb-2 sm:mb-3 relative overflow-hidden bg-gray-100">
+                        {imgSrc ? (
+                          <Image
+                            fill
+                            src={imgSrc}
+                            alt={project.name}
+                            className="object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <ImageIcon className="w-8 h-8 text-[#d4d4d4]" />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-transparent group-hover:bg-black/5 transition-colors duration-300" />
+                        {project.status === 'draft' && (
+                          <span className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-0.5 rounded-full">Draft</span>
+                        )}
+                      </div>
+                      <div className="px-1 sm:px-2 pb-1 flex flex-col self-stretch">
+                        <h4 className="text-[12px] font-[700] leading-[1.5] tracking-[-0.36px] text-[#0a0a0a] mb-0.5 truncate">{project.name}</h4>
+                        <p className="text-[12px] font-normal leading-[1.5] tracking-[-0.36px] text-[#737373]">{timeAgo}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </motion.div>
 
           {/* Explore AI Tools */}
