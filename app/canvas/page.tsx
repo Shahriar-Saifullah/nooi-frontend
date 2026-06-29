@@ -118,6 +118,7 @@ export default function CanvasPage() {
   useEffect(() => {
     if (!mounted) return;
     if ((currentProject?.rooms?.length ?? 0) > 0) {
+      // Use Gemini box coordinates directly — do NOT relayout
       setRooms(currentProject!.rooms!.map(toGridRoom).filter((r: GridRoom) => r.box));
       return;
     }
@@ -126,9 +127,10 @@ export default function CanvasPage() {
       getProject(currentProject.id)
         .then(p => {
           const apiRooms = p.room_data?.rooms ?? [];
-          setRooms(apiRooms.map(toGridRoom).filter((r: GridRoom) => r.box));
+          // Use Gemini box coordinates directly — do NOT relayout
+          const gridRooms = apiRooms.map(toGridRoom).filter((r: GridRoom) => r.box);
+          setRooms(gridRooms);
           if (apiRooms.length > 0) setProjectRooms(apiRooms);
-          // Also sync floor_plan_url from API if store doesn't have it yet
           if (p.floor_plan_url && !floorPlanUrl) {
             setProject({ ...currentProject, floor_plan_url: p.floor_plan_url });
           }
@@ -209,18 +211,27 @@ export default function CanvasPage() {
 
   const selectedFurniture = placedFurniture.find(f => f.id === selectedFurnitureId);
 
-  // Compute real room dimensions in cm from the detected rooms.
-  // Use the total bounding box of all rooms to size the 3D scene correctly.
-  // Falls back to a sensible default if no dimension data exists.
+  // Compute overall floor plan dimensions in cm from room data.
+  // The total_area gives us the scale — use the largest room dimensions
+  // to size the 3D scene correctly.
   const roomDimensionsCm = (() => {
-    const roomsWithDims = rooms.filter((r: any) => r.length && r.width);
-    if (roomsWithDims.length === 0) return { width: 500, depth: 400 };
-    // Sum widths across rooms in the same row, take max across rows
-    const totalWidth = Math.max(...roomsWithDims.map((r: any) => (r.width || 0) * 100));
-    const totalDepth = Math.max(...roomsWithDims.map((r: any) => (r.length || 0) * 100));
+    if (rooms.length === 0) return { width: 500, depth: 400 };
+    // Find total bounding box by looking at rightmost and bottommost room edges
+    let maxRight = 0;
+    let maxBottom = 0;
+    rooms.forEach((r: any) => {
+      if (r.box) {
+        maxRight  = Math.max(maxRight,  (r.box.left + r.box.width));
+        maxBottom = Math.max(maxBottom, (r.box.top  + r.box.height));
+      }
+    });
+    // Scale: box coords are 0-100% of image. Use total_area to estimate real size.
+    // Fallback: use largest real-world room dimensions as reference.
+    const largestWidth  = Math.max(...rooms.map((r: any) => (r.width  || 0) * 100));
+    const largestLength = Math.max(...rooms.map((r: any) => (r.length || 0) * 100));
     return {
-      width: Math.max(totalWidth, 300),
-      depth: Math.max(totalDepth, 300),
+      width: Math.max(largestWidth  * 2, 400),
+      depth: Math.max(largestLength * 2, 400),
     };
   })();
 
@@ -474,6 +485,7 @@ export default function CanvasPage() {
                   floorPlanUrl={floorPlanUrl || null}
                   roomWidthCm={roomDimensionsCm.width}
                   roomDepthCm={roomDimensionsCm.depth}
+                  rooms={rooms}
                   furniture={placedFurniture}
                   onFurnitureMove={handleFurnitureMove}
                   onFurnitureSelect={setSelectedFurnitureId}
