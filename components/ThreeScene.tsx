@@ -24,7 +24,7 @@ interface ThreeSceneProps {
   floorPlanUrl?: string | null;
   roomWidthCm?: number;
   roomDepthCm?: number;
-  rooms?: GridRoom[];
+  rooms?: (GridRoom & { polygon?: [number, number][] })[];
   furniture?: PlacedFurniture[];
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   onFurnitureSelect?: (id: string | null) => void;
@@ -59,31 +59,82 @@ function PlainFloor({ width, depth }: { width: number; depth: number }) {
   );
 }
 
-// ─── Outer perimeter walls only ───────────────────────────────────────────────
-// The floor plan image shows all interior room divisions.
-// We only need 3 exterior walls (leave one open so user can see inside).
+// ─── Polygon-extruded walls from Gemini room polygon data ─────────────────────
+// When Gemini returns polygon points for a room, we extrude them into 3D walls.
+// Points are [x, y] in 0-1000 scale matching the floor plan image.
+function PolygonWalls({
+  rooms,
+  totalWidth,
+  totalDepth,
+}: {
+  rooms: (GridRoom & { polygon?: [number, number][] })[];
+  totalWidth: number;
+  totalDepth: number;
+}) {
+  const walls: React.ReactElement[] = [];
+  const wallH = WALL_HEIGHT;
+  const wallT = WALL_THICKNESS;
+
+  rooms.forEach((room) => {
+    if (!room.polygon || room.polygon.length < 3) return;
+
+    const pts = room.polygon;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+
+      // Convert 0-1000 → world coords (centered at origin)
+      const ax = (a[0] / 1000) * totalWidth  - totalWidth  / 2;
+      const az = (a[1] / 1000) * totalDepth  - totalDepth  / 2;
+      const bx = (b[0] / 1000) * totalWidth  - totalWidth  / 2;
+      const bz = (b[1] / 1000) * totalDepth  - totalDepth  / 2;
+
+      const dx  = bx - ax;
+      const dz  = bz - az;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      if (len < 0.01) continue;
+
+      const cx  = (ax + bx) / 2;
+      const cz  = (az + bz) / 2;
+      const angle = Math.atan2(dx, dz);
+
+      walls.push(
+        <mesh
+          key={`${room.id}-wall-${i}`}
+          position={[cx, wallH / 2, cz]}
+          rotation={[0, angle, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[wallT, wallH, len]} />
+          <meshStandardMaterial color="#e8e6e0" roughness={0.95} metalness={0} />
+        </mesh>
+      );
+    }
+  });
+
+  return <>{walls}</>;
+}
+
+// ─── Outer perimeter walls fallback ───────────────────────────────────────────
 function PerimeterWalls({ width, depth }: { width: number; depth: number }) {
   const h = WALL_HEIGHT;
   const t = WALL_THICKNESS;
   const hy = h / 2;
   return (
     <group>
-      {/* Back wall */}
       <mesh position={[0, hy, -depth / 2]} castShadow receiveShadow>
         <boxGeometry args={[width + t, h, t]} />
         <meshStandardMaterial color="#e8e6e0" roughness={0.95} metalness={0} />
       </mesh>
-      {/* Left wall */}
       <mesh position={[-width / 2, hy, 0]} castShadow receiveShadow>
         <boxGeometry args={[t, h, depth + t]} />
         <meshStandardMaterial color="#e0deda" roughness={0.95} metalness={0} />
       </mesh>
-      {/* Right wall */}
       <mesh position={[width / 2, hy, 0]} castShadow receiveShadow>
         <boxGeometry args={[t, h, depth + t]} />
         <meshStandardMaterial color="#e0deda" roughness={0.95} metalness={0} />
       </mesh>
-      {/* Ceiling — semi-transparent so user can see inside */}
       <mesh position={[0, h, 0]} receiveShadow>
         <boxGeometry args={[width, t, depth]} />
         <meshStandardMaterial color="#f5f3ee" roughness={1} transparent opacity={0.15} />
@@ -257,14 +308,17 @@ function Scene({
       />
       <pointLight position={[-roomWidth / 2, 3, -roomDepth / 2]} intensity={0.3} />
 
-      {/* Floor — floor plan image shows all room divisions */}
+      {/* Floor — shows the floor plan image */}
       {floorPlanUrl
         ? <FloorPlanMesh url={floorPlanUrl} width={roomWidth} depth={roomDepth} />
         : <PlainFloor width={roomWidth} depth={roomDepth} />
       }
 
-      {/* Simple perimeter walls — floor plan image handles interior divisions */}
-      <PerimeterWalls width={roomWidth} depth={roomDepth} />
+      {/* Walls — use polygon data when available, perimeter box as fallback */}
+      {rooms.some((r: any) => r.polygon?.length >= 3)
+        ? <PolygonWalls rooms={rooms as any} totalWidth={roomWidth} totalDepth={roomDepth} />
+        : <PerimeterWalls width={roomWidth} depth={roomDepth} />
+      }
 
       {/* Floor grid overlay */}
       <Grid
