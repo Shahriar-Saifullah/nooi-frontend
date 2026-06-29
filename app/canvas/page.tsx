@@ -101,6 +101,7 @@ export default function CanvasPage() {
 
   const { currentProject, setProjectRooms, setProject } = useProjectStore();
   const [rooms, setRooms] = useState<GridRoom[]>([]);
+  const [buildingPerimeter, setBuildingPerimeter] = useState<[number,number][] | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
@@ -127,10 +128,12 @@ export default function CanvasPage() {
       getProject(currentProject.id)
         .then(p => {
           const apiRooms = p.room_data?.rooms ?? [];
-          // Use Gemini box coordinates directly — do NOT relayout
           const gridRooms = apiRooms.map(toGridRoom).filter((r: GridRoom) => r.box);
           setRooms(gridRooms);
           if (apiRooms.length > 0) setProjectRooms(apiRooms);
+          if (p.room_data?.building_perimeter) {
+            setBuildingPerimeter(p.room_data.building_perimeter);
+          }
           if (p.floor_plan_url && !floorPlanUrl) {
             setProject({ ...currentProject, floor_plan_url: p.floor_plan_url });
           }
@@ -486,6 +489,7 @@ export default function CanvasPage() {
                   roomWidthCm={roomDimensionsCm.width}
                   roomDepthCm={roomDimensionsCm.depth}
                   rooms={rooms}
+                  buildingPerimeter={buildingPerimeter}
                   furniture={placedFurniture}
                   onFurnitureMove={handleFurnitureMove}
                   onFurnitureSelect={setSelectedFurnitureId}
