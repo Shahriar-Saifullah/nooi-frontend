@@ -138,15 +138,18 @@ function PrecisionWalls({
     const wallOpenings = openings.filter(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      const isHoriz = Math.abs(dz) < Math.abs(dx) * 0.3;
+      // isHoriz: wall runs left-right (dx dominates)
+      const isHoriz = Math.abs(dx) > Math.abs(dz);
+      // Use generous tolerance — coordinate systems have inherent imprecision
+      const tol = Math.max(totalW, totalD) * 0.05; // 5% of scene size
       if (isHoriz) {
-        const minX = Math.min(wx1, wx2) - 0.2;
-        const maxX = Math.max(wx1, wx2) + 0.2;
-        return Math.abs(oz - cz) < 0.5 && ox >= minX && ox <= maxX;
+        const minX = Math.min(wx1, wx2) - tol;
+        const maxX = Math.max(wx1, wx2) + tol;
+        return Math.abs(oz - cz) < tol && ox >= minX && ox <= maxX;
       } else {
-        const minZ = Math.min(wz1, wz2) - 0.2;
-        const maxZ2 = Math.max(wz1, wz2) + 0.2;
-        return Math.abs(ox - cx) < 0.5 && oz >= minZ && oz <= maxZ2;
+        const minZ = Math.min(wz1, wz2) - tol;
+        const maxZ2 = Math.max(wz1, wz2) + tol;
+        return Math.abs(ox - cx) < tol && oz >= minZ && oz <= maxZ2;
       }
     });
 
@@ -165,10 +168,14 @@ function PrecisionWalls({
     const cuts: Cut[] = wallOpenings.map(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      const isHoriz = Math.abs(dz) < Math.abs(dx) * 0.3;
-      const opW = (op.width / 1000) * (isHoriz ? totalW : totalD);
-      const distFromStart = isHoriz ? Math.abs(ox - wx1) : Math.abs(oz - wz1);
-      return { pos: distFromStart, halfW: Math.max(opW/2, 0.3), type: op.type };
+      const isHoriz = Math.abs(dx) > Math.abs(dz);
+      // Opening width in world units
+      const opW = (op.width / 1000) * Math.max(totalW, totalD);
+      // Distance from wall start along wall direction
+      const distFromStart = isHoriz
+        ? Math.sqrt((ox - wx1)**2) * Math.sign(ox - wx1 >= 0 ? 1 : -1)
+        : Math.sqrt((oz - wz1)**2) * Math.sign(oz - wz1 >= 0 ? 1 : -1);
+      return { pos: Math.max(0, Math.min(len, Math.abs(distFromStart))), halfW: Math.max(opW/2, 0.2), type: op.type };
     }).sort((a,b) => a.pos - b.pos);
 
     let cursor = 0;
@@ -306,21 +313,19 @@ function RoomWalls({ rooms, totalW, totalD, openings }: {
     const wallH = WALL_H;
 
     // Find openings that sit on this wall segment
+    const tol = Math.max(totalW, totalD) * 0.05; // 5% of scene
     const wallOpenings = openings.filter(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      // Check if opening center is near this wall line
       const isHoriz = Math.abs(seg.z1 - seg.z2) < 0.05;
       if (isHoriz) {
-        // Wall is horizontal — opening must be on same z, x within range
-        const minX = Math.min(seg.x1, seg.x2);
-        const maxX = Math.max(seg.x1, seg.x2);
-        return Math.abs(oz - seg.z1) < 0.3 && ox >= minX - 0.1 && ox <= maxX + 0.1;
+        const minX = Math.min(seg.x1, seg.x2) - tol;
+        const maxX = Math.max(seg.x1, seg.x2) + tol;
+        return Math.abs(oz - seg.z1) < tol && ox >= minX && ox <= maxX;
       } else {
-        // Wall is vertical
-        const minZ = Math.min(seg.z1, seg.z2);
-        const maxZ = Math.max(seg.z1, seg.z2);
-        return Math.abs(ox - seg.x1) < 0.3 && oz >= minZ - 0.1 && oz <= maxZ + 0.1;
+        const minZ = Math.min(seg.z1, seg.z2) - tol;
+        const maxZ = Math.max(seg.z1, seg.z2) + tol;
+        return Math.abs(ox - seg.x1) < tol && oz >= minZ && oz <= maxZ;
       }
     });
 
@@ -338,16 +343,16 @@ function RoomWalls({ rooms, totalW, totalD, openings }: {
     }
 
     // Split wall around each opening
-    // Convert openings to positions along the wall (0 = start, len = end)
-    const isHoriz = Math.abs(seg.z1 - seg.z2) < 0.05;
+    const isHorizWall = Math.abs(seg.z1 - seg.z2) < 0.05;
     type Cut = { start: number; end: number; type: 'door' | 'window' };
     const cuts: Cut[] = wallOpenings.map(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      const opW = (op.width / 1000) * (isHoriz ? totalW : totalD);
-      const pos = isHoriz
-        ? Math.sqrt((ox - seg.x1) ** 2)
-        : Math.sqrt((oz - seg.z1) ** 2);
+      const opW = Math.max(0.3, (op.width / 1000) * Math.max(totalW, totalD));
+      // Distance along the wall from its start
+      const pos = isHorizWall
+        ? Math.abs(ox - Math.min(seg.x1, seg.x2))
+        : Math.abs(oz - Math.min(seg.z1, seg.z2));
       return { start: Math.max(0, pos - opW/2), end: Math.min(len, pos + opW/2), type: op.type };
     }).sort((a, b) => a.start - b.start);
 
