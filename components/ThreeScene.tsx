@@ -34,6 +34,7 @@ interface ThreeSceneProps {
   roomDepthCm?: number;
   rooms?: GridRoom[];
   buildingPerimeter?: [number, number][] | null;
+  rfWalls?: Array<{ x1: number; y1: number; x2: number; y2: number; thickness: number }>;
   openings?: Opening[];
   furniture?: PlacedFurniture[];
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
@@ -90,7 +91,156 @@ function RoomFloors({ rooms, totalW, totalD }: {
   );
 }
 
-// ─── Wall generation from room boxes ─────────────────────────────────────────
+// ─── Precision walls from Roboflow ────────────────────────────────────────────
+// Uses exact wall coordinates from CubiCasa5k model via Roboflow API.
+// Wall segments are stored as x1,y1,x2,y2 in % of image dimensions (0-100).
+function PrecisionWalls({
+  walls, openings, totalW, totalD,
+}: {
+  walls: Array<{ x1: number; y1: number; x2: number; y2: number; thickness: number }>;
+  openings: Opening[];
+  totalW: number;
+  totalD: number;
+}) {
+  const segments: React.ReactElement[] = [];
+
+  walls.forEach((wall, i) => {
+    // Convert % coords to world coords (centered at origin)
+    const wx1 = (wall.x1 / 100) * totalW - totalW / 2;
+    const wz1 = (wall.y1 / 100) * totalD - totalD / 2;
+    const wx2 = (wall.x2 / 100) * totalW - totalW / 2;
+    const wz2 = (wall.y2 / 100) * totalD - totalD / 2;
+
+    const dx  = wx2 - wx1;
+    const dz  = wz2 - wz1;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    if (len < 0.05) return;
+
+    const cx    = (wx1 + wx2) / 2;
+    const cz    = (wz1 + wz2) / 2;
+    const angle = Math.atan2(dx, dz);
+    const t     = Math.max(0.08, (wall.thickness / 100) * Math.min(totalW, totalD));
+
+    // Skip front face (max Z) so user can always see inside
+    const maxZ = totalD / 2;
+    if (Math.abs(cz - maxZ) < 0.3 && Math.abs(angle) < 0.1) return;
+
+    // Check if any opening sits on this wall
+    const wallOpenings = openings.filter(op => {
+      const ox = (op.x / 1000) * totalW - totalW / 2;
+      const oz = (op.y / 1000) * totalD - totalD / 2;
+      const isHoriz = Math.abs(dz) < 0.1;
+      if (isHoriz) {
+        const minX = Math.min(wx1, wx2);
+        const maxX = Math.max(wx1, wx2);
+        return Math.abs(oz - cz) < 0.4 && ox >= minX - 0.1 && ox <= maxX + 0.1;
+      } else {
+        const minZ = Math.min(wz1, wz2);
+        const maxZ2 = Math.max(wz1, wz2);
+        return Math.abs(ox - cx) < 0.4 && oz >= minZ - 0.1 && oz <= maxZ2 + 0.1;
+      }
+    });
+
+    if (wallOpenings.length === 0) {
+      segments.push(
+        <mesh key={`rf-wall-${i}`} position={[cx, WALL_H/2, cz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+          <boxGeometry args={[t, WALL_H, len]} />
+          <meshStandardMaterial color="#d8d4cc" roughness={0.9} metalness={0} />
+        </mesh>
+      );
+      return;
+    }
+
+    // Split wall around openings
+    type Cut = { pos: number; halfW: number; type: 'door' | 'window' };
+    const cuts: Cut[] = wallOpenings.map(op => {
+      const ox = (op.x / 1000) * totalW - totalW / 2;
+      const oz = (op.y / 1000) * totalD - totalD / 2;
+      const isHoriz = Math.abs(dz) < 0.1;
+      const opW = (op.width / 1000) * (isHoriz ? totalW : totalD);
+      const distFromStart = isHoriz
+        ? Math.abs(ox - wx1)
+        : Math.abs(oz - wz1);
+      return { pos: distFromStart, halfW: opW / 2, type: op.type };
+    }).sort((a, b) => a.pos - b.pos);
+
+    // Generate wall pieces between cuts
+    let cursor = 0;
+    cuts.forEach((cut, ci) => {
+      const start = Math.max(0, cut.pos - cut.halfW);
+      if (start > cursor + 0.05) {
+        const pLen = start - cursor;
+        const pOff = cursor + pLen / 2 - len / 2;
+        const px = cx + Math.sin(angle) * pOff;
+        const pz = cz + Math.cos(angle) * pOff;
+        segments.push(
+          <mesh key={`rf-piece-${i}-${ci}a`} position={[px, WALL_H/2, pz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+            <boxGeometry args={[t, WALL_H, pLen]} />
+            <meshStandardMaterial color="#d8d4cc" roughness={0.9} metalness={0} />
+          </mesh>
+        );
+      }
+
+      // Window: sill + glass + header
+      if (cut.type === 'window') {
+        const opOff = cut.pos - len / 2;
+        const px2 = cx + Math.sin(angle) * opOff;
+        const pz2 = cz + Math.cos(angle) * opOff;
+        const opLen = cut.halfW * 2;
+        const sillH = 0.9; const topH = 0.4;
+        segments.push(
+          <mesh key={`rf-sill-${i}-${ci}`} position={[px2, sillH/2, pz2]} rotation={[0, angle, 0]} castShadow>
+            <boxGeometry args={[t, sillH, opLen]} />
+            <meshStandardMaterial color="#d8d4cc" roughness={0.9} />
+          </mesh>
+        );
+        segments.push(
+          <mesh key={`rf-top-${i}-${ci}`} position={[px2, WALL_H - topH/2, pz2]} rotation={[0, angle, 0]} castShadow>
+            <boxGeometry args={[t, topH, opLen]} />
+            <meshStandardMaterial color="#d8d4cc" roughness={0.9} />
+          </mesh>
+        );
+        segments.push(
+          <mesh key={`rf-glass-${i}-${ci}`} position={[px2, sillH + (WALL_H - sillH - topH)/2, pz2]} rotation={[0, angle, 0]}>
+            <boxGeometry args={[0.02, WALL_H - sillH - topH, opLen]} />
+            <meshStandardMaterial color="#a8d8f0" transparent opacity={0.4} roughness={0} />
+          </mesh>
+        );
+      }
+      // Door: lintel only
+      if (cut.type === 'door') {
+        const opOff = cut.pos - len / 2;
+        const px2 = cx + Math.sin(angle) * opOff;
+        const pz2 = cz + Math.cos(angle) * opOff;
+        segments.push(
+          <mesh key={`rf-lintel-${i}-${ci}`} position={[px2, WALL_H - 0.15, pz2]} rotation={[0, angle, 0]} castShadow>
+            <boxGeometry args={[t, 0.3, cut.halfW * 2 + 0.05]} />
+            <meshStandardMaterial color="#d8d4cc" roughness={0.9} />
+          </mesh>
+        );
+      }
+      cursor = cut.pos + cut.halfW;
+    });
+
+    // Final piece after last cut
+    if (cursor < len - 0.05) {
+      const pLen = len - cursor;
+      const pOff = cursor + pLen / 2 - len / 2;
+      const px = cx + Math.sin(angle) * pOff;
+      const pz = cz + Math.cos(angle) * pOff;
+      segments.push(
+        <mesh key={`rf-last-${i}`} position={[px, WALL_H/2, pz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+          <boxGeometry args={[t, WALL_H, pLen]} />
+          <meshStandardMaterial color="#d8d4cc" roughness={0.9} metalness={0} />
+        </mesh>
+      );
+    }
+  });
+
+  return <>{segments}</>;
+}
+
+// ─── Wall generation from room boxes (fallback) ───────────────────────────────
 interface WallSeg {
   x1: number; z1: number;
   x2: number; z2: number;
@@ -403,11 +553,12 @@ function CameraSetup({ width, depth }: { width: number; depth: number }) {
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
 function Scene({
-  roomWidth, roomDepth, rooms, openings, furniture,
+  roomWidth, roomDepth, rooms, rfWalls = [], openings, furniture,
   onFurnitureMove, onFurnitureSelect, selectedFurnitureId,
 }: {
   roomWidth: number; roomDepth: number;
   rooms: GridRoom[];
+  rfWalls: Array<{ x1: number; y1: number; x2: number; y2: number; thickness: number }>;
   openings: Opening[];
   furniture: PlacedFurniture[];
   onFurnitureMove?: (id: string, pos: [number, number, number]) => void;
@@ -415,6 +566,7 @@ function Scene({
   selectedFurnitureId?: string | null;
 }) {
   const hasRooms = rooms.length > 0;
+  const hasPrecisionWalls = rfWalls.length > 0;
 
   return (
     <>
@@ -437,23 +589,25 @@ function Scene({
       {/* Colored room tiles */}
       {hasRooms && <RoomFloors rooms={rooms} totalW={roomWidth} totalD={roomDepth} />}
 
-      {/* Walls from room boxes, front face always open */}
-      {hasRooms
-        ? <RoomWalls rooms={rooms} totalW={roomWidth} totalD={roomDepth} openings={openings} />
-        : (
-          <group>
-            {[
-              { p: [0, WALL_H/2, -roomDepth/2] as [number,number,number], a: [roomWidth+0.2, WALL_H, 0.2] as [number,number,number] },
-              { p: [-roomWidth/2, WALL_H/2, 0] as [number,number,number], a: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
-              { p: [roomWidth/2, WALL_H/2, 0] as [number,number,number], a: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
-            ].map((w, i) => (
-              <mesh key={i} position={w.p} castShadow receiveShadow>
-                <boxGeometry args={w.a} />
-                <meshStandardMaterial color="#ccc8c0" roughness={0.9} />
-              </mesh>
-            ))}
-          </group>
-        )
+      {/* Walls — Roboflow precision walls when available, box-based fallback */}
+      {hasPrecisionWalls
+        ? <PrecisionWalls walls={rfWalls} openings={openings} totalW={roomWidth} totalD={roomDepth} />
+        : hasRooms
+          ? <RoomWalls rooms={rooms} totalW={roomWidth} totalD={roomDepth} openings={openings} />
+          : (
+            <group>
+              {[
+                { p: [0, WALL_H/2, -roomDepth/2] as [number,number,number], a: [roomWidth+0.2, WALL_H, 0.2] as [number,number,number] },
+                { p: [-roomWidth/2, WALL_H/2, 0] as [number,number,number], a: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
+                { p: [roomWidth/2, WALL_H/2, 0] as [number,number,number], a: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
+              ].map((w, i) => (
+                <mesh key={i} position={w.p} castShadow receiveShadow>
+                  <boxGeometry args={w.a} />
+                  <meshStandardMaterial color="#ccc8c0" roughness={0.9} />
+                </mesh>
+              ))}
+            </group>
+          )
       }
 
       {/* Floor grid */}
@@ -488,7 +642,7 @@ function Scene({
 // ─── Export ───────────────────────────────────────────────────────────────────
 export default function ThreeScene({
   floorPlanUrl, roomWidthCm = 500, roomDepthCm = 400,
-  rooms = [], buildingPerimeter, openings = [], furniture = [],
+  rooms = [], buildingPerimeter, rfWalls = [], openings = [], furniture = [],
   onFurnitureMove, onFurnitureSelect, selectedFurnitureId,
 }: ThreeSceneProps) {
   const roomWidth = roomWidthCm * CM;
@@ -511,7 +665,7 @@ export default function ThreeScene({
         }>
           <Scene
             roomWidth={roomWidth} roomDepth={roomDepth}
-            rooms={rooms} openings={openings} furniture={furniture}
+            rooms={rooms} rfWalls={rfWalls} openings={openings} furniture={furniture}
             onFurnitureMove={onFurnitureMove}
             onFurnitureSelect={onFurnitureSelect}
             selectedFurnitureId={selectedFurnitureId}

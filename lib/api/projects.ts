@@ -47,6 +47,7 @@ export interface Project {
     rooms: Room[];
     total_area_m2?: number;
     building_perimeter?: [number, number][];
+    walls?: Array<{ x1: number; y1: number; x2: number; y2: number; thickness: number }>;
     openings?: Array<{
       type: 'door' | 'window';
       wall: 'horizontal' | 'vertical';
