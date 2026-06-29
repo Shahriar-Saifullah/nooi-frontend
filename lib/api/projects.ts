@@ -47,6 +47,13 @@ export interface Project {
     rooms: Room[];
     total_area_m2?: number;
     building_perimeter?: [number, number][];
+    openings?: Array<{
+      type: 'door' | 'window';
+      wall: 'horizontal' | 'vertical';
+      x: number;
+      y: number;
+      width: number;
+    }>;
   };
   created_at: string;
   updated_at: string;

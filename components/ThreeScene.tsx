@@ -2,7 +2,7 @@
 
 import React, { Suspense, useRef, useEffect } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls, useTexture, Html, Grid } from "@react-three/drei";
+import { OrbitControls, Html, Grid } from "@react-three/drei";
 import * as THREE from "three";
 import type { GridRoom, RoomBox } from "@/components/RoomLayoutGrid";
 
@@ -20,12 +20,21 @@ export interface PlacedFurniture {
   height: number;
 }
 
+export interface Opening {
+  type: 'door' | 'window';
+  wall: 'horizontal' | 'vertical';
+  x: number;
+  y: number;
+  width: number;
+}
+
 interface ThreeSceneProps {
   floorPlanUrl?: string | null;
   roomWidthCm?: number;
   roomDepthCm?: number;
   rooms?: GridRoom[];
   buildingPerimeter?: [number, number][] | null;
+  openings?: Opening[];
   furniture?: PlacedFurniture[];
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   onFurnitureSelect?: (id: string | null) => void;
@@ -33,53 +42,13 @@ interface ThreeSceneProps {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const CM          = 1 / 100;
-const WALL_H      = 2.8;
-const WALL_T_EXT  = 0.2;   // exterior wall thickness
-const WALL_T_INT  = 0.12;  // interior wall thickness
-const SNAP        = 1.5;   // % tolerance to consider two edges shared/exterior
+const CM         = 1 / 100;
+const WALL_H     = 2.8;
+const WALL_T_EXT = 0.2;
+const WALL_T_INT = 0.12;
+const SNAP       = 2.0; // % tolerance for exterior detection
 
-// ─── Floor plan texture ───────────────────────────────────────────────────────
-function FloorPlanMesh({ url, width, depth }: { url: string; width: number; depth: number }) {
-  const texture = useTexture(url);
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} receiveShadow>
-      <planeGeometry args={[width, depth]} />
-      <meshStandardMaterial map={texture} transparent opacity={0.6} roughness={1} />
-    </mesh>
-  );
-}
-
-function PlainFloor({ width, depth }: { width: number; depth: number }) {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-      <planeGeometry args={[width, depth]} />
-      <meshStandardMaterial color="#f0ede8" roughness={0.9} />
-    </mesh>
-  );
-}
-
-// ─── Room floor tiles (colored per room) ─────────────────────────────────────
-function RoomFloors({ rooms, totalW, totalD }: { rooms: GridRoom[]; totalW: number; totalD: number }) {
-  return (
-    <>
-      {rooms.map(room => {
-        if (!room.box) return null;
-        const { x, z, w, d } = boxToWorld(room.box, totalW, totalD);
-        return (
-          <mesh key={room.id} rotation={[-Math.PI / 2, 0, 0]} position={[x + w/2, 0.003, z + d/2]} receiveShadow>
-            <planeGeometry args={[w, d]} />
-            <meshStandardMaterial color={room.color} transparent opacity={0.35} roughness={1} />
-          </mesh>
-        );
-      })}
-    </>
-  );
-}
-
-// ─── Convert box % coords to world coords ────────────────────────────────────
+// ─── Convert box % to world coords ───────────────────────────────────────────
 function boxToWorld(box: RoomBox, totalW: number, totalD: number) {
   const x = (box.left   / 100) * totalW - totalW / 2;
   const z = (box.top    / 100) * totalD - totalD / 2;
@@ -88,23 +57,50 @@ function boxToWorld(box: RoomBox, totalW: number, totalD: number) {
   return { x, z, w, d };
 }
 
-// ─── Wall generation from room boxes ─────────────────────────────────────────
-// For each room we generate 4 wall segments (edges of the bounding box).
-// We then classify each edge:
-//   - EXTERIOR: sits on or near the overall bounding box boundary → thick wall
-//   - INTERIOR: shared between two rooms OR internal → thin wall
-// This gives us Coohom-style separated rooms with proper interior dividers.
+// ─── Plain floor ──────────────────────────────────────────────────────────────
+function PlainFloor({ width, depth }: { width: number; depth: number }) {
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
+      <planeGeometry args={[width, depth]} />
+      <meshStandardMaterial color="#f2ede6" roughness={0.95} metalness={0} />
+    </mesh>
+  );
+}
 
+// ─── Colored room floor tiles ─────────────────────────────────────────────────
+function RoomFloors({ rooms, totalW, totalD }: {
+  rooms: GridRoom[]; totalW: number; totalD: number;
+}) {
+  return (
+    <>
+      {rooms.map(room => {
+        if (!room.box) return null;
+        const { x, z, w, d } = boxToWorld(room.box, totalW, totalD);
+        return (
+          <group key={room.id}>
+            {/* Colored floor */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x + w/2, 0.002, z + d/2]} receiveShadow>
+              <planeGeometry args={[w - 0.02, d - 0.02]} />
+              <meshStandardMaterial color={room.color} transparent opacity={0.4} roughness={1} />
+            </mesh>
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+// ─── Wall generation from room boxes ─────────────────────────────────────────
 interface WallSeg {
   x1: number; z1: number;
   x2: number; z2: number;
   isExterior: boolean;
+  isFront: boolean; // front face — skip rendering so user can see inside
 }
 
 function generateWalls(rooms: GridRoom[], totalW: number, totalD: number): WallSeg[] {
   if (rooms.length === 0) return [];
 
-  // Overall bounding box in world coords
   const minX = -totalW / 2;
   const maxX =  totalW / 2;
   const minZ = -totalD / 2;
@@ -112,17 +108,17 @@ function generateWalls(rooms: GridRoom[], totalW: number, totalD: number): WallS
   const snapW = (SNAP / 100) * totalW;
   const snapD = (SNAP / 100) * totalD;
 
-  const isOnExterior = (x1: number, z1: number, x2: number, z2: number) => {
-    // Horizontal edge (same z)
-    if (Math.abs(z1 - z2) < 0.01) {
+  const isExterior = (x1: number, z1: number, x2: number, z2: number) => {
+    if (Math.abs(z1 - z2) < 0.01) // horizontal
       return Math.abs(z1 - minZ) < snapD || Math.abs(z1 - maxZ) < snapD;
-    }
-    // Vertical edge (same x)
-    if (Math.abs(x1 - x2) < 0.01) {
+    if (Math.abs(x1 - x2) < 0.01) // vertical
       return Math.abs(x1 - minX) < snapW || Math.abs(x1 - maxX) < snapW;
-    }
     return false;
   };
+
+  // The "front" is the max-Z boundary — always skip this so interior is visible
+  const isFrontEdge = (z1: number, z2: number) =>
+    Math.abs(z1 - maxZ) < snapD && Math.abs(z2 - maxZ) < snapD;
 
   const segs: WallSeg[] = [];
 
@@ -132,66 +128,177 @@ function generateWalls(rooms: GridRoom[], totalW: number, totalD: number): WallS
     const x2 = x + w;
     const z2 = z + d;
 
-    // 4 edges: top, bottom, left, right
     const edges: [number, number, number, number][] = [
-      [x, z,  x2, z ],  // top edge
-      [x, z2, x2, z2],  // bottom edge
-      [x, z,  x,  z2],  // left edge
-      [x2, z, x2, z2],  // right edge
+      [x, z,  x2, z ],  // top
+      [x, z2, x2, z2],  // bottom
+      [x, z,  x,  z2],  // left
+      [x2, z, x2, z2],  // right
     ];
 
     edges.forEach(([ex1, ez1, ex2, ez2]) => {
       segs.push({
-        x1: ex1, z1: ez1,
-        x2: ex2, z2: ez2,
-        isExterior: isOnExterior(ex1, ez1, ex2, ez2),
+        x1: ex1, z1: ez1, x2: ex2, z2: ez2,
+        isExterior: isExterior(ex1, ez1, ex2, ez2),
+        isFront: isFrontEdge(ez1, ez2),
       });
     });
   });
 
-  // Deduplicate: if two segments are nearly identical, keep one
-  // (shared interior walls between adjacent rooms)
+  // Deduplicate shared walls
   const unique: WallSeg[] = [];
   segs.forEach(seg => {
-    const isDuplicate = unique.some(u => {
-      const sameAB = Math.abs(u.x1-seg.x1)<0.05 && Math.abs(u.z1-seg.z1)<0.05
-                  && Math.abs(u.x2-seg.x2)<0.05 && Math.abs(u.z2-seg.z2)<0.05;
-      const sameBA = Math.abs(u.x1-seg.x2)<0.05 && Math.abs(u.z1-seg.z2)<0.05
-                  && Math.abs(u.x2-seg.x1)<0.05 && Math.abs(u.z2-seg.z1)<0.05;
-      return sameAB || sameBA;
+    const dup = unique.some(u => {
+      const ab = Math.abs(u.x1-seg.x1)<0.05 && Math.abs(u.z1-seg.z1)<0.05
+              && Math.abs(u.x2-seg.x2)<0.05 && Math.abs(u.z2-seg.z2)<0.05;
+      const ba = Math.abs(u.x1-seg.x2)<0.05 && Math.abs(u.z1-seg.z2)<0.05
+              && Math.abs(u.x2-seg.x1)<0.05 && Math.abs(u.z2-seg.z1)<0.05;
+      return ab || ba;
     });
-    if (!isDuplicate) unique.push(seg);
+    if (!dup) unique.push(seg);
   });
 
   return unique;
 }
 
-function RoomWalls({ rooms, totalW, totalD }: { rooms: GridRoom[]; totalW: number; totalD: number }) {
+function RoomWalls({ rooms, totalW, totalD, openings }: {
+  rooms: GridRoom[]; totalW: number; totalD: number;
+  openings: Opening[];
+}) {
   const walls = generateWalls(rooms, totalW, totalD);
+  const segments: React.ReactElement[] = [];
 
-  return (
-    <>
-      {walls.map((seg, i) => {
-        const dx  = seg.x2 - seg.x1;
-        const dz  = seg.z2 - seg.z1;
-        const len = Math.sqrt(dx*dx + dz*dz);
-        if (len < 0.02) return null;
+  walls.forEach((seg, i) => {
+    if (seg.isFront) return;
 
-        const cx    = (seg.x1 + seg.x2) / 2;
-        const cz    = (seg.z1 + seg.z2) / 2;
-        const angle = Math.atan2(dx, dz);
-        const t     = seg.isExterior ? WALL_T_EXT : WALL_T_INT;
-        const color = seg.isExterior ? "#d4cfc6" : "#e8e4dc";
+    const dx  = seg.x2 - seg.x1;
+    const dz  = seg.z2 - seg.z1;
+    const len = Math.sqrt(dx*dx + dz*dz);
+    if (len < 0.02) return;
 
-        return (
-          <mesh key={i} position={[cx, WALL_H/2, cz]} rotation={[0, angle, 0]} castShadow receiveShadow>
-            <boxGeometry args={[t, WALL_H, len + t/2]} />
-            <meshStandardMaterial color={color} roughness={0.9} metalness={0} />
+    const angle = Math.atan2(dx, dz);
+    const t     = seg.isExterior ? WALL_T_EXT : WALL_T_INT;
+    const color = seg.isExterior ? "#ccc8c0" : "#e8e4dc";
+    const wallH = WALL_H;
+
+    // Find openings that sit on this wall segment
+    const wallOpenings = openings.filter(op => {
+      const ox = (op.x / 1000) * totalW - totalW / 2;
+      const oz = (op.y / 1000) * totalD - totalD / 2;
+      // Check if opening center is near this wall line
+      const isHoriz = Math.abs(seg.z1 - seg.z2) < 0.05;
+      if (isHoriz) {
+        // Wall is horizontal — opening must be on same z, x within range
+        const minX = Math.min(seg.x1, seg.x2);
+        const maxX = Math.max(seg.x1, seg.x2);
+        return Math.abs(oz - seg.z1) < 0.3 && ox >= minX - 0.1 && ox <= maxX + 0.1;
+      } else {
+        // Wall is vertical
+        const minZ = Math.min(seg.z1, seg.z2);
+        const maxZ = Math.max(seg.z1, seg.z2);
+        return Math.abs(ox - seg.x1) < 0.3 && oz >= minZ - 0.1 && oz <= maxZ + 0.1;
+      }
+    });
+
+    if (wallOpenings.length === 0) {
+      // No openings — render full wall
+      const cx = (seg.x1 + seg.x2) / 2;
+      const cz = (seg.z1 + seg.z2) / 2;
+      segments.push(
+        <mesh key={`wall-${i}`} position={[cx, wallH/2, cz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+          <boxGeometry args={[t, wallH, len + t/2]} />
+          <meshStandardMaterial color={color} roughness={0.88} metalness={0} />
+        </mesh>
+      );
+      return;
+    }
+
+    // Split wall around each opening
+    // Convert openings to positions along the wall (0 = start, len = end)
+    const isHoriz = Math.abs(seg.z1 - seg.z2) < 0.05;
+    type Cut = { start: number; end: number; type: 'door' | 'window' };
+    const cuts: Cut[] = wallOpenings.map(op => {
+      const ox = (op.x / 1000) * totalW - totalW / 2;
+      const oz = (op.y / 1000) * totalD - totalD / 2;
+      const opW = (op.width / 1000) * (isHoriz ? totalW : totalD);
+      const pos = isHoriz
+        ? Math.sqrt((ox - seg.x1) ** 2)
+        : Math.sqrt((oz - seg.z1) ** 2);
+      return { start: Math.max(0, pos - opW/2), end: Math.min(len, pos + opW/2), type: op.type };
+    }).sort((a, b) => a.start - b.start);
+
+    // Generate wall pieces between cuts
+    const pieces: { from: number; to: number }[] = [];
+    let cursor = 0;
+    cuts.forEach(cut => {
+      if (cut.start > cursor + 0.05) pieces.push({ from: cursor, to: cut.start });
+      cursor = cut.end;
+    });
+    if (cursor < len - 0.05) pieces.push({ from: cursor, to: len });
+
+    // Add window sill pieces (partial height) for windows
+    cuts.forEach((cut, ci) => {
+      if (cut.type === 'window') {
+        const pLen = cut.end - cut.start;
+        const pCenter = cut.start + pLen / 2;
+        const px = seg.x1 + (dx / len) * pCenter;
+        const pz = seg.z1 + (dz / len) * pCenter;
+        const sillH = 0.9;
+        const topH  = 0.5;
+        // Sill (bottom)
+        segments.push(
+          <mesh key={`sill-${i}-${ci}`} position={[px, sillH/2, pz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+            <boxGeometry args={[t, sillH, pLen]} />
+            <meshStandardMaterial color={color} roughness={0.88} metalness={0} />
           </mesh>
         );
-      })}
-    </>
-  );
+        // Top piece
+        segments.push(
+          <mesh key={`top-${i}-${ci}`} position={[px, wallH - topH/2, pz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+            <boxGeometry args={[t, topH, pLen]} />
+            <meshStandardMaterial color={color} roughness={0.88} metalness={0} />
+          </mesh>
+        );
+        // Glass pane
+        segments.push(
+          <mesh key={`glass-${i}-${ci}`} position={[px, sillH + (wallH - sillH - topH)/2, pz]} rotation={[0, angle, 0]}>
+            <boxGeometry args={[0.02, wallH - sillH - topH, pLen]} />
+            <meshStandardMaterial color="#a8d8f0" transparent opacity={0.35} roughness={0} metalness={0.1} />
+          </mesh>
+        );
+      }
+      // Door: just a gap — optionally add door frame
+      if (cut.type === 'door') {
+        const pLen = cut.end - cut.start;
+        const pCenter = cut.start + pLen / 2;
+        const px = seg.x1 + (dx / len) * pCenter;
+        const pz = seg.z1 + (dz / len) * pCenter;
+        // Door lintel (top of door frame)
+        segments.push(
+          <mesh key={`lintel-${i}-${ci}`} position={[px, wallH - 0.15, pz]} rotation={[0, angle, 0]} castShadow>
+            <boxGeometry args={[t, 0.3, pLen + 0.05]} />
+            <meshStandardMaterial color={color} roughness={0.88} />
+          </mesh>
+        );
+      }
+    });
+
+    // Full-height wall pieces between openings
+    pieces.forEach((piece, pi) => {
+      const pLen = piece.to - piece.from;
+      if (pLen < 0.05) return;
+      const pCenter = piece.from + pLen / 2;
+      const px = seg.x1 + (dx / len) * pCenter;
+      const pz = seg.z1 + (dz / len) * pCenter;
+      segments.push(
+        <mesh key={`piece-${i}-${pi}`} position={[px, wallH/2, pz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+          <boxGeometry args={[t, wallH, pLen]} />
+          <meshStandardMaterial color={color} roughness={0.88} metalness={0} />
+        </mesh>
+      );
+    });
+  });
+
+  return <>{segments}</>;
 }
 
 // ─── Draggable furniture ──────────────────────────────────────────────────────
@@ -244,7 +351,10 @@ function FurnitureBox({ item, isSelected, onSelect, onMove }: {
     const onUp = () => { isDragging.current = false; gl.domElement.style.cursor = "default"; };
     window.addEventListener("pointermove", onMove_);
     window.addEventListener("pointerup", onUp);
-    return () => { window.removeEventListener("pointermove", onMove_); window.removeEventListener("pointerup", onUp); };
+    return () => {
+      window.removeEventListener("pointermove", onMove_);
+      window.removeEventListener("pointerup", onUp);
+    };
   }, [isSelected, item.position]);
 
   return (
@@ -284,7 +394,8 @@ function CameraSetup({ width, depth }: { width: number; depth: number }) {
   const { camera } = useThree();
   useEffect(() => {
     const d = Math.max(width, depth);
-    camera.position.set(d * 0.9, d * 1.1, d * 1.2);
+    // Position camera at front-right so the open front face is visible
+    camera.position.set(d * 0.7, d * 0.9, d * 1.3);
     camera.lookAt(0, 0, 0);
   }, [width, depth]);
   return null;
@@ -292,12 +403,13 @@ function CameraSetup({ width, depth }: { width: number; depth: number }) {
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
 function Scene({
-  floorPlanUrl, roomWidth, roomDepth, rooms, furniture,
+  roomWidth, roomDepth, rooms, openings, furniture,
   onFurnitureMove, onFurnitureSelect, selectedFurnitureId,
 }: {
-  floorPlanUrl?: string | null;
   roomWidth: number; roomDepth: number;
-  rooms: GridRoom[]; furniture: PlacedFurniture[];
+  rooms: GridRoom[];
+  openings: Opening[];
+  furniture: PlacedFurniture[];
   onFurnitureMove?: (id: string, pos: [number, number, number]) => void;
   onFurnitureSelect?: (id: string | null) => void;
   selectedFurnitureId?: string | null;
@@ -308,42 +420,36 @@ function Scene({
     <>
       <CameraSetup width={roomWidth} depth={roomDepth} />
 
-      {/* Lighting */}
-      <ambientLight intensity={0.8} />
+      <ambientLight intensity={0.9} />
       <directionalLight
-        position={[roomWidth * 0.8, 5, roomDepth * 0.8]}
-        intensity={1.2} castShadow
+        position={[roomWidth * 0.8, 6, roomDepth * 1.2]}
+        intensity={1.3} castShadow
         shadow-mapSize-width={2048} shadow-mapSize-height={2048}
         shadow-camera-far={60}
         shadow-camera-left={-roomWidth} shadow-camera-right={roomWidth}
         shadow-camera-top={roomDepth} shadow-camera-bottom={-roomDepth}
       />
-      <pointLight position={[-roomWidth/2, 3, -roomDepth/2]} intensity={0.4} />
-      <pointLight position={[roomWidth/2, 3, roomDepth/2]} intensity={0.3} />
+      <pointLight position={[0, 3, 0]} intensity={0.5} />
 
-      {/* Floor */}
-      {floorPlanUrl && hasRooms
-        ? <FloorPlanMesh url={floorPlanUrl} width={roomWidth} depth={roomDepth} />
-        : <PlainFloor width={roomWidth} depth={roomDepth} />
-      }
+      {/* Floor — plain, no floor plan image */}
+      <PlainFloor width={roomWidth} depth={roomDepth} />
 
-      {/* Colored room floor tiles */}
+      {/* Colored room tiles */}
       {hasRooms && <RoomFloors rooms={rooms} totalW={roomWidth} totalD={roomDepth} />}
 
-      {/* Walls generated from room boxes */}
+      {/* Walls from room boxes, front face always open */}
       {hasRooms
-        ? <RoomWalls rooms={rooms} totalW={roomWidth} totalD={roomDepth} />
+        ? <RoomWalls rooms={rooms} totalW={roomWidth} totalD={roomDepth} openings={openings} />
         : (
-          // Fallback: simple box room
           <group>
             {[
-              { pos: [0, WALL_H/2, -roomDepth/2] as [number,number,number], args: [roomWidth+0.2, WALL_H, 0.2] as [number,number,number] },
-              { pos: [-roomWidth/2, WALL_H/2, 0] as [number,number,number], args: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
-              { pos: [roomWidth/2, WALL_H/2, 0] as [number,number,number], args: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
+              { p: [0, WALL_H/2, -roomDepth/2] as [number,number,number], a: [roomWidth+0.2, WALL_H, 0.2] as [number,number,number] },
+              { p: [-roomWidth/2, WALL_H/2, 0] as [number,number,number], a: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
+              { p: [roomWidth/2, WALL_H/2, 0] as [number,number,number], a: [0.2, WALL_H, roomDepth+0.2] as [number,number,number] },
             ].map((w, i) => (
-              <mesh key={i} position={w.pos} castShadow receiveShadow>
-                <boxGeometry args={w.args} />
-                <meshStandardMaterial color="#e8e4dc" roughness={0.9} />
+              <mesh key={i} position={w.p} castShadow receiveShadow>
+                <boxGeometry args={w.a} />
+                <meshStandardMaterial color="#ccc8c0" roughness={0.9} />
               </mesh>
             ))}
           </group>
@@ -352,10 +458,10 @@ function Scene({
 
       {/* Floor grid */}
       <Grid
-        position={[0, 0.005, 0]}
+        position={[0, 0.006, 0]}
         args={[roomWidth, roomDepth]}
-        cellSize={0.5} cellThickness={0.3} cellColor="#c8d0ce"
-        sectionSize={1} sectionThickness={0.5} sectionColor="#a0aba9"
+        cellSize={0.5} cellThickness={0.3} cellColor="#bbb8b0"
+        sectionSize={1} sectionThickness={0.6} sectionColor="#a09c94"
         fadeDistance={30} fadeStrength={1} infiniteGrid={false}
       />
 
@@ -370,7 +476,8 @@ function Scene({
       ))}
 
       <OrbitControls
-        makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2.05}
+        makeDefault
+        minPolarAngle={0} maxPolarAngle={Math.PI / 2.05}
         minDistance={1} maxDistance={Math.max(roomWidth, roomDepth) * 3}
         enableDamping dampingFactor={0.08}
       />
@@ -381,7 +488,7 @@ function Scene({
 // ─── Export ───────────────────────────────────────────────────────────────────
 export default function ThreeScene({
   floorPlanUrl, roomWidthCm = 500, roomDepthCm = 400,
-  rooms = [], buildingPerimeter, furniture = [],
+  rooms = [], buildingPerimeter, openings = [], furniture = [],
   onFurnitureMove, onFurnitureSelect, selectedFurnitureId,
 }: ThreeSceneProps) {
   const roomWidth = roomWidthCm * CM;
@@ -403,9 +510,8 @@ export default function ThreeScene({
           </Html>
         }>
           <Scene
-            floorPlanUrl={floorPlanUrl}
             roomWidth={roomWidth} roomDepth={roomDepth}
-            rooms={rooms} furniture={furniture}
+            rooms={rooms} openings={openings} furniture={furniture}
             onFurnitureMove={onFurnitureMove}
             onFurnitureSelect={onFurnitureSelect}
             selectedFurnitureId={selectedFurnitureId}
