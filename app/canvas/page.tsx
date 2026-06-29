@@ -1,1112 +1,604 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
-  Search,
-  Minus,
-  Plus,
-  RotateCcw,
-  Sofa,
-  Sun,
-  Layers,
-  Sparkles,
-  ChevronDown,
-  Settings2,
-  LayoutGrid,
-  ChevronLeft,
-  Share2,
-  Download,
-  Palette,
-  ChevronRight,
-  SlidersHorizontal,
-  X,
-  Loader2,
+  Search, Minus, Plus, RotateCcw, Sofa,
+  ChevronDown, ChevronLeft, Share2, Download,
+  SlidersHorizontal, Loader2, RotateCw, Trash2,
 } from "lucide-react";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import { useProjectStore } from "@/lib/store";
 import { getProject } from "@/lib/api/projects";
-import {
-  RoomOverlayBox,
-  relayoutGrid,
-  type GridRoom,
-} from "@/components/RoomLayoutGrid";
+import { RoomOverlayBox, relayoutGrid, type GridRoom } from "@/components/RoomLayoutGrid";
+import type { PlacedFurniture } from "@/components/ThreeScene";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Lazy-load Three.js (no SSR — Three.js requires browser APIs) ─────────────
+const ThreeScene = dynamic(() => import("@/components/ThreeScene"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-[#1a1f1e]">
+      <div className="flex flex-col items-center gap-3">
+        <Loader2 size={24} className="animate-spin text-[#c7de7d]" />
+        <p className="text-[13px] text-white/60 font-medium">Loading 3D scene…</p>
+      </div>
+    </div>
+  ),
+});
 
-type ElementItem = { id: string; name: string; icon: string };
-type Category = { name: string; items: ElementItem[] };
-
-// ─── Element Library Data ────────────────────────────────────────────────────
-
-const ELEMENTS: Category[] = [
+// ─── Furniture catalogue ──────────────────────────────────────────────────────
+const FURNITURE_CATALOGUE = [
   {
-    name: "Living Room",
+    category: "Living Room",
     items: [
-      { id: "sofa", name: "Sofa", icon: "sofa" },
-      { id: "armchair", name: "Armchair", icon: "armchair" },
-      { id: "tv-stand", name: "TV Stand", icon: "tv" },
-      { id: "coffee-table", name: "Coffee Table", icon: "table" },
-      { id: "side-table", name: "Side Table", icon: "side-table" },
+      { id: "sofa-3seat", name: "3-Seat Sofa", width: 220, depth: 90, height: 85, color: "#8a7156" },
+      { id: "armchair", name: "Armchair", width: 85, depth: 80, height: 85, color: "#6b5d4f" },
+      { id: "coffee-table", name: "Coffee Table", width: 120, depth: 60, height: 45, color: "#5c3d24" },
+      { id: "tv-stand", name: "TV Stand", width: 180, depth: 45, height: 55, color: "#3d2f26" },
+      { id: "bookshelf", name: "Bookshelf", width: 90, depth: 30, height: 180, color: "#4d3627" },
+      { id: "floor-lamp", name: "Floor Lamp", width: 35, depth: 35, height: 160, color: "#c0a870" },
     ],
   },
   {
-    name: "Bedroom",
+    category: "Bedroom",
     items: [
-      { id: "queen-bed", name: "Queen Bed", icon: "bed" },
-      { id: "king-bed", name: "King Bed", icon: "bed" },
-      { id: "nightstand", name: "Nightstand", icon: "nightstand" },
-      { id: "dresser", name: "Dresser", icon: "dresser" },
-      { id: "wardrobe", name: "Wardrobe", icon: "wardrobe" },
+      { id: "king-bed", name: "King Bed", width: 200, depth: 220, height: 50, color: "#8d9fa0" },
+      { id: "queen-bed", name: "Queen Bed", width: 160, depth: 200, height: 50, color: "#9aacad" },
+      { id: "nightstand", name: "Nightstand", width: 55, depth: 45, height: 60, color: "#5c3d24" },
+      { id: "wardrobe", name: "Wardrobe", width: 200, depth: 60, height: 220, color: "#4a3728" },
     ],
   },
   {
-    name: "Dining",
+    category: "Dining",
     items: [
-      { id: "dining-4", name: "Dining Table (4)", icon: "dining" },
-      { id: "dining-6", name: "Dining Table (6)", icon: "dining" },
-      { id: "dining-chair", name: "Dining Chair", icon: "chair" },
-      { id: "bar-stool", name: "Bar Stool", icon: "stool" },
+      { id: "dining-table-6", name: "Dining Table (6)", width: 200, depth: 90, height: 76, color: "#7a5c3c" },
+      { id: "dining-chair", name: "Dining Chair", width: 45, depth: 50, height: 90, color: "#5c3d24" },
+      { id: "sideboard", name: "Sideboard", width: 160, depth: 45, height: 80, color: "#4d3627" },
     ],
   },
   {
-    name: "Office",
+    category: "Office",
     items: [
-      { id: "desk", name: "Desk", icon: "desk" },
-      { id: "l-desk", name: "L-Shaped Desk", icon: "desk" },
-      { id: "office-chair", name: "Office Chair", icon: "chair" },
-      { id: "bookshelf", name: "Bookshelf", icon: "bookshelf" },
-      { id: "filing-cabinet", name: "Filing Cabinet", icon: "cabinet" },
+      { id: "desk", name: "Desk", width: 160, depth: 70, height: 75, color: "#8a7156" },
+      { id: "office-chair", name: "Office Chair", width: 65, depth: 65, height: 110, color: "#2d2d2d" },
     ],
   },
   {
-    name: "Bathroom",
+    category: "Decor",
     items: [
-      { id: "bathtub", name: "Bathtub", icon: "bath" },
-      { id: "shower", name: "Shower", icon: "shower" },
-      { id: "sink", name: "Sink", icon: "sink" },
-      { id: "toilet", name: "Toilet", icon: "toilet" },
-      { id: "vanity", name: "Vanity", icon: "vanity" },
-    ],
-  },
-  {
-    name: "Decor",
-    items: [
-      { id: "small-plant", name: "Small Plant", icon: "plant" },
-      { id: "large-plant", name: "Large Plant", icon: "plant" },
-      { id: "floor-lamp", name: "Floor Lamp", icon: "lamp" },
-      { id: "table-lamp", name: "Table Lamp", icon: "lamp" },
-      { id: "rug", name: "Rug", icon: "rug" },
+      { id: "plant-large", name: "Large Plant", width: 50, depth: 50, height: 120, color: "#3a6b3a" },
+      { id: "plant-small", name: "Small Plant", width: 25, depth: 25, height: 50, color: "#4d8b4d" },
+      { id: "rug-large", name: "Rug (Large)", width: 200, depth: 140, height: 2, color: "#c4a882" },
     ],
   },
 ];
 
-// ─── Color palette from Figma ─────────────────────────────────────────────────
-
-const PALETTE_COLORS = [
-  "#f5f0e8",
-  "#3d5a4c",
-  "#8a8a8a",
-  "#1a6b63",
-  "#2e8b7a",
-  "#e8c840",
-];
-
-// ─── Suggestion chips from Figma ──────────────────────────────────────────────
-
-const SUGGESTION_CHIPS = [
-  "Cozy Scandinavian living room",
-  "Maximise natural light",
-  "Add plants for biophilic design",
-  "Modern minimalist bedroom",
-];
-
-// ─── Furniture Library Data from Figma ────────────────────────────────────────
-
-const LIBRARY_SECTIONS = [
-  {
-    name: "Living Room",
-    count: "24 items",
-    items: [
-      { name: "L-Shaped Sofa", size: "240 × 160 cm", img: "https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&w=300&q=80" },
-      { name: "Armchair", size: "85 × 80 cm", img: "https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?auto=format&fit=crop&w=300&q=80" },
-      { name: "Coffee Table", size: "Ø 100 cm", img: "https://images.unsplash.com/photo-1533090161767-e6ffed986c88?auto=format&fit=crop&w=300&q=80" },
-      { name: "TV Stand", size: "180 × 45 cm", img: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?auto=format&fit=crop&w=300&q=80" },
-      { name: "Bookshelf", size: "120 × 30 cm", img: "https://images.unsplash.com/photo-1544644181-1484b3fdfc62?auto=format&fit=crop&w=300&q=80" },
-      { name: "Floor Lamp", size: "Ø 40 cm", img: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=300&q=80" },
-    ]
-  },
-  {
-    name: "Dining",
-    count: "16 items",
-    items: [
-      { name: "Dining Table", size: "200 × 100 cm", img: "https://images.unsplash.com/photo-1615066390971-03e4e1c36ddf?auto=format&fit=crop&w=300&q=80" },
-      { name: "Dining Chair", size: "45 × 50 cm", img: "https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=300&q=80" },
-      { name: "Bar Stool", size: "Ø 40 cm", img: "https://images.unsplash.com/photo-1592078615290-033ee584e267?auto=format&fit=crop&w=300&q=80" },
-      { name: "Sideboard", size: "160 × 45 cm", img: "https://images.unsplash.com/photo-1595428774223-ef52624120d2?auto=format&fit=crop&w=300&q=80" },
-    ]
-  },
-  {
-    name: "Bedroom",
-    count: "18 items",
-    items: []
-  }
-];
-
-// ─── SVG Icons ---────────────────────────────────────────────────────────────────
-
-function FurnitureIcon({ type, size = 24 }: { type: string; size?: number }) {
-  const s = size;
-  const c = { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  switch (type) {
-    case "sofa": case "armchair":
-      return <svg {...c}><rect x="2" y="9" width="20" height="10" rx="2"/><rect x="1" y="11" width="4" height="6" rx="1"/><rect x="19" y="11" width="4" height="6" rx="1"/><path d="M6 19v2M18 19v2"/></svg>;
-    case "tv":
-      return <svg {...c}><rect x="2" y="5" width="20" height="13" rx="2"/><path d="M8 21h8M12 18v3"/></svg>;
-    case "table": case "side-table":
-      return <svg {...c}><rect x="3" y="8" width="18" height="3" rx="1"/><path d="M5 11v5M19 11v5"/></svg>;
-    case "bed":
-      return <svg {...c}><rect x="2" y="8" width="20" height="13" rx="2"/><path d="M2 14h20M7 8V5a1 1 0 011-1h8a1 1 0 011 1v3"/></svg>;
-    case "nightstand": case "dresser": case "wardrobe": case "cabinet": case "bookshelf":
-      return <svg {...c}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M12 3v18"/></svg>;
-    case "dining":
-      return <svg {...c}><rect x="5" y="5" width="14" height="14" rx="2"/><circle cx="12" cy="12" r="3"/></svg>;
-    case "chair": case "stool":
-      return <svg {...c}><rect x="6" y="10" width="12" height="8" rx="1"/><path d="M6 10V6a2 2 0 014 0v4M14 10V6a2 2 0 014 0v4M6 18v3M18 18v3"/></svg>;
-    case "desk":
-      return <svg {...c}><rect x="2" y="10" width="20" height="4" rx="1"/><path d="M4 14v6M20 14v6"/></svg>;
-    case "bath":
-      return <svg {...c}><path d="M3 9h18v5a7 7 0 01-14 0V9zM7 9V5a2 2 0 014 0"/></svg>;
-    case "shower":
-      return <svg {...c}><path d="M4 4h4v4H4zM12 4h8v16H4V8h8"/><circle cx="8" cy="8" r="1" fill="currentColor"/></svg>;
-    case "sink":
-      return <svg {...c}><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M10 8V5M14 8V5"/></svg>;
-    case "toilet":
-      return <svg {...c}><rect x="5" y="3" width="14" height="5" rx="1"/><ellipse cx="12" cy="16" rx="7" ry="5"/></svg>;
-    case "vanity":
-      return <svg {...c}><rect x="2" y="10" width="20" height="11" rx="1"/><path d="M2 14h20M12 10V4M9 7h6"/></svg>;
-    case "plant":
-      return <svg {...c}><path d="M12 21v-8"/><path d="M12 13C9 10 5 11 5 11s0 4 7 2"/><path d="M12 13c3-3 7-2 7-2s0 4-7 2"/><ellipse cx="12" cy="8" rx="4" ry="5"/></svg>;
-    case "lamp":
-      return <svg {...c}><path d="M12 2l-5 9h10L12 2z"/><rect x="10" y="11" width="4" height="7"/><path d="M9 18h6"/></svg>;
-    case "rug":
-      return <svg {...c}><rect x="3" y="6" width="18" height="12" rx="2"/><rect x="6" y="9" width="12" height="6" rx="1"/></svg>;
-    default:
-      return <svg {...c}><rect x="3" y="3" width="18" height="18" rx="2"/></svg>;
-  }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// API rooms always have color as optional — give every room a fallback so the
-// grid never renders an unstyled/invisible block.
+const PALETTE_COLORS = ["#f5f0e8", "#3d5a4c", "#8a8a8a", "#1a6b63", "#2e8b7a", "#e8c840"];
+const SUGGESTION_CHIPS = ["Cozy Scandinavian living room", "Maximise natural light", "Modern minimalist bedroom"];
 const FALLBACK_COLORS = ["#c3f4f0", "#b9eac5", "#87ddd7", "#f7dfad", "#d5dbda", "#ffc9c0"];
 
 function toGridRoom(room: any, index: number): GridRoom {
   return {
-    id:        room.id,
-    name:      room.name,
-    color:     room.color || FALLBACK_COLORS[index % FALLBACK_COLORS.length],
-    box:       room.box,
-    gridRow:   room.gridRow,
-    gridCol:   room.gridCol,
-    rowWeight: room.rowWeight,
-    colWeight: room.colWeight,
+    id: room.id, name: room.name,
+    color: room.color || FALLBACK_COLORS[index % FALLBACK_COLORS.length],
+    box: room.box, gridRow: room.gridRow, gridCol: room.gridCol,
+    rowWeight: room.rowWeight, colWeight: room.colWeight,
   };
 }
 
-// ─── Main Canvas Page ─────────────────────────────────────────────────────────
+const EDIT_COLORS = ["#8a7156","#5c3d24","#2d2d2d","#4a7c59","#7b9ab2","#c4a882","#f0ede8","#3d5a4c"];
 
 export default function CanvasPage() {
   const router = useRouter();
-  const [rightTab, setRightTab] = useState<"elements" | "edit">("elements");
-  const [activeSubTab, setActiveSubTab] = useState<"assets" | "layers">("assets");
-  const [activeCategoryIcon, setActiveCategoryIcon] = useState(0);
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const [rightTab, setRightTab] = useState<"elements" | "edit">("elements");
   const [zoom, setZoom] = useState(100);
   const [searchQuery, setSearchQuery] = useState("");
-  const [mounted, setMounted] = useState(false);
-  const { currentProject, setProjectRooms } = useProjectStore();
-  const [activeEditSubTab, setActiveEditSubTab] = useState<"settings" | "layers" | "palette">("layers");
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [librarySearchQuery, setLibrarySearchQuery] = useState("");
   const [activeFilterChip, setActiveFilterChip] = useState("All");
+  const [mounted, setMounted] = useState(false);
 
-  // ── Room layout state (replaces the static floor plan image) ──
+  const { currentProject, setProjectRooms, setProject } = useProjectStore();
   const [rooms, setRooms] = useState<GridRoom[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
-  // ── AI design render state (from the prompt box) ──
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isGeneratingRender, setIsGeneratingRender] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const [placedFurniture, setPlacedFurniture] = useState<PlacedFurniture[]>([]);
+  const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
+  const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
+  const canvasRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (mounted) {
-      console.log("Canvas mounted. Current Project:", currentProject);
-    }
-  }, [mounted, currentProject]);
+  useEffect(() => { setMounted(true); }, []);
 
-  // Load the room layout: prefer the store (set right after project creation,
-  // no network wait), fall back to fetching the project fresh — covers a
-  // direct page refresh or opening a saved project from the dashboard.
   useEffect(() => {
     if (!mounted) return;
-
-    if (currentProject?.rooms && currentProject.rooms.length > 0) {
-      setRooms(currentProject.rooms.map(toGridRoom).filter(r => r.box));
+    if ((currentProject?.rooms?.length ?? 0) > 0) {
+      setRooms(currentProject!.rooms!.map(toGridRoom).filter((r: GridRoom) => r.box));
       return;
     }
-
     if (currentProject?.id) {
       setLoadingRooms(true);
       getProject(currentProject.id)
-        .then((project) => {
-          const apiRooms = project.room_data?.rooms ?? [];
-          const gridRooms = apiRooms.map(toGridRoom).filter(r => r.box);
-          setRooms(gridRooms);
+        .then(p => {
+          const apiRooms = p.room_data?.rooms ?? [];
+          setRooms(apiRooms.map(toGridRoom).filter((r: GridRoom) => r.box));
           if (apiRooms.length > 0) setProjectRooms(apiRooms);
+          // Also sync floor_plan_url from API if store doesn't have it yet
+          if (p.floor_plan_url && !floorPlanUrl) {
+            setProject({ ...currentProject, floor_plan_url: p.floor_plan_url });
+          }
         })
-        .catch((err) => {
-          console.error("Failed to load project rooms:", err);
-        })
+        .catch(err => console.error("Failed to load rooms:", err))
         .finally(() => setLoadingRooms(false));
     }
   }, [mounted, currentProject?.id]);
 
+  // Resolve floor plan URL from either field name (store uses both)
+  const floorPlanUrl = currentProject?.floor_plan_url || currentProject?.floorPlanUrl || null;
+
   const handleResizeRoom = (id: string, box: GridRoom["box"]) => {
     if (!box) return;
-    const target = rooms.find(r => r.id === id);
-    if (!target || target.gridRow === undefined) return;
-
-    const updated = rooms.map(r =>
-      r.id === id ? { ...r, rowWeight: box.height, colWeight: box.width } : r
-    );
-    setRooms(relayoutGrid(updated));
+    setRooms(relayoutGrid(rooms.map(r => r.id === id ? { ...r, rowWeight: box.height, colWeight: box.width } : r)));
   };
 
   const handleSwapRooms = (draggedId: string, targetId: string) => {
     if (draggedId === targetId) return;
-    const dragged = rooms.find(r => r.id === draggedId);
-    const target  = rooms.find(r => r.id === targetId);
-    if (!dragged || !target || dragged.gridRow === undefined || target.gridRow === undefined) return;
-
-    const updated = rooms.map(r => {
-      if (r.id === draggedId) {
-        return { ...r, gridRow: target.gridRow, gridCol: target.gridCol, rowWeight: target.rowWeight, colWeight: target.colWeight };
-      }
-      if (r.id === targetId) {
-        return { ...r, gridRow: dragged.gridRow, gridCol: dragged.gridCol, rowWeight: dragged.rowWeight, colWeight: dragged.colWeight };
-      }
+    const a = rooms.find(r => r.id === draggedId);
+    const b = rooms.find(r => r.id === targetId);
+    if (!a || !b || a.gridRow === undefined || b.gridRow === undefined) return;
+    setRooms(relayoutGrid(rooms.map(r => {
+      if (r.id === draggedId) return { ...r, gridRow: b.gridRow, gridCol: b.gridCol, rowWeight: b.rowWeight, colWeight: b.colWeight };
+      if (r.id === targetId) return { ...r, gridRow: a.gridRow, gridCol: a.gridCol, rowWeight: a.rowWeight, colWeight: a.colWeight };
       return r;
-    });
-    setRooms(relayoutGrid(updated));
+    })));
   };
 
-  const filteredElements = ELEMENTS.map((cat) => ({
+  const handleDragStart = (e: React.DragEvent, item: any) => {
+    e.dataTransfer.setData("furniture", JSON.stringify(item));
+  };
+
+  const handleDrop3D = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverCanvas(false);
+    if (viewMode !== "3d") return;
+    const data = e.dataTransfer.getData("furniture");
+    if (!data) return;
+    const item = JSON.parse(data);
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = ((e.clientX - rect.left) / rect.width - 0.5) * 5;
+    const z = ((e.clientY - rect.top) / rect.height - 0.5) * 4;
+    const newItem: PlacedFurniture = {
+      id: `${item.id}-${Date.now()}`,
+      name: item.name,
+      position: [x, 0, z],
+      rotation: 0,
+      scale: [1, 1, 1],
+      color: item.color,
+      width: item.width,
+      depth: item.depth,
+      height: item.height,
+    };
+    setPlacedFurniture(prev => [...prev, newItem]);
+    setSelectedFurnitureId(newItem.id);
+    setRightTab("edit");
+  };
+
+  const handleFurnitureMove = (id: string, position: [number, number, number]) => {
+    setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, position } : f));
+  };
+
+  const handleRotate = () => {
+    if (!selectedFurnitureId) return;
+    setPlacedFurniture(prev => prev.map(f => f.id === selectedFurnitureId ? { ...f, rotation: f.rotation + Math.PI / 4 } : f));
+  };
+
+  const handleDelete = () => {
+    setPlacedFurniture(prev => prev.filter(f => f.id !== selectedFurnitureId));
+    setSelectedFurnitureId(null);
+  };
+
+  const setColor = (color: string) => {
+    setPlacedFurniture(prev => prev.map(f => f.id === selectedFurnitureId ? { ...f, color } : f));
+  };
+
+  const selectedFurniture = placedFurniture.find(f => f.id === selectedFurnitureId);
+
+  // Compute real room dimensions in cm from the detected rooms.
+  // Use the total bounding box of all rooms to size the 3D scene correctly.
+  // Falls back to a sensible default if no dimension data exists.
+  const roomDimensionsCm = (() => {
+    const roomsWithDims = rooms.filter((r: any) => r.length && r.width);
+    if (roomsWithDims.length === 0) return { width: 500, depth: 400 };
+    // Sum widths across rooms in the same row, take max across rows
+    const totalWidth = Math.max(...roomsWithDims.map((r: any) => (r.width || 0) * 100));
+    const totalDepth = Math.max(...roomsWithDims.map((r: any) => (r.length || 0) * 100));
+    return {
+      width: Math.max(totalWidth, 300),
+      depth: Math.max(totalDepth, 300),
+    };
+  })();
+
+  const filteredCatalogue = FURNITURE_CATALOGUE.map(cat => ({
     ...cat,
-    items: cat.items.filter((item) =>
+    items: cat.items.filter(item =>
+      (activeFilterChip === "All" || cat.category === activeFilterChip) &&
       item.name.toLowerCase().includes(searchQuery.toLowerCase())
     ),
-  })).filter((cat) => cat.items.length > 0);
+  })).filter(cat => cat.items.length > 0);
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#f5f5f5] overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
-      {/* ── Navbar ── */}
+
+      {/* Navbar */}
       <header className="h-[56px] border-b border-[#e5e5e5] bg-white flex items-center justify-between px-4 shrink-0">
-        {/* Left container */}
         <div className="flex items-center gap-3">
-          {/* Dashboard Return Button */}
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="flex items-center gap-1 px-2 py-1.5 hover:bg-[#fafafa] rounded-full transition-colors text-[12px] font-medium text-[#525252]"
-          >
-            <ChevronLeft size={16} className="text-[#525252]" />
-            Dashboard
+          <button onClick={() => router.push("/dashboard")} className="flex items-center gap-1 px-2 py-1.5 hover:bg-[#fafafa] rounded-full text-[12px] font-medium text-[#525252]">
+            <ChevronLeft size={16} />Dashboard
           </button>
-          
-          {/* Vertical divider */}
           <div className="h-5 w-px bg-[#e5e5e5]" />
-          
-          {/* Project Type Icon Wrapper (Nooi light green badge icon) */}
           <div className="w-7 h-7 bg-[#c7de7d] rounded-[10px] flex items-center justify-center shrink-0">
-            {/* Grid icon representation for floor plan */}
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#003832" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <path d="M9 3v18M15 3v18M3 9h18M3 15h18" />
+              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>
             </svg>
           </div>
-          
-          {/* Project Title and type */}
           <div className="flex items-baseline gap-1">
-            <span className="text-[14px] font-semibold text-[#0a0a0a] tracking-tight">
-              {currentProject?.name || "Untitled Project"}
-            </span>
-            <span className="text-[12px] text-[#737373]">
-              — Floor plan
-            </span>
+            <span className="text-[14px] font-semibold text-[#0a0a0a]">{currentProject?.name || "Untitled Project"}</span>
+            <span className="text-[12px] text-[#737373]">— {viewMode === "3d" ? "3D Scene" : "Floor plan"}</span>
           </div>
         </div>
-
-        {/* Right container */}
         <div className="flex items-center gap-2">
-          {/* Share button */}
-          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-gray-50 transition-all text-[12px] font-medium text-[#525252]">
-            <Share2 size={14} className="text-[#525252]" />
-            Share
+          {viewMode === "3d" && placedFurniture.length > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f0f7f6] border border-[#c7de7d] rounded-full text-[12px] font-medium text-[#004643]">
+              <Sofa size={12} />{placedFurniture.length} item{placedFurniture.length !== 1 ? "s" : ""}
+            </div>
+          )}
+          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-gray-50 text-[12px] font-medium text-[#525252]">
+            <Share2 size={14} />Share
           </button>
-          
-          {/* Export button */}
-          <button className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#004643] rounded-full hover:bg-[#003633] transition-all text-[12px] font-medium text-white shadow-[0_1px_3px_rgba(0,70,67,0.15)]">
-            <Download size={14} className="text-white" />
-            Export
+          <button className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#004643] rounded-full hover:bg-[#003633] text-[12px] font-medium text-white">
+            <Download size={14} />Export
           </button>
         </div>
       </header>
 
-      {/* Main layout container wrapping panels */}
-      <div className="flex flex-row flex-1 overflow-hidden p-3 gap-3 bg-[#f5f5f5] min-w-0">
+      <div className="flex flex-row flex-1 overflow-hidden p-3 gap-3 min-w-0">
 
-      {/* ══════════════════════════════════════════════════════════════════════
-          LEFT PANEL: AI Design Assistant
-          ══════════════════════════════════════════════════════════════════════ */}
-      <aside
-        className="shrink-0 bg-white flex flex-col overflow-visible rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06),0_4px_12px_-2px_rgba(0,0,0,0.04)]"
-        style={{ width: 280 }}
-      >
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-3">
-          <div className="flex items-center gap-2.5">
-            {/* Nooi green logo circle */}
+        {/* Left Panel */}
+        <aside className="shrink-0 bg-white flex flex-col overflow-visible rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06)]" style={{ width: 280 }}>
+          <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
             <div className="w-[26px] h-[26px] rounded-full bg-[#003832] flex items-center justify-center shrink-0">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <circle cx="6" cy="6" r="4" stroke="white" strokeWidth="1.2"/>
-                <circle cx="6" cy="6" r="1.5" fill="white"/>
-              </svg>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4" stroke="white" strokeWidth="1.2"/><circle cx="6" cy="6" r="1.5" fill="white"/></svg>
             </div>
-            <span className="text-[13px] font-semibold text-[#0a0a0a] tracking-[-0.01em]">
-              AI Design Assistant
-            </span>
-          </div>
-          {/* Collapse icon */}
-          <button className="w-6 h-6 flex items-center justify-center text-[#a3a3a3] hover:text-[#525252] transition-colors rounded">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
-              <rect x="1" y="1" width="12" height="12" rx="2"/>
-              <path d="M5 1v12"/>
-            </svg>
-          </button>
-        </div>
-
-        {/* ── Chat area: welcome message + generated render result ── */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-4 flex flex-col gap-3">
-          <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-3">
-            <p className="text-[12px] leading-[1.55] text-[#404040]">
-              Hi! I&apos;m your Nooi design assistant. Describe the room or style you want and I&apos;ll lay it out for you.
-            </p>
+            <span className="text-[13px] font-semibold text-[#0a0a0a]">AI Design Assistant</span>
           </div>
 
-          {isGeneratingRender && (
-            <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-4 flex items-center gap-2.5">
-              <Loader2 size={14} className="animate-spin text-[#004643]" />
-              <p className="text-[12px] text-[#404040]">Generating your design render…</p>
+          <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-4 flex flex-col gap-3">
+            <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-3">
+              <p className="text-[12px] leading-[1.55] text-[#404040]">
+                {viewMode === "3d"
+                  ? "Drag furniture from the right panel into the 3D scene. Click to select, then rotate or delete."
+                  : "Describe the room or style you want and I'll generate a design for you."}
+              </p>
             </div>
-          )}
+            {isGeneratingRender && (
+              <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-4 flex items-center gap-2.5">
+                <Loader2 size={14} className="animate-spin text-[#004643]" />
+                <p className="text-[12px] text-[#404040]">Generating your design…</p>
+              </div>
+            )}
+            {renderError && (
+              <div className="bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3.5 py-3">
+                <p className="text-[12px] text-[#b91c1c]">{renderError}</p>
+              </div>
+            )}
+            {generatedImageUrl && !isGeneratingRender && (
+              <div className="rounded-[10px] overflow-hidden border border-[#e5e5e5]">
+                <img src={generatedImageUrl} alt="AI render" className="w-full h-auto block" />
+              </div>
+            )}
+            {viewMode === "3d" && selectedFurniture && (
+              <div className="bg-[#f0f7f6] border border-[#c7de7d] rounded-[12px] p-3">
+                <p className="text-[11px] font-semibold text-[#004643] mb-1">Selected: {selectedFurniture.name}</p>
+                <p className="text-[10px] text-[#737373] mb-3">{selectedFurniture.width} × {selectedFurniture.depth} cm</p>
+                <div className="flex gap-2">
+                  <button onClick={handleRotate} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-[#e5e5e5] rounded-[8px] text-[11px] font-medium text-[#525252] hover:border-[#004643] hover:text-[#004643] transition-all">
+                    <RotateCw size={12} />Rotate
+                  </button>
+                  <button onClick={handleDelete} className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white border border-[#e5e5e5] rounded-[8px] text-[11px] font-medium text-[#ef4444] hover:border-[#ef4444] transition-all">
+                    <Trash2 size={12} />Delete
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
-          {renderError && (
-            <div className="bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3.5 py-3">
-              <p className="text-[12px] leading-[1.55] text-[#b91c1c]">{renderError}</p>
+          <div className="px-4 pb-3">
+            <p className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase mb-3">Design Settings</p>
+            <div className="flex gap-2 mb-3">
+              {["Style", "Budget"].map(label => (
+                <div key={label} className="flex-1 h-[30px] border border-[#e5e5e5] rounded-[8px] flex items-center justify-between px-2.5 cursor-pointer hover:border-[#d4d4d4]">
+                  <span className="text-[11px] text-[#a3a3a3]">{label}</span>
+                  <ChevronDown size={11} className="text-[#a3a3a3]" />
+                </div>
+              ))}
             </div>
-          )}
-
-          {generatedImageUrl && !isGeneratingRender && (
-            <div className="rounded-[10px] overflow-hidden border border-[#e5e5e5]">
-              <img
-                src={generatedImageUrl}
-                alt="AI-generated design render"
-                className="w-full h-auto block"
-              />
+            <div className="flex items-center gap-1 mb-4">
+              <span className="text-[10px] text-[#a3a3a3] mr-1">Palette:</span>
+              {PALETTE_COLORS.map((c, i) => (
+                <button key={i} className="w-[16px] h-[16px] rounded-full border border-black/8 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
+              ))}
             </div>
-          )}
-        </div>
-
-        {/* ── DESIGN SETTINGS ── */}
-        <div className="px-4 pb-3">
-          <p className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase mb-3">
-            Design Settings
-          </p>
-
-          {/* Two dropdowns side by side */}
-          <div className="flex gap-2 mb-3">
-            <div className="flex-1 h-[30px] border border-[#e5e5e5] rounded-[8px] flex items-center justify-between px-2.5 cursor-pointer hover:border-[#d4d4d4] transition-colors">
-              <span className="text-[11px] text-[#a3a3a3]"></span>
-              <ChevronDown size={11} className="text-[#a3a3a3]" />
-            </div>
-            <div className="flex-1 h-[30px] border border-[#e5e5e5] rounded-[8px] flex items-center justify-between px-2.5 cursor-pointer hover:border-[#d4d4d4] transition-colors">
-              <span className="text-[11px] text-[#a3a3a3]"></span>
-              <ChevronDown size={11} className="text-[#a3a3a3]" />
+            <div className="flex flex-col gap-[6px] mb-4">
+              {SUGGESTION_CHIPS.map(chip => (
+                <button key={chip} className="flex items-center gap-1.5 text-left text-[11px] text-[#525252] hover:text-[#0a0a0a] transition-colors group">
+                  <span className="text-[#a3a3a3] group-hover:text-[#525252] text-[11px]">+</span>
+                  <span>{chip}</span>
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Palette row */}
-          <div className="flex items-center gap-1 mb-4">
-            <span className="text-[10px] text-[#a3a3a3] mr-1">Palette:</span>
-            {PALETTE_COLORS.map((color, i) => (
-              <button
-                key={i}
-                className="w-[16px] h-[16px] rounded-full border border-black/8 shrink-0 hover:scale-110 transition-transform"
-                style={{ backgroundColor: color }}
-              />
-            ))}
-            <button className="w-[16px] h-[16px] rounded-full border border-dashed border-[#d4d4d4] flex items-center justify-center text-[#a3a3a3] hover:border-[#737373] hover:text-[#737373] transition-colors shrink-0">
-              <Plus size={8} />
-            </button>
-          </div>
+          <CanvasPromptBox
+            projectId={currentProject?.id}
+            onGenerateStart={() => { setIsGeneratingRender(true); setRenderError(null); }}
+            onGenerateSuccess={url => { setGeneratedImageUrl(url); setIsGeneratingRender(false); }}
+            onGenerateError={msg => { setRenderError(msg); setIsGeneratingRender(false); }}
+          />
+        </aside>
 
-          {/* Suggestion chips */}
-          <div className="flex flex-col gap-[6px] mb-4">
-            {SUGGESTION_CHIPS.map((chip) => (
-              <button
-                key={chip}
-                className="flex items-center gap-1.5 text-left text-[11px] text-[#525252] hover:text-[#0a0a0a] transition-colors group"
-              >
-                <span className="text-[#a3a3a3] group-hover:text-[#525252] transition-colors text-[11px]">+</span>
-                <span>{chip}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* ── Prompt Input ── */}
-        <CanvasPromptBox
-          projectId={currentProject?.id}
-          onGenerateStart={() => {
-            setIsGeneratingRender(true);
-            setRenderError(null);
-          }}
-          onGenerateSuccess={(imageUrl) => {
-            setGeneratedImageUrl(imageUrl);
-            setIsGeneratingRender(false);
-          }}
-          onGenerateError={(message) => {
-            setRenderError(message);
-            setIsGeneratingRender(false);
-          }}
-        />
-      </aside>
-
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          CENTER: Canvas
-          ══════════════════════════════════════════════════════════════════════ */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white border border-[#e5e5e5] rounded-[16px] shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
-        {/* Top bar — 2D / 3D Switcher */}
-        <div className="absolute top-[18px] left-1/2 -translate-x-1/2 z-10 bg-white border border-[#e5e5e5] rounded-full p-[5px] flex items-center gap-[4px] shadow-[0px_4px_6px_rgba(0,0,0,0.05),0px_2px_4px_rgba(0,0,0,0.05)]">
-          {(["2d", "3d"] as const).map((mode) => {
-            const isActive = viewMode === mode;
-            return (
+        {/* Center Canvas */}
+        <main
+          ref={canvasRef}
+          className={`flex-1 flex flex-col min-w-0 overflow-hidden relative bg-white rounded-[16px] shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-all border ${
+            isDragOverCanvas && viewMode === "3d" ? "border-[#004643] border-2" : "border-[#e5e5e5]"
+          }`}
+          onDragOver={e => { e.preventDefault(); if (viewMode === "3d") setIsDragOverCanvas(true); }}
+          onDragLeave={() => setIsDragOverCanvas(false)}
+          onDrop={handleDrop3D}
+        >
+          {/* 2D / 3D toggle */}
+          <div className="absolute top-[18px] left-1/2 -translate-x-1/2 z-10 bg-white border border-[#e5e5e5] rounded-full p-[5px] flex items-center gap-[4px] shadow-[0px_4px_6px_rgba(0,0,0,0.05)]">
+            {(["2d", "3d"] as const).map(mode => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
-                className={`flex items-center gap-[6px] px-[16px] py-[6px] rounded-full text-[12px] font-medium leading-[18px] transition-all whitespace-nowrap ${
-                  isActive
-                    ? "bg-[#003832] text-white shadow-sm"
-                    : "text-[#525252] hover:text-[#0a0a0a] hover:bg-[#f5f5f5]"
+                className={`flex items-center gap-[6px] px-[16px] py-[6px] rounded-full text-[12px] font-medium transition-all whitespace-nowrap ${
+                  viewMode === mode ? "bg-[#003832] text-white shadow-sm" : "text-[#525252] hover:text-[#0a0a0a] hover:bg-[#f5f5f5]"
                 }`}
               >
-                {mode === "2d" ? (
-                  <>
-                    <Image
-                      width={14}
-                      height={14}
-                      src="/Logo/floor-plan.svg"
-                      alt=""
-                      className={`w-[14px] h-[14px] ${isActive ? "brightness-0 invert" : ""}`}
-                    />
-                    <span>2D Floor Plan</span>
-                  </>
-                ) : (
-                  <>
-                    <Image
-                      width={14}
-                      height={14}
-                      src="/Logo/3d-studio.svg"
-                      alt=""
-                      className={`w-[14px] h-[14px] ${isActive ? "brightness-0 invert" : ""}`}
-                    />
-                    <span>3D Walkthrough</span>
-                  </>
-                )}
+                {mode === "2d" ? "2D Floor Plan" : "3D Walkthrough"}
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
 
-        {/* Zoom controls */}
-        <div className="absolute bottom-5 right-5 z-10 flex items-center gap-1 bg-white border border-[#e8eceb] rounded-[10px] shadow-sm px-3 py-2">
-          <button
-            onClick={() => setZoom((z) => Math.max(25, z - 10))}
-            className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6] transition-colors text-[#444]"
-          >
-            <Minus size={15} />
-          </button>
-          <span className="text-[13px] font-medium text-[#101212] w-[44px] text-center">{zoom}%</span>
-          <button
-            onClick={() => setZoom((z) => Math.min(200, z + 10))}
-            className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6] transition-colors text-[#444]"
-          >
-            <Plus size={15} />
-          </button>
-          <div className="w-px h-5 bg-[#e8eceb] mx-1" />
-          <button
-            onClick={() => setZoom(100)}
-            className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6] transition-colors text-[#444]"
-            title="Reset zoom"
-          >
-            <RotateCcw size={14} />
-          </button>
-        </div>
+          {/* Drop hint */}
+          {viewMode === "3d" && isDragOverCanvas && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+              <div className="bg-[#004643] text-white px-6 py-3 rounded-full text-[14px] font-semibold shadow-lg">Drop to place furniture</div>
+            </div>
+          )}
 
-        {/* Grid canvas area */}
-        <div
-          className="flex-1 overflow-hidden relative flex items-center justify-center"
-          style={{
-            backgroundColor: "#f7f8f8",
-            backgroundImage: `
-              linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
-              linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px)
-            `,
-            backgroundSize: `${zoom * 0.4}px ${zoom * 0.4}px`,
-            backgroundPosition: "center center",
-          }}
-          onClick={() => setSelectedRoomId(null)}
-        >
-          <div
-            className="relative transition-transform duration-100 ease-out"
-            style={{
-              transform: `scale(${zoom / 100})`,
-            }}
-          >
-            {/* White card container from Figma — now hosts the interactive room grid
-                instead of the static uploaded floor plan image */}
+          {/* Zoom (2D only) */}
+          {viewMode === "2d" && (
+            <div className="absolute bottom-5 right-5 z-10 flex items-center gap-1 bg-white border border-[#e8eceb] rounded-[10px] shadow-sm px-3 py-2">
+              <button onClick={() => setZoom(z => Math.max(25, z - 10))} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><Minus size={15} /></button>
+              <span className="text-[13px] font-medium w-[44px] text-center">{zoom}%</span>
+              <button onClick={() => setZoom(z => Math.min(200, z + 10))} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><Plus size={15} /></button>
+              <div className="w-px h-5 bg-[#e8eceb] mx-1" />
+              <button onClick={() => setZoom(100)} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><RotateCcw size={14} /></button>
+            </div>
+          )}
+
+          {/* 3D controls hint */}
+          {viewMode === "3d" && (
+            <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4 bg-black/50 backdrop-blur-sm text-white/80 text-[11px] px-4 py-2 rounded-full pointer-events-none">
+              <span>🖱 Drag to orbit</span>
+              <span>⚡ Scroll to zoom</span>
+              <span>✋ Right-click to pan</span>
+            </div>
+          )}
+
+          {/* 2D View */}
+          {viewMode === "2d" && (
             <div
-              className="bg-white border-2 border-[#d4d4d4] border-solid h-[460px] w-[680px] rounded-[14px] shadow-[0px_1px_3px_0px_rgba(0,0,0,0.1),0px_1px_2px_-1px_rgba(0,0,0,0.1)] flex items-center justify-center p-[32px] relative overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
+              className="flex-1 overflow-hidden relative flex items-center justify-center"
+              style={{
+                backgroundColor: "#f7f8f8",
+                backgroundImage: `linear-gradient(to right,rgba(0,0,0,0.04) 1px,transparent 1px),linear-gradient(to bottom,rgba(0,0,0,0.04) 1px,transparent 1px)`,
+                backgroundSize: `${zoom * 0.4}px ${zoom * 0.4}px`,
+              }}
+              onClick={() => setSelectedRoomId(null)}
             >
-              {mounted && rooms.length > 0 ? (
-                <div data-overlay-root className="relative w-full h-full">
-                  {rooms.map((room) => (
-                    <RoomOverlayBox
-                      key={room.id}
-                      room={room}
-                      isSelected={selectedRoomId === room.id}
-                      hasSelection={!!selectedRoomId}
-                      onSelect={() => setSelectedRoomId(room.id)}
-                      onResize={(box) => handleResizeRoom(room.id, box)}
-                      onSwap={(targetId) => handleSwapRooms(room.id, targetId)}
+              <div style={{ transform: `scale(${zoom / 100})` }} className="transition-transform duration-100">
+                <div
+                  className="bg-white border-2 border-[#d4d4d4] h-[460px] w-[680px] rounded-[14px] shadow flex items-center justify-center p-[32px] relative overflow-hidden"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {/* Always show floor plan image as background if available */}
+                  {floorPlanUrl && (
+                    <img
+                      src={floorPlanUrl}
+                      alt="Floor plan"
+                      className="absolute inset-0 w-full h-full object-contain opacity-40 pointer-events-none"
                     />
-                  ))}
+                  )}
+
+                  {mounted && rooms.length > 0 ? (
+                    <div data-overlay-root className="relative w-full h-full">
+                      {rooms.map(room => (
+                        <RoomOverlayBox
+                          key={room.id} room={room}
+                          isSelected={selectedRoomId === room.id}
+                          hasSelection={!!selectedRoomId}
+                          onSelect={() => setSelectedRoomId(room.id)}
+                          onResize={box => handleResizeRoom(room.id, box)}
+                          onSwap={targetId => handleSwapRooms(room.id, targetId)}
+                        />
+                      ))}
+                    </div>
+                  ) : loadingRooms ? (
+                    <div className="flex flex-col items-center gap-2 text-gray-400 relative z-10">
+                      <Loader2 size={24} className="animate-spin" />
+                      <span className="text-sm">Detecting rooms…</span>
+                    </div>
+                  ) : !floorPlanUrl ? (
+                    <div className="flex flex-col items-center gap-2 text-gray-300 select-none relative z-10">
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect width="18" height="18" x="3" y="3" rx="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+                      </svg>
+                      <span className="text-sm font-medium">No Floor Plan Uploaded</span>
+                    </div>
+                  ) : (
+                    // Floor plan uploaded but no rooms detected
+                    <div className="flex flex-col items-center gap-2 text-gray-400 select-none relative z-10">
+                      <span className="text-sm font-medium">Floor plan loaded</span>
+                      <span className="text-xs text-gray-300">Room detection complete</span>
+                    </div>
+                  )}
                 </div>
-              ) : loadingRooms ? (
-                <div className="text-gray-300 text-sm font-medium flex flex-col items-center gap-2 select-none">
-                  <span>Loading floor plan…</span>
-                </div>
-              ) : (
-                <div className="text-gray-300 text-sm font-medium flex flex-col items-center gap-2 select-none">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
-                    <circle cx="9" cy="9" r="2"/>
-                    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
-                  </svg>
-                  <span>No Floor Plan Uploaded</span>
-                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 3D View */}
+          {viewMode === "3d" && (
+            <div className="flex-1 overflow-hidden" onClick={() => setSelectedFurnitureId(null)}>
+              {mounted && (
+                <ThreeScene
+                  floorPlanUrl={floorPlanUrl || null}
+                  roomWidthCm={roomDimensionsCm.width}
+                  roomDepthCm={roomDimensionsCm.depth}
+                  furniture={placedFurniture}
+                  onFurnitureMove={handleFurnitureMove}
+                  onFurnitureSelect={setSelectedFurnitureId}
+                  selectedFurnitureId={selectedFurnitureId}
+                />
               )}
             </div>
-          </div>
-        </div>
-      </main>
+          )}
+        </main>
 
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          RIGHT PANEL: Elements + Edit
-          ══════════════════════════════════════════════════════════════════════ */}
-      <aside
-        className="shrink-0 bg-white flex flex-col overflow-hidden rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06),0_4px_12px_-2px_rgba(0,0,0,0.04)]"
-        style={{ width: 280 }}
-      >
-        {/* ── Top Tabs: Elements | Edit | Grid icon ── */}
-        <div className="flex items-center px-3 pt-3 pb-2 gap-2">
-          <div className="flex bg-[#f5f5f5] rounded-full p-[3px] flex-1">
-            <button
-              onClick={() => setRightTab("elements")}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-[5.5px] rounded-full text-[12px] font-medium transition-all ${
-                rightTab === "elements"
-                  ? "bg-white text-[#0a0a0a] shadow-sm"
-                  : "text-[#737373] hover:text-[#0a0a0a]"
-              }`}
-            >
-              <Sofa size={13} />
-              <span>Elements</span>
-            </button>
-            <button
-              onClick={() => setRightTab("edit")}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-[5.5px] rounded-full text-[12px] font-medium transition-all ${
-                rightTab === "edit"
-                  ? "bg-white text-[#0a0a0a] shadow-sm"
-                  : "text-[#737373] hover:text-[#0a0a0a]"
-              }`}
-            >
-              <SlidersHorizontal size={13} />
-              <span>Edit</span>
-            </button>
-          </div>
-          {/* Grid/layout icon button */}
-          <button className="w-[28px] h-[28px] flex items-center justify-center text-[#a3a3a3] hover:text-[#525252] transition-colors rounded">
-            <LayoutGrid size={14} />
-          </button>
-        </div>
-
-        {rightTab === "elements" ? (
-          showLibrary ? (
-            /* ── Furniture Library View ── */
-            <>
-              {/* ── Library Header ── */}
-              <div className="flex items-center justify-between px-3 pt-1 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-[26px] h-[26px] bg-[#eaf8f4] rounded-[8px] flex items-center justify-center text-[#003832]">
-                    <Sofa size={14} />
-                  </div>
-                  <span className="text-[13px] font-semibold text-[#0a0a0a]">Furniture Library</span>
-                </div>
+        {/* Right Panel */}
+        <aside className="shrink-0 bg-white flex flex-col overflow-hidden rounded-[16px] border border-[#e5e5e5] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.06)]" style={{ width: 280 }}>
+          <div className="flex items-center px-3 pt-3 pb-2">
+            <div className="flex bg-[#f5f5f5] rounded-full p-[3px] flex-1">
+              {(["elements", "edit"] as const).map(tab => (
                 <button
-                  onClick={() => setShowLibrary(false)}
-                  className="w-6 h-6 flex items-center justify-center text-[#a3a3a3] hover:text-[#525252] rounded transition-colors"
+                  key={tab}
+                  onClick={() => setRightTab(tab)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-[5.5px] rounded-full text-[12px] font-medium transition-all ${
+                    rightTab === tab ? "bg-white text-[#0a0a0a] shadow-sm" : "text-[#737373] hover:text-[#0a0a0a]"
+                  }`}
                 >
-                  <X size={15} />
+                  {tab === "elements" ? <><Sofa size={13} /><span>Elements</span></> : <><SlidersHorizontal size={13} /><span>Edit</span></>}
                 </button>
-              </div>
+              ))}
+            </div>
+          </div>
 
-              {/* ── Search ── */}
+          {rightTab === "elements" ? (
+            <>
+              {viewMode === "3d" && (
+                <div className="mx-3 mb-2 bg-[#f0f7f6] border border-[#c7de7d] rounded-[10px] px-3 py-2">
+                  <p className="text-[11px] text-[#004643] font-medium">Drag items into the 3D scene →</p>
+                </div>
+              )}
               <div className="px-3 pb-2">
                 <div className="flex items-center gap-2 bg-[#f5f5f5] rounded-[8px] px-3 h-[34px]">
                   <Search className="w-[13px] h-[13px] text-[#a3a3a3] shrink-0" />
-                  <input
-                    value={librarySearchQuery}
-                    onChange={(e) => setLibrarySearchQuery(e.target.value)}
-                    placeholder="Search elements..."
-                    className="flex-1 bg-transparent text-[12px] text-[#0a0a0a] placeholder:text-[#a3a3a3] focus:outline-none"
-                  />
+                  <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search furniture…" className="flex-1 bg-transparent text-[12px] placeholder:text-[#a3a3a3] focus:outline-none" />
                 </div>
               </div>
-
-              {/* ── Filter chips ── */}
               <div className="px-3 pb-2">
                 <div className="flex gap-1.5 overflow-x-auto scrollbar-hide py-0.5">
-                  {["All", "Seating", "Tables", "Storage", "Beds"].map((chip) => (
-                    <button
-                      key={chip}
-                      onClick={() => setActiveFilterChip(chip)}
-                      className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all shrink-0 ${
-                        activeFilterChip === chip
-                          ? "bg-[#003832] text-white"
-                          : "bg-[#f5f5f5] text-[#737373] hover:text-[#0a0a0a]"
-                      }`}
-                    >
-                      {chip}
-                    </button>
+                  {["All", ...FURNITURE_CATALOGUE.map(c => c.category)].map(chip => (
+                    <button key={chip} onClick={() => setActiveFilterChip(chip)} className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all shrink-0 ${activeFilterChip === chip ? "bg-[#003832] text-white" : "bg-[#f5f5f5] text-[#737373] hover:text-[#0a0a0a]"}`}>{chip}</button>
                   ))}
                 </div>
               </div>
-
-              {/* ── Library List ── */}
               <div className="flex-1 overflow-y-auto scrollbar-hide px-3 pb-4">
-                {LIBRARY_SECTIONS.map((section) => {
-                  const filteredItems = section.items.filter((item) =>
-                    item.name.toLowerCase().includes(librarySearchQuery.toLowerCase())
-                  );
-                  if (section.items.length > 0 && filteredItems.length === 0) return null;
-                  
-                  return (
-                    <div key={section.name} className="mb-4">
-                      <div className="flex items-center justify-between pt-2 pb-1.5">
-                        <span className="text-[11px] font-bold text-[#a3a3a3] uppercase tracking-[0.05em]">{section.name}</span>
-                        <span className="text-[11px] text-[#a3a3a3]">{section.count}</span>
-                      </div>
-                      
-                      {section.items.length > 0 ? (
-                        <div className="grid grid-cols-2 gap-[10px]">
-                          {filteredItems.map((item, idx) => (
-                            <button
-                              key={idx}
-                              className="flex flex-col text-left bg-white border border-[#e5e5e5] rounded-[14px] overflow-hidden hover:border-[#003832] transition-all group"
-                            >
-                              <div className="w-full aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
-                                <img
-                                  src={item.img}
-                                  alt={item.name}
-                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                />
-                              </div>
-                              <div className="p-2 flex flex-col gap-0.5">
-                                <span className="text-[11px] font-bold text-[#171717] truncate leading-tight group-hover:text-[#003832] transition-colors">{item.name}</span>
-                                <span className="text-[10px] text-[#a3a3a3] font-medium leading-none">{item.size}</span>
-                              </div>
-                            </button>
-                          ))}
+                {filteredCatalogue.map(cat => (
+                  <div key={cat.category} className="mb-4">
+                    <p className="text-[11px] font-bold text-[#a3a3a3] uppercase tracking-[0.05em] pt-2 pb-1.5">{cat.category}</p>
+                    <div className="grid grid-cols-2 gap-[8px]">
+                      {cat.items.map(item => (
+                        <div
+                          key={item.id}
+                          draggable={viewMode === "3d"}
+                          onDragStart={e => handleDragStart(e, item)}
+                          className={`flex flex-col bg-white border border-[#e5e5e5] rounded-[12px] overflow-hidden transition-all group ${viewMode === "3d" ? "cursor-grab active:cursor-grabbing hover:border-[#003832] hover:shadow-sm" : "opacity-60"}`}
+                        >
+                          <div className="w-full h-[52px] flex items-center justify-center" style={{ backgroundColor: item.color + "22" }}>
+                            <div className="w-8 h-8 rounded-[6px] border border-black/10" style={{ backgroundColor: item.color }} />
+                          </div>
+                          <div className="p-2">
+                            <p className="text-[11px] font-bold text-[#171717] truncate group-hover:text-[#003832] transition-colors">{item.name}</p>
+                            <p className="text-[10px] text-[#a3a3a3] mt-0.5">{item.width}×{item.depth} cm</p>
+                          </div>
                         </div>
-                      ) : (
-                        <div className="h-[34px] bg-[#f5f5f5] rounded-[10px] flex items-center justify-center text-[11px] text-[#a3a3a3] border border-dashed border-[#e5e5e5]">
-                          No items loaded
-                        </div>
-                      )}
+                      ))}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
+                {viewMode === "2d" && (
+                  <div className="flex flex-col items-center py-6 gap-2 text-center">
+                    <p className="text-[11px] text-[#a3a3a3]">Switch to 3D view to place furniture</p>
+                    <button onClick={() => setViewMode("3d")} className="px-4 py-2 bg-[#003832] text-white text-[11px] font-medium rounded-full hover:bg-[#004643] transition-colors">Switch to 3D →</button>
+                  </div>
+                )}
               </div>
             </>
           ) : (
-            <>
-              {/* ── Search ── */}
-              <div className="px-3 pb-2">
-                <div className="flex items-center gap-2 bg-[#f5f5f5] rounded-[8px] px-3 h-[34px]">
-                  <Search className="w-[13px] h-[13px] text-[#a3a3a3] shrink-0" />
-                  <input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search elements..."
-                    className="flex-1 bg-transparent text-[12px] text-[#0a0a0a] placeholder:text-[#a3a3a3] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* ── Assets / Layers toggle ── */}
-              <div className="px-3 pb-2">
-                <div className="flex bg-[#f5f5f5] rounded-[20px] p-[3px]">
-                  {(["assets", "layers"] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveSubTab(tab)}
-                      className={`flex-1 text-[12px] font-medium py-[5px] rounded-[18px] transition-all ${
-                        activeSubTab === tab
-                          ? "bg-white text-[#0a0a0a] shadow-sm"
-                          : "text-[#a3a3a3] hover:text-[#525252]"
-                      }`}
-                    >
-                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-            {/* ── Category Icon Row ── */}
-            <div className="px-3 pb-2">
-              <div className="flex bg-[#f5f5f5] rounded-full p-[3px]">
-                {[
-                  <LayoutGrid size={14} key="grid" />,
-                  <Layers size={14} key="layers" />,
-                  <Palette size={14} key="palette" />,
-                ].map((icon, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setActiveCategoryIcon(i)}
-                    className={`flex-1 h-[28px] flex items-center justify-center rounded-full transition-all ${
-                      activeCategoryIcon === i
-                        ? "bg-white text-[#0a0a0a] shadow-sm"
-                        : "text-[#737373] hover:text-[#0a0a0a]"
-                    }`}
-                  >
-                    {icon}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* ── Furniture Categories + Grid ── */}
-            <div className="flex-1 overflow-y-auto scrollbar-hide px-3">
-              {filteredElements.map((cat) => (
-                <div key={cat.name} className="mb-4">
-                  <p className="text-[12px] font-medium text-[#737373] pt-2 pb-1.5">
-                    {cat.name}
-                  </p>
-                  <div className="grid grid-cols-2 gap-[10px] pb-1">
-                    {cat.items.map((item) => (
-                      <button
-                        key={item.id}
-                        draggable
-                        onClick={() => setShowLibrary(true)}
-                        className="flex flex-col items-center justify-center gap-1.5 p-3.5 bg-white border border-[#e5e5e5] rounded-[12px] hover:border-[#003832] hover:bg-[#f0f7f6] transition-all group"
-                      >
-                        <div className="text-[#525252] group-hover:text-[#003832] transition-colors">
-                          <FurnitureIcon type={item.icon} size={18} />
-                        </div>
-                        <span className="text-[11px] font-medium text-[#171717] group-hover:text-[#003832] text-center leading-tight transition-colors">
-                          {item.name}
-                        </span>
-                      </button>
-                    ))}
+            <div className="flex-1 overflow-y-auto scrollbar-hide px-3 py-4">
+              {selectedFurniture ? (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <p className="text-[13px] font-semibold text-[#0a0a0a] mb-1">{selectedFurniture.name}</p>
+                    <p className="text-[11px] text-[#737373]">{selectedFurniture.width} × {selectedFurniture.depth} × {selectedFurniture.height} cm</p>
                   </div>
-                </div>
-              ))}
-              <div className="h-4" />
-            </div>
-          </>
-          )
-        ) : (
-          /* ── Edit Tab Content ── */
-          <>
-            {/* ── Edit Sub-tab Pill ── */}
-            <div className="px-3 pb-3 pt-1">
-              <div className="flex bg-[#f5f5f5] rounded-full p-[3px]">
-                {[
-                  { id: "settings", icon: <SlidersHorizontal size={14} /> },
-                  { id: "layers", icon: <Layers size={14} /> },
-                  { id: "palette", icon: <Palette size={14} /> },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveEditSubTab(tab.id as any)}
-                    className={`flex-1 h-[28px] flex items-center justify-center rounded-full transition-all ${
-                      activeEditSubTab === tab.id
-                        ? "bg-white text-[#0a0a0a] shadow-sm"
-                        : "text-[#737373] hover:text-[#0a0a0a]"
-                    }`}
-                  >
-                    {tab.icon}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto scrollbar-hide">
-              {activeEditSubTab === "layers" ? (
-                <>
-                  {/* ── Alignment Row ── */}
-                  <div className="flex items-center justify-between px-3 pb-4 pt-1">
-                    {[
-                      {
-                        name: "Align Left",
-                        svg: (
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M4 2v20M8 5h12v4H8V5zm0 8h8v4H8v-4z"/>
-                          </svg>
-                        )
-                      },
-                      {
-                        name: "Align Center",
-                        svg: (
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 2v20M6 6h12v4H6V6zm2 8h8v4H8v-4z"/>
-                          </svg>
-                        )
-                      },
-                      {
-                        name: "Align Right",
-                        svg: (
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M20 2v20M4 5h12v4H4V5zm4 8h8v4H8v-4z"/>
-                          </svg>
-                        )
-                      },
-                      {
-                        name: "Align Top",
-                        svg: (
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M2 4h20M5 8h4v12H5V8zm8 0h4v8h-4V8z"/>
-                          </svg>
-                        )
-                      },
-                      {
-                        name: "Align Middle",
-                        svg: (
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M2 12h20M5 6h4v12H5V6zm8 2h4v8h-4V8z"/>
-                          </svg>
-                        )
-                      },
-                      {
-                        name: "Align Bottom",
-                        svg: (
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M2 20h20M5 4h4v12H5V4zm8 4h4v8h-4V8z"/>
-                          </svg>
-                        )
-                      },
-                    ].map((btn, idx) => (
-                      <button
-                        key={idx}
-                        title={btn.name}
-                        className="w-[32px] h-[32px] flex items-center justify-center border border-[#e5e5e5] rounded-[8px] bg-white text-[#737373] hover:text-[#0a0a0a] hover:bg-gray-50 transition-all"
-                      >
-                        {btn.svg}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* ── Coordinates Grid ── */}
-                  <div className="grid grid-cols-2 gap-2 px-3 pb-3">
-                    {[
-                      { label: "X", value: 120 },
-                      { label: "Y", value: 350 },
-                      { label: "W", value: 240 },
-                      { label: "H", value: 85 },
-                      { label: "R", value: 0 },
-                      { label: "Z", value: 0 },
-                    ].map((item) => (
-                      <div key={item.label} className="flex items-center bg-[#f5f5f5] rounded-[8px] px-3 h-[34px] gap-2">
-                        <span className="text-[11px] font-medium text-[#a3a3a3] uppercase w-3">{item.label}</span>
-                        <input
-                          type="number"
-                          defaultValue={item.value}
-                          className="w-full bg-transparent text-[12px] text-[#0a0a0a] focus:outline-none font-medium"
-                        />
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* ── Constrain proportions ── */}
-                  <div className="flex items-center gap-2 px-3 pb-4">
-                    <input
-                      type="checkbox"
-                      id="constrain"
-                      className="w-3.5 h-3.5 border border-[#d4d4d4] rounded bg-white checked:bg-[#003832]"
-                    />
-                    <label htmlFor="constrain" className="text-[11px] text-[#737373] cursor-pointer">
-                      Constrain proportions
-                    </label>
-                  </div>
-
-                  {/* ── Layers placeholder ── */}
-                  <div className="px-3 border-t border-[#e5e5e5] pt-3 pb-4">
-                    <h3 className="text-[13px] font-semibold text-[#0a0a0a]">Layers</h3>
-                    <p className="text-[11px] text-[#737373] mt-0.5">Manage all elements in your design</p>
-                    
-                    <div className="flex flex-col items-center justify-center py-8 border border-dashed border-[#e5e5e5] rounded-[12px] mt-3 bg-[#fafafa]">
-                      <Layers className="text-[#d4d4d4]" size={28} />
-                      <p className="text-[12px] font-semibold text-[#525252] mt-2">No elements yet</p>
-                      <p className="text-[11px] text-[#a3a3a3] mt-0.5">Add items from the left panel</p>
-                    </div>
-                  </div>
-
-                  {/* ── Layer Actions ── */}
-                  <div className="px-3 border-t border-[#e5e5e5] pt-3 pb-4">
-                    <h3 className="text-[13px] font-semibold text-[#0a0a0a] mb-2.5">Layer Actions</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      {["Bring Forward", "Send Backward", "To Front", "To Back"].map((action) => (
-                        <button
-                          key={action}
-                          className="h-[32px] border border-[#e5e5e5] rounded-[8px] bg-white text-[11px] font-medium text-[#525252] hover:bg-gray-50 hover:text-[#0a0a0a] transition-all"
-                        >
-                          {action}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* ── Materials ── */}
-                  <div className="px-3 border-t border-[#e5e5e5] pt-3 pb-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-bold text-[#737373] tracking-[0.05em] uppercase">Materials</span>
-                      <button className="text-[#737373] hover:text-[#0a0a0a]">
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center justify-between text-[11px] font-medium py-1">
-                        <div className="flex items-center gap-2">
-                          <div className="w-[18px] h-[18px] rounded bg-[#e5e5e5] border border-black/5" />
-                          <span className="text-[#171717]">Fabric - Grey Linen</span>
-                        </div>
-                        <span className="text-[#a3a3a3]">100%</span>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] font-medium py-1">
-                        <div className="flex items-center gap-2">
-                          <div className="w-[18px] h-[18px] rounded bg-[#3d2f26] border border-black/5" />
-                          <span className="text-[#171717]">Wood - Dark Walnut</span>
-                        </div>
-                        <span className="text-[#a3a3a3]">100%</span>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : activeEditSubTab === "palette" ? (
-                <>
-                  {/* ── Materials & Finishes Header ── */}
-                  <div className="px-3 pb-3">
-                    <h3 className="text-[13px] font-semibold text-[#0a0a0a]">Materials & Finishes</h3>
-                    <p className="text-[11px] text-[#737373] mt-0.5">Apply realistic materials to your elements</p>
-                  </div>
-
-                  {/* ── Material Presets ── */}
-                  <div className="px-3 pb-2">
-                    <p className="text-[12px] font-semibold text-[#0a0a0a] mb-2">Material Presets</p>
-                    <div className="flex flex-col gap-2">
-                      {[
-                        { name: "Wood - Oak", color: "#9c7b50" },
-                        { name: "Wood - Walnut", color: "#613d1d" },
-                        { name: "Wood - Mahogany", color: "#4d3227" },
-                        { name: "Metal - Steel", color: "#7f8082" },
-                        { name: "Metal - Black", color: "#2e3033" },
-                        { name: "Fabric - Beige", color: "#ab8265" },
-                        { name: "Fabric - Gray", color: "#a1a1a1" },
-                        { name: "Ceramic - White", color: "#f7f7f7" },
-                        { name: "Glass - Clear", color: "#e8f1f5" },
-                        { name: "Stone - Marble", color: "#ebdcd8" },
-                      ].map((preset, index) => (
-                        <button
-                          key={index}
-                          className="flex items-center justify-between p-2 bg-white border border-[#e5e5e5] rounded-[10px] hover:border-[#003832] transition-all text-left"
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div
-                              className="w-[20px] h-[20px] rounded-[5px] border border-black/5"
-                              style={{ backgroundColor: preset.color }}
-                            />
-                            <span className="text-[11px] font-medium text-[#171717]">{preset.name}</span>
-                          </div>
-                          <ChevronRight size={12} className="text-[#a3a3a3]" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* ── Custom Color ── */}
-                  <div className="px-3 pt-3 pb-6 border-t border-[#e5e5e5] mt-3">
-                    <p className="text-[12px] font-semibold text-[#0a0a0a] mb-2">Custom Color</p>
+                  <div>
+                    <p className="text-[11px] font-bold text-[#737373] uppercase tracking-[0.05em] mb-2">Color</p>
                     <div className="grid grid-cols-4 gap-2">
-                      {[
-                        "#8a7156", "#5c3d24", "#4e3629", "#2d2d2d",
-                        "#808080", "#a6a6a6", "#ffffff", "#eaeaea",
-                        "#228b22", "#cd7f32", "#ffd700", "#87ceeb",
-                      ].map((color, index) => (
+                      {EDIT_COLORS.map(color => (
                         <button
-                          key={index}
-                          className="aspect-square rounded-[8px] border border-black/5 hover:scale-105 transition-transform"
+                          key={color}
+                          onClick={() => setColor(color)}
+                          className={`aspect-square rounded-[8px] border-2 transition-all hover:scale-105 ${selectedFurniture.color === color ? "border-[#003832]" : "border-transparent"}`}
                           style={{ backgroundColor: color }}
                         />
                       ))}
                     </div>
                   </div>
-                </>
+                  <div className="flex gap-2">
+                    <button onClick={handleRotate} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-[#f5f5f5] rounded-[10px] text-[12px] font-medium text-[#525252] hover:bg-[#e8e8e8] transition-colors">
+                      <RotateCw size={13} />Rotate 45°
+                    </button>
+                    <button onClick={handleDelete} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-[#fef2f2] rounded-[10px] text-[12px] font-medium text-[#ef4444] hover:bg-[#fee2e2] transition-colors">
+                      <Trash2 size={13} />Delete
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <div className="px-3 py-6 text-center text-[12px] text-[#a3a3a3]">
-                  Select the settings or layers sub-tab to edit properties.
+                <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-10">
+                  <Sofa size={28} className="text-[#d4d4d4]" />
+                  <p className="text-[12px] font-semibold text-[#525252]">No item selected</p>
+                  <p className="text-[11px] text-[#a3a3a3]">Click a furniture item in the 3D scene to edit it</p>
                 </div>
               )}
             </div>
-          </>
-        )}
-      </aside>
-      
-      </div> {/* End of main layout container */}
+          )}
+        </aside>
+      </div>
 
       <style>{`
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .scrollbar-hide::-webkit-scrollbar{display:none}
+        .scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}
       `}</style>
     </div>
   );

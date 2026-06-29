@@ -287,7 +287,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         setApiLoading(true);
         const project = await createProject(projectName, projectType, address);
         setProjectId(project.id);
-        setProject({ id: project.id, name: project.name, floorPlanUrl: null });
+        setProject({ id: project.id, name: project.name, floor_plan_url: null, floorPlanUrl: null });
         setStep(2);
       } catch (err: any) {
         setApiError(err.message || "Failed to create project");
@@ -308,9 +308,10 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         const result = await uploadFloorPlan(projectId!, file);
 
         setProject({
-          id:           projectId!,
-          name:         projectName,
-          floorPlanUrl: result.floor_plan_url,
+          id:             projectId!,
+          name:           projectName,
+          floor_plan_url: result.floor_plan_url,
+          floorPlanUrl:   result.floor_plan_url,
         });
         setFloorPlanUrl(result.floor_plan_url);
 
@@ -411,9 +412,10 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     // page can render the same interactive layout → navigate
     setIsCreating(true);
     setProject({
-      id:           projectId!,
-      name:         projectName,
-      floorPlanUrl: floorPlanUrl,
+      id:             projectId!,
+      name:           projectName,
+      floor_plan_url: floorPlanUrl,
+      floorPlanUrl:   floorPlanUrl,
       rooms:        rooms.map(toApiRoom),
     });
     setTimeout(() => {
