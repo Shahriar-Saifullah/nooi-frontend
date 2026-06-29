@@ -102,6 +102,7 @@ export default function CanvasPage() {
   const { currentProject, setProjectRooms, setProject } = useProjectStore();
   const [rooms, setRooms] = useState<GridRoom[]>([]);
   const [buildingPerimeter, setBuildingPerimeter] = useState<[number,number][] | null>(null);
+  const [rfWalls, setRfWalls] = useState<Array<{x1:number;y1:number;x2:number;y2:number;thickness:number}>>([]);
   const [openings, setOpenings] = useState<Array<{type:'door'|'window';wall:'horizontal'|'vertical';x:number;y:number;width:number}>>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [loadingRooms, setLoadingRooms] = useState(false);
@@ -134,6 +135,9 @@ export default function CanvasPage() {
           if (apiRooms.length > 0) setProjectRooms(apiRooms);
           if (p.room_data?.building_perimeter) {
             setBuildingPerimeter(p.room_data.building_perimeter);
+          }
+          if (p.room_data?.walls) {
+            setRfWalls(p.room_data.walls);
           }
           if (p.room_data?.openings) {
             setOpenings(p.room_data.openings);
@@ -494,6 +498,7 @@ export default function CanvasPage() {
                   roomDepthCm={roomDimensionsCm.depth}
                   rooms={rooms}
                   buildingPerimeter={buildingPerimeter}
+                  rfWalls={rfWalls}
                   openings={openings}
                   furniture={placedFurniture}
                   onFurnitureMove={handleFurnitureMove}
