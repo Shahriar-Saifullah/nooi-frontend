@@ -455,23 +455,39 @@ export default function CanvasPage() {
                         const cy = room.box.top + room.box.height / 2;
                         const isSelected = selectedRoomId === room.id;
                         return (
-                          <button
-                            key={room.id}
-                            onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
-                            className="absolute -translate-x-1/2 -translate-y-1/2"
-                            style={{ left: `${cx}%`, top: `${cy}%` }}
-                          >
+                          <div key={room.id}>
+                            {/* Colored semi-transparent box matching room boundary */}
                             <div
-                              className={`px-2 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap shadow border transition-all ${
-                                isSelected
-                                  ? "bg-[#004643] text-white border-[#004643] scale-110"
-                                  : "bg-white/85 text-[#004643] border-[#004643]/40 hover:bg-white hover:border-[#004643]"
-                              }`}
-                              style={{ backdropFilter: "blur(4px)" }}
+                              className="absolute border-2 transition-all cursor-pointer"
+                              style={{
+                                left:   `${room.box.left}%`,
+                                top:    `${room.box.top}%`,
+                                width:  `${room.box.width}%`,
+                                height: `${room.box.height}%`,
+                                backgroundColor: room.color + (isSelected ? '60' : '30'),
+                                borderColor:     room.color,
+                                borderRadius: 4,
+                              }}
+                              onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
+                            />
+                            {/* Room name chip at center */}
+                            <button
+                              onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
+                              className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
+                              style={{ left: `${cx}%`, top: `${cy}%` }}
                             >
-                              {room.name}
-                            </div>
-                          </button>
+                              <div
+                                className={`px-2 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap shadow border transition-all ${
+                                  isSelected
+                                    ? "bg-[#004643] text-white border-[#004643] scale-110"
+                                    : "bg-white/90 text-[#004643] border-[#004643]/40 hover:bg-white hover:border-[#004643]"
+                                }`}
+                                style={{ backdropFilter: "blur(4px)" }}
+                              >
+                                {room.name}
+                              </div>
+                            </button>
+                          </div>
                         );
                       })}
                     </div>
