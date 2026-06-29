@@ -46,6 +46,7 @@ export interface Project {
   room_data: {
     rooms: Room[];
     total_area_m2?: number;
+    building_perimeter?: [number, number][];
   };
   created_at: string;
   updated_at: string;
