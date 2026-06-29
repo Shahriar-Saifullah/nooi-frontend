@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 import { listProjects, type Project } from "@/lib/api/projects";
@@ -22,6 +22,10 @@ export default function DashboardPage() {
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const [showFreePlanBanner, setShowFreePlanBanner] = useState(true);
+  const [activeRecentTab, setActiveRecentTab] = useState('All');
+  const [activeExploreTab, setActiveExploreTab] = useState('All');
+  const [activeView, setActiveView] = useState<'home' | 'history' | 'collection'>('home');
 
   useEffect(() => {
     getCurrentUser().then((res) => {
@@ -83,15 +87,30 @@ export default function DashboardPage() {
           </div>
 
           <div className="hidden md:flex bg-[#f5f5f5] h-10 items-center p-1 rounded-full">
-            <div className="bg-white flex items-center gap-2 h-full px-4 rounded-full shadow-sm cursor-pointer">
+            <div
+              onClick={() => setActiveView('home')}
+              className={`flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors ${
+                activeView === 'home' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
+              }`}
+            >
               <Home className="w-4 h-4" />
               <span className="text-xs font-medium">Home</span>
             </div>
-            <div className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer hover:bg-gray-200 transition-colors">
+            <div
+              onClick={() => setActiveView('history')}
+              className={`flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors ${
+                activeView === 'history' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
+              }`}
+            >
               <Clock className="w-4 h-4" />
               <span className="text-xs font-medium">History</span>
             </div>
-            <div className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer hover:bg-gray-200 transition-colors">
+            <div
+              onClick={() => setActiveView('collection')}
+              className={`flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors ${
+                activeView === 'collection' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
+              }`}
+            >
               <FolderOpen className="w-4 h-4" />
               <span className="text-xs font-medium">Collection</span>
             </div>
@@ -185,6 +204,82 @@ export default function DashboardPage() {
       {/* Main Content Layout */}
       <main className="w-full px-6 lg:px-8 py-6 flex flex-col xl:flex-row gap-6">
 
+        {/* History View */}
+        <AnimatePresence mode="wait">
+        {activeView === 'history' && (
+          <motion.div
+            key="history"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 bg-white rounded-3xl shadow-[0_0_32px_rgba(149,157,165,0.04)] p-6 flex flex-col gap-6"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-[#f5f5f5] flex items-center justify-center">
+                <Clock className="w-5 h-5 text-[#004643]" />
+              </div>
+              <div>
+                <h1 className="text-xl font-[600]">History</h1>
+                <p className="text-sm text-[#525252]">Your recent activity and past generations.</p>
+              </div>
+            </div>
+            <div className="border border-dashed border-[#e5e5e5] rounded-[20px] p-16 flex flex-col items-center justify-center gap-3 text-center">
+              <div className="w-12 h-12 rounded-full bg-[#f5f5f5] flex items-center justify-center">
+                <Clock className="w-5 h-5 text-[#a3a3a3]" />
+              </div>
+              <p className="text-[13px] font-medium text-[#737373]">No history yet</p>
+              <p className="text-[12px] text-[#a3a3a3]">Your generation history will appear here once you start creating.</p>
+              <button
+                onClick={() => setActiveView('home')}
+                className="mt-2 text-[12px] font-semibold text-[#004643] bg-[#f5f5f5] px-4 py-2 rounded-full hover:bg-gray-200 transition-colors"
+              >
+                Start Creating →
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Collection View */}
+        {activeView === 'collection' && (
+          <motion.div
+            key="collection"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 bg-white rounded-3xl shadow-[0_0_32px_rgba(149,157,165,0.04)] p-6 flex flex-col gap-6"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-[#f5f5f5] flex items-center justify-center">
+                <FolderOpen className="w-5 h-5 text-[#004643]" />
+              </div>
+              <div>
+                <h1 className="text-xl font-[600]">Collection</h1>
+                <p className="text-sm text-[#525252]">Designs and renders you've saved.</p>
+              </div>
+            </div>
+            <div className="border border-dashed border-[#e5e5e5] rounded-[20px] p-16 flex flex-col items-center justify-center gap-3 text-center">
+              <div className="w-12 h-12 rounded-full bg-[#f5f5f5] flex items-center justify-center">
+                <FolderOpen className="w-5 h-5 text-[#a3a3a3]" />
+              </div>
+              <p className="text-[13px] font-medium text-[#737373]">No saved items yet</p>
+              <p className="text-[12px] text-[#a3a3a3]">Save your favourite designs here to build your collection.</p>
+              <button
+                onClick={() => setActiveView('home')}
+                className="mt-2 text-[12px] font-semibold text-[#004643] bg-[#f5f5f5] px-4 py-2 rounded-full hover:bg-gray-200 transition-colors"
+              >
+                Explore Designs →
+              </button>
+            </div>
+          </motion.div>
+        )}
+        </AnimatePresence>
+
+        {/* Home View */}
+        <AnimatePresence mode="wait">
+        {activeView === 'home' && (<>
+
         {/* Left Column */}
         <motion.div
           className="flex-1 bg-white rounded-3xl shadow-[0_0_32px_rgba(149,157,165,0.04)] p-4 sm:p-6 flex flex-col gap-4 sm:gap-6 min-w-0"
@@ -227,32 +322,57 @@ export default function DashboardPage() {
           </motion.div>
 
           {/* Free Plan Banner */}
-          <motion.div variants={itemVariants} className="bg-[#fcfdf8] border border-[#f0f4e3] rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-            <div className="bg-[#d2e88a] w-10 h-10 rounded-full flex items-center justify-center shrink-0 relative">
-              <Image fill src="/assets/imgVerticalContainer1.svg" className="absolute inset-0 object-contain" alt="bg" />
-              <Image width={100} height={100} src="/assets/imgIllustration1.svg" className="relative w-6 h-6 object-contain z-10" alt="diamond" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-[15px] font-[700] mb-0.5">You're currently on the Free Plan</h3>
-              <p className="text-xs text-[#737373]">You have 100 points to get started. Upgrade to access advanced tools and exclusive benefits</p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button className="bg-[#004643] text-white text-[12px] font-medium px-4 py-2 rounded-full hover:bg-[#003633] transition-colors whitespace-nowrap">
-                Get Started
-              </button>
-              <button className="text-[#004643] text-[12px] font-medium px-4 py-2 rounded-full hover:bg-gray-100 transition-colors whitespace-nowrap">
-                Dismiss
-              </button>
-            </div>
-          </motion.div>
+          <AnimatePresence>
+            {showFreePlanBanner && (
+              <motion.div
+                variants={itemVariants}
+                initial="hidden"
+                animate="show"
+                exit={{ opacity: 0, height: 0, marginTop: 0, overflow: 'hidden' }}
+                transition={{ duration: 0.25 }}
+                className="bg-[#fcfdf8] border border-[#f0f4e3] rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4"
+              >
+                <div className="bg-[#d2e88a] w-10 h-10 rounded-full flex items-center justify-center shrink-0 relative">
+                  <Image fill src="/assets/imgVerticalContainer1.svg" className="absolute inset-0 object-contain" alt="bg" />
+                  <Image width={100} height={100} src="/assets/imgIllustration1.svg" className="relative w-6 h-6 object-contain z-10" alt="diamond" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-[15px] font-[700] mb-0.5">You're currently on the Free Plan</h3>
+                  <p className="text-xs text-[#737373]">You have 100 points to get started. Upgrade to access advanced tools and exclusive benefits</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => router.push('/pricing')}
+                    className="bg-[#004643] text-white text-[12px] font-medium px-4 py-2 rounded-full hover:bg-[#003633] transition-colors whitespace-nowrap"
+                  >
+                    Get Started
+                  </button>
+                  <button
+                    onClick={() => setShowFreePlanBanner(false)}
+                    className="text-[#004643] text-[12px] font-medium px-4 py-2 rounded-full hover:bg-gray-100 transition-colors whitespace-nowrap"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Recent Creations */}
           <motion.div variants={itemVariants} className="flex flex-col gap-3 sm:gap-4">
             <h2 className="text-base sm:text-lg font-medium">Recent Creations</h2>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div className="bg-[#f5f5f5] h-10 inline-flex items-center p-1 rounded-full overflow-x-auto hide-scrollbar w-full sm:w-auto">
-                {['All', 'Create', 'Edit', 'Enhance'].map((tab, i) => (
-                  <div key={tab} className={`${i === 0 ? 'bg-white shadow-sm' : 'hover:bg-gray-200 transition-colors cursor-pointer'} px-4 py-1.5 rounded-full whitespace-nowrap`}>
+                {['All', 'Create', 'Edit', 'Enhance'].map((tab) => (
+                  <div
+                    key={tab}
+                    onClick={() => setActiveRecentTab(tab)}
+                    className={`${
+                      activeRecentTab === tab
+                        ? 'bg-white shadow-sm'
+                        : 'hover:bg-gray-200 transition-colors cursor-pointer'
+                    } px-4 py-1.5 rounded-full whitespace-nowrap cursor-pointer`}
+                  >
                     <span className="text-xs font-medium">{tab}</span>
                   </div>
                 ))}
@@ -345,8 +465,16 @@ export default function DashboardPage() {
             <h2 className="text-base sm:text-lg font-medium">Explore AI Tools</h2>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div className="bg-[#f5f5f5] h-10 inline-flex items-center p-1 rounded-full overflow-x-auto hide-scrollbar w-full sm:w-auto">
-                {['All', 'Create', 'Edit', 'Enhance'].map((tab, i) => (
-                  <div key={tab} className={`${i === 0 ? 'bg-white shadow-sm' : 'hover:bg-gray-200 transition-colors cursor-pointer'} px-4 py-1.5 rounded-full whitespace-nowrap`}>
+                {['All', 'Create', 'Edit', 'Enhance'].map((tab) => (
+                  <div
+                    key={tab}
+                    onClick={() => setActiveExploreTab(tab)}
+                    className={`${
+                      activeExploreTab === tab
+                        ? 'bg-white shadow-sm'
+                        : 'hover:bg-gray-200 transition-colors cursor-pointer'
+                    } px-4 py-1.5 rounded-full whitespace-nowrap cursor-pointer`}
+                  >
                     <span className="text-xs font-medium">{tab}</span>
                   </div>
                 ))}
@@ -356,9 +484,10 @@ export default function DashboardPage() {
               </button>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {[
+              <AnimatePresence mode="popLayout">
+              {([
                 {
-                  title: 'Smart Render', desc: 'Turn sketches or photos into stunning 3D visuals effortlessly.',
+                  title: 'Smart Render', category: 'Create', desc: 'Turn sketches or photos into stunning 3D visuals effortlessly.',
                   splitPos: '50.2%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
@@ -370,7 +499,7 @@ export default function DashboardPage() {
                   )
                 },
                 {
-                  title: 'Prompt Render', desc: 'Write what you imagine, and come into beautiful interior visuals.', badge: 'Make modern bathroom',
+                  title: 'Prompt Render', category: 'Create', desc: 'Write what you imagine, and come into beautiful interior visuals.', badge: 'Make modern bathroom',
                   splitPos: '27.6%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
@@ -382,7 +511,7 @@ export default function DashboardPage() {
                   )
                 },
                 {
-                  title: 'Expand View', desc: 'Experience your design view detail with an expanded layout.',
+                  title: 'Expand View', category: 'Edit', desc: 'Experience your design view detail with an expanded layout.',
                   splitPos: '48%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
@@ -395,7 +524,7 @@ export default function DashboardPage() {
                   )
                 },
                 {
-                  title: 'HD Boost', desc: 'Enhance your render with sharper details and vibrant clarity in HD.',
+                  title: 'HD Boost', category: 'Enhance', desc: 'Enhance your render with sharper details and vibrant clarity in HD.',
                   splitPos: '50.6%',
                   imageContent: (
                     <div className="relative w-full h-full overflow-hidden">
@@ -406,8 +535,18 @@ export default function DashboardPage() {
                     </div>
                   )
                 }
-              ].map((item, i) => (
-                <div key={i} className="border border-[#f0f0f0] rounded-[20px] p-2 flex flex-col group cursor-pointer hover:shadow-md transition-all h-full">
+              ] as Array<{ title: string; category: string; desc: string; splitPos: string; badge?: string; imageContent: React.ReactNode }>)
+                .filter(item => activeExploreTab === 'All' || item.category === activeExploreTab)
+                .map((item) => (
+                <motion.div
+                  key={item.title}
+                  layout
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                  className="border border-[#f0f0f0] rounded-[20px] p-2 flex flex-col group cursor-pointer hover:shadow-md transition-shadow h-full"
+                >
                   <div className="rounded-xl h-[100px] sm:h-[120px] mb-2 sm:mb-3 relative overflow-hidden bg-gray-100">
                     <div className="absolute inset-0 opacity-90 group-hover:opacity-100 transition-opacity">
                       {item.imageContent}
@@ -429,8 +568,9 @@ export default function DashboardPage() {
                     <h4 className="text-[13px] sm:text-[16px] font-medium leading-[1.5] tracking-[-0.48px] text-[#0a0a0a] mb-1">{item.title}</h4>
                     <p className="text-[12px] sm:text-[14px] font-normal leading-[1.5] tracking-[-0.42px] text-[#404040] leading-relaxed">{item.desc}</p>
                   </div>
-                </div>
+                </motion.div>
               ))}
+              </AnimatePresence>
             </div>
           </motion.div>
         </motion.div>
@@ -528,6 +668,8 @@ export default function DashboardPage() {
 
           </div>
         </motion.aside>
+      </>)}
+      </AnimatePresence>
       </main>
 
       <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setCreateModalOpen(false)} />
