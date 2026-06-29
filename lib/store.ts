@@ -45,11 +45,8 @@ interface ProjectState {
   currentProject: {
     id: string;
     name: string;
-    floorPlanUrl: string | null;
-    // Rooms with their interactive grid layout (box/gridRow/gridCol/weights),
-    // set once the user finishes reviewing rooms in CreateProjectModal so the
-    // canvas page can render the same interactive blocks instead of the raw
-    // uploaded floor plan photo.
+    floor_plan_url: string | null;  // matches API snake_case
+    floorPlanUrl?: string | null;   // legacy camelCase — kept for backwards compat
     rooms?: Room[];
   } | null;
 
