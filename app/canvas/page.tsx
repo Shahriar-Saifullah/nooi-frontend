@@ -12,7 +12,7 @@ import {
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import { useProjectStore } from "@/lib/store";
 import { getProject } from "@/lib/api/projects";
-import { RoomOverlayBox, relayoutGrid, type GridRoom } from "@/components/RoomLayoutGrid";
+import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture } from "@/components/ThreeScene";
 
 // ─── Lazy-load Three.js (no SSR — Three.js requires browser APIs) ─────────────
@@ -104,6 +104,7 @@ export default function CanvasPage() {
   const [buildingPerimeter, setBuildingPerimeter] = useState<[number,number][] | null>(null);
   const [rfWalls, setRfWalls] = useState<Array<{x1:number;y1:number;x2:number;y2:number;thickness:number}>>([]);
   const [openings, setOpenings] = useState<Array<{type:'door'|'window';wall:'horizontal'|'vertical';x:number;y:number;width:number}>>([]);
+  const [imageSize, setImageSize] = useState<{width:number;height:number} | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
@@ -142,6 +143,9 @@ export default function CanvasPage() {
           if (p.room_data?.openings) {
             setOpenings(p.room_data.openings);
           }
+          if ((p.room_data as any)?.image_size) {
+            setImageSize((p.room_data as any).image_size);
+          }
           if (p.floor_plan_url && !floorPlanUrl) {
             setProject({ ...currentProject, floor_plan_url: p.floor_plan_url });
           }
@@ -153,23 +157,6 @@ export default function CanvasPage() {
 
   // Resolve floor plan URL from either field name (store uses both)
   const floorPlanUrl = currentProject?.floor_plan_url || currentProject?.floorPlanUrl || null;
-
-  const handleResizeRoom = (id: string, box: GridRoom["box"]) => {
-    if (!box) return;
-    setRooms(relayoutGrid(rooms.map(r => r.id === id ? { ...r, rowWeight: box.height, colWeight: box.width } : r)));
-  };
-
-  const handleSwapRooms = (draggedId: string, targetId: string) => {
-    if (draggedId === targetId) return;
-    const a = rooms.find(r => r.id === draggedId);
-    const b = rooms.find(r => r.id === targetId);
-    if (!a || !b || a.gridRow === undefined || b.gridRow === undefined) return;
-    setRooms(relayoutGrid(rooms.map(r => {
-      if (r.id === draggedId) return { ...r, gridRow: b.gridRow, gridCol: b.gridCol, rowWeight: b.rowWeight, colWeight: b.colWeight };
-      if (r.id === targetId) return { ...r, gridRow: a.gridRow, gridCol: a.gridCol, rowWeight: a.rowWeight, colWeight: a.colWeight };
-      return r;
-    })));
-  };
 
   const handleDragStart = (e: React.DragEvent, item: any) => {
     e.dataTransfer.setData("furniture", JSON.stringify(item));
@@ -225,25 +212,38 @@ export default function CanvasPage() {
   // Compute overall floor plan dimensions in cm from room data.
   // The total_area gives us the scale — use the largest room dimensions
   // to size the 3D scene correctly.
+  // Use the actual image dimensions from Roboflow to compute the 3D scene aspect ratio.
+  // This ensures walls are proportionally correct relative to the real floor plan.
   const roomDimensionsCm = (() => {
-    if (rooms.length === 0) return { width: 500, depth: 400 };
-    // Find total bounding box by looking at rightmost and bottommost room edges
-    let maxRight = 0;
-    let maxBottom = 0;
-    rooms.forEach((r: any) => {
-      if (r.box) {
-        maxRight  = Math.max(maxRight,  (r.box.left + r.box.width));
-        maxBottom = Math.max(maxBottom, (r.box.top  + r.box.height));
+    // If we have image dimensions from Roboflow, use the aspect ratio directly
+    if (imageSize && imageSize.width > 0 && imageSize.height > 0) {
+      const BASE = 1500; // base cm for the longer dimension
+      if (imageSize.width >= imageSize.height) {
+        return { width: BASE, depth: Math.round(BASE * imageSize.height / imageSize.width) };
+      } else {
+        return { width: Math.round(BASE * imageSize.width / imageSize.height), depth: BASE };
       }
-    });
-    // Scale: box coords are 0-100% of image. Use total_area to estimate real size.
-    // Fallback: use largest real-world room dimensions as reference.
-    const largestWidth  = Math.max(...rooms.map((r: any) => (r.width  || 0) * 100));
-    const largestLength = Math.max(...rooms.map((r: any) => (r.length || 0) * 100));
-    return {
-      width: Math.max(largestWidth  * 2, 400),
-      depth: Math.max(largestLength * 2, 400),
-    };
+    }
+    // Fallback: use Roboflow wall extents to estimate aspect ratio
+    if (rfWalls.length > 0) {
+      const maxX = Math.max(...rfWalls.map(w => Math.max(w.x1, w.x2)));
+      const maxY = Math.max(...rfWalls.map(w => Math.max(w.y1, w.y2)));
+      if (maxX > 0 && maxY > 0) {
+        const BASE = 1500;
+        return maxX >= maxY
+          ? { width: BASE, depth: Math.round(BASE * maxY / maxX) }
+          : { width: Math.round(BASE * maxX / maxY), depth: BASE };
+      }
+    }
+    // Fallback: use room data
+    if (rooms.length > 0) {
+      const largestWidth  = Math.max(...rooms.map((r: any) => (r.width  || 0) * 100));
+      const largestLength = Math.max(...rooms.map((r: any) => (r.length || 0) * 100));
+      if (largestWidth > 0 && largestLength > 0) {
+        return { width: Math.max(largestWidth * 2, 400), depth: Math.max(largestLength * 2, 400) };
+      }
+    }
+    return { width: 1500, depth: 1200 };
   })();
 
   const filteredCatalogue = FURNITURE_CATALOGUE.map(cat => ({
@@ -406,17 +406,6 @@ export default function CanvasPage() {
             </div>
           )}
 
-          {/* Zoom (2D only) */}
-          {viewMode === "2d" && (
-            <div className="absolute bottom-5 right-5 z-10 flex items-center gap-1 bg-white border border-[#e8eceb] rounded-[10px] shadow-sm px-3 py-2">
-              <button onClick={() => setZoom(z => Math.max(25, z - 10))} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><Minus size={15} /></button>
-              <span className="text-[13px] font-medium w-[44px] text-center">{zoom}%</span>
-              <button onClick={() => setZoom(z => Math.min(200, z + 10))} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><Plus size={15} /></button>
-              <div className="w-px h-5 bg-[#e8eceb] mx-1" />
-              <button onClick={() => setZoom(100)} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><RotateCcw size={14} /></button>
-            </div>
-          )}
-
           {/* 3D controls hint */}
           {viewMode === "3d" && (
             <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4 bg-black/50 backdrop-blur-sm text-white/80 text-[11px] px-4 py-2 rounded-full pointer-events-none">
@@ -430,60 +419,81 @@ export default function CanvasPage() {
           {viewMode === "2d" && (
             <div
               className="flex-1 overflow-hidden relative flex items-center justify-center"
-              style={{
-                backgroundColor: "#f7f8f8",
-                backgroundImage: `linear-gradient(to right,rgba(0,0,0,0.04) 1px,transparent 1px),linear-gradient(to bottom,rgba(0,0,0,0.04) 1px,transparent 1px)`,
-                backgroundSize: `${zoom * 0.4}px ${zoom * 0.4}px`,
-              }}
+              style={{ backgroundColor: "#e8e8e8" }}
               onClick={() => setSelectedRoomId(null)}
             >
-              <div style={{ transform: `scale(${zoom / 100})` }} className="transition-transform duration-100">
+              <div style={{ transform: `scale(${zoom / 100})` }} className="transition-transform duration-100 origin-center">
                 <div
-                  className="bg-white border-2 border-[#d4d4d4] h-[460px] w-[680px] rounded-[14px] shadow flex items-center justify-center p-[32px] relative overflow-hidden"
+                  className="bg-white border border-[#d4d4d4] rounded-[12px] shadow-lg relative overflow-hidden"
+                  style={{ width: 720, height: 560 }}
                   onClick={e => e.stopPropagation()}
                 >
-                  {/* Always show floor plan image as background if available */}
-                  {floorPlanUrl && (
+                  {/* Floor plan image — this IS the 2D view */}
+                  {floorPlanUrl ? (
                     <img
                       src={floorPlanUrl}
                       alt="Floor plan"
-                      className="absolute inset-0 w-full h-full object-contain opacity-40 pointer-events-none"
+                      className="absolute inset-0 w-full h-full object-contain"
+                      style={{ padding: 20 }}
                     />
-                  )}
-
-                  {mounted && rooms.length > 0 ? (
-                    <div data-overlay-root className="relative w-full h-full">
-                      {rooms.map(room => (
-                        <RoomOverlayBox
-                          key={room.id} room={room}
-                          isSelected={selectedRoomId === room.id}
-                          hasSelection={!!selectedRoomId}
-                          onSelect={() => setSelectedRoomId(room.id)}
-                          onResize={box => handleResizeRoom(room.id, box)}
-                          onSwap={targetId => handleSwapRooms(room.id, targetId)}
-                        />
-                      ))}
-                    </div>
-                  ) : loadingRooms ? (
-                    <div className="flex flex-col items-center gap-2 text-gray-400 relative z-10">
-                      <Loader2 size={24} className="animate-spin" />
-                      <span className="text-sm">Detecting rooms…</span>
-                    </div>
-                  ) : !floorPlanUrl ? (
-                    <div className="flex flex-col items-center gap-2 text-gray-300 select-none relative z-10">
+                  ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-300 select-none">
                       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <rect width="18" height="18" x="3" y="3" rx="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+                        <rect width="18" height="18" x="3" y="3" rx="2"/>
+                        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
                       </svg>
                       <span className="text-sm font-medium">No Floor Plan Uploaded</span>
                     </div>
-                  ) : (
-                    // Floor plan uploaded but no rooms detected
-                    <div className="flex flex-col items-center gap-2 text-gray-400 select-none relative z-10">
-                      <span className="text-sm font-medium">Floor plan loaded</span>
-                      <span className="text-xs text-gray-300">Room detection complete</span>
+                  )}
+
+                  {/* Room name labels floating over floor plan */}
+                  {mounted && rooms.length > 0 && floorPlanUrl && (
+                    <div className="absolute inset-0" style={{ padding: 20 }}>
+                      {rooms.map(room => {
+                        if (!room.box) return null;
+                        const cx = room.box.left + room.box.width / 2;
+                        const cy = room.box.top + room.box.height / 2;
+                        const isSelected = selectedRoomId === room.id;
+                        return (
+                          <button
+                            key={room.id}
+                            onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
+                            className="absolute -translate-x-1/2 -translate-y-1/2"
+                            style={{ left: `${cx}%`, top: `${cy}%` }}
+                          >
+                            <div
+                              className={`px-2 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap shadow border transition-all ${
+                                isSelected
+                                  ? "bg-[#004643] text-white border-[#004643] scale-110"
+                                  : "bg-white/85 text-[#004643] border-[#004643]/40 hover:bg-white hover:border-[#004643]"
+                              }`}
+                              style={{ backdropFilter: "blur(4px)" }}
+                            >
+                              {room.name}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Loading */}
+                  {loadingRooms && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/80">
+                      <Loader2 size={22} className="animate-spin text-[#004643]" />
+                      <span className="text-sm text-gray-500">Analysing floor plan…</span>
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Zoom controls */}
+              <div className="absolute bottom-5 right-5 z-10 flex items-center gap-1 bg-white border border-[#e8eceb] rounded-[10px] shadow-sm px-3 py-2">
+                <button onClick={() => setZoom(z => Math.max(25, z - 10))} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><Minus size={15} /></button>
+                <span className="text-[13px] font-medium w-[44px] text-center">{zoom}%</span>
+                <button onClick={() => setZoom(z => Math.min(200, z + 10))} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><Plus size={15} /></button>
+                <div className="w-px h-5 bg-[#e8eceb] mx-1" />
+                <button onClick={() => setZoom(100)} className="w-8 h-8 flex items-center justify-center rounded hover:bg-[#f5f7f6]"><RotateCcw size={14} /></button>
               </div>
             </div>
           )}

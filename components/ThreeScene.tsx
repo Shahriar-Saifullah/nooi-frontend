@@ -63,7 +63,7 @@ function PlainFloor({ width, depth }: { width: number; depth: number }) {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
       <planeGeometry args={[width, depth]} />
-      <meshStandardMaterial color="#f2ede6" roughness={0.95} metalness={0} />
+      <meshStandardMaterial color="#f5f0e8" roughness={0.85} metalness={0} />
     </mesh>
   );
 }
@@ -92,8 +92,6 @@ function RoomFloors({ rooms, totalW, totalD }: {
 }
 
 // ─── Precision walls from Roboflow ────────────────────────────────────────────
-// Uses exact wall coordinates from CubiCasa5k model via Roboflow API.
-// Wall segments are stored as x1,y1,x2,y2 in % of image dimensions (0-100).
 function PrecisionWalls({
   walls, openings, totalW, totalD,
 }: {
@@ -103,9 +101,18 @@ function PrecisionWalls({
   totalD: number;
 }) {
   const segments: React.ReactElement[] = [];
+  const maxZ = totalD / 2;
 
-  walls.forEach((wall, i) => {
-    // Convert % coords to world coords (centered at origin)
+  // Filter: remove walls that are too square (area detections not line segments)
+  // A real wall segment has one dimension much larger than the other
+  const lineWalls = walls.filter(w => {
+    const dx = Math.abs(w.x2 - w.x1);
+    const dz = Math.abs(w.y2 - w.y1);
+    const len = Math.sqrt(dx*dx + dz*dz);
+    return len > 0.05; // must have meaningful length in world coords
+  });
+
+  lineWalls.forEach((wall, i) => {
     const wx1 = (wall.x1 / 100) * totalW - totalW / 2;
     const wz1 = (wall.y1 / 100) * totalD - totalD / 2;
     const wx2 = (wall.x2 / 100) * totalW - totalW / 2;
@@ -114,124 +121,92 @@ function PrecisionWalls({
     const dx  = wx2 - wx1;
     const dz  = wz2 - wz1;
     const len = Math.sqrt(dx * dx + dz * dz);
-    if (len < 0.05) return;
+    if (len < 0.08) return;
 
     const cx    = (wx1 + wx2) / 2;
     const cz    = (wz1 + wz2) / 2;
     const angle = Math.atan2(dx, dz);
-    const t     = Math.max(0.08, (wall.thickness / 100) * Math.min(totalW, totalD));
 
-    // Skip front face (max Z) so user can always see inside
-    const maxZ = totalD / 2;
-    if (Math.abs(cz - maxZ) < 0.3 && Math.abs(angle) < 0.1) return;
+    // Skip front face
+    if (cz > maxZ - 0.4 && Math.abs(Math.cos(angle)) > 0.7) return;
 
-    // Check if any opening sits on this wall
+    // Wall thickness: clamp to reasonable range
+    const t = Math.max(0.08, Math.min(0.25, (wall.thickness / 100) * Math.min(totalW, totalD)));
+    const color = "#d6d2ca";
+
+    // Find openings on this wall
     const wallOpenings = openings.filter(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      const isHoriz = Math.abs(dz) < 0.1;
+      const isHoriz = Math.abs(dz) < Math.abs(dx) * 0.3;
       if (isHoriz) {
-        const minX = Math.min(wx1, wx2);
-        const maxX = Math.max(wx1, wx2);
-        return Math.abs(oz - cz) < 0.4 && ox >= minX - 0.1 && ox <= maxX + 0.1;
+        const minX = Math.min(wx1, wx2) - 0.2;
+        const maxX = Math.max(wx1, wx2) + 0.2;
+        return Math.abs(oz - cz) < 0.5 && ox >= minX && ox <= maxX;
       } else {
-        const minZ = Math.min(wz1, wz2);
-        const maxZ2 = Math.max(wz1, wz2);
-        return Math.abs(ox - cx) < 0.4 && oz >= minZ - 0.1 && oz <= maxZ2 + 0.1;
+        const minZ = Math.min(wz1, wz2) - 0.2;
+        const maxZ2 = Math.max(wz1, wz2) + 0.2;
+        return Math.abs(ox - cx) < 0.5 && oz >= minZ && oz <= maxZ2;
       }
     });
 
     if (wallOpenings.length === 0) {
       segments.push(
-        <mesh key={`rf-wall-${i}`} position={[cx, WALL_H/2, cz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+        <mesh key={`w${i}`} position={[cx, WALL_H/2, cz]} rotation={[0, angle, 0]} castShadow receiveShadow>
           <boxGeometry args={[t, WALL_H, len]} />
-          <meshStandardMaterial color="#d8d4cc" roughness={0.9} metalness={0} />
+          <meshStandardMaterial color={color} roughness={0.88} metalness={0} />
         </mesh>
       );
       return;
     }
 
     // Split wall around openings
-    type Cut = { pos: number; halfW: number; type: 'door' | 'window' };
+    type Cut = { pos: number; halfW: number; type: 'door'|'window' };
     const cuts: Cut[] = wallOpenings.map(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      const isHoriz = Math.abs(dz) < 0.1;
+      const isHoriz = Math.abs(dz) < Math.abs(dx) * 0.3;
       const opW = (op.width / 1000) * (isHoriz ? totalW : totalD);
-      const distFromStart = isHoriz
-        ? Math.abs(ox - wx1)
-        : Math.abs(oz - wz1);
-      return { pos: distFromStart, halfW: opW / 2, type: op.type };
-    }).sort((a, b) => a.pos - b.pos);
+      const distFromStart = isHoriz ? Math.abs(ox - wx1) : Math.abs(oz - wz1);
+      return { pos: distFromStart, halfW: Math.max(opW/2, 0.3), type: op.type };
+    }).sort((a,b) => a.pos - b.pos);
 
-    // Generate wall pieces between cuts
     let cursor = 0;
     cuts.forEach((cut, ci) => {
       const start = Math.max(0, cut.pos - cut.halfW);
       if (start > cursor + 0.05) {
         const pLen = start - cursor;
-        const pOff = cursor + pLen / 2 - len / 2;
-        const px = cx + Math.sin(angle) * pOff;
-        const pz = cz + Math.cos(angle) * pOff;
+        const pOff = cursor + pLen/2 - len/2;
         segments.push(
-          <mesh key={`rf-piece-${i}-${ci}a`} position={[px, WALL_H/2, pz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+          <mesh key={`w${i}p${ci}a`} position={[cx + Math.sin(angle)*pOff, WALL_H/2, cz + Math.cos(angle)*pOff]} rotation={[0,angle,0]} castShadow receiveShadow>
             <boxGeometry args={[t, WALL_H, pLen]} />
-            <meshStandardMaterial color="#d8d4cc" roughness={0.9} metalness={0} />
+            <meshStandardMaterial color={color} roughness={0.88} />
           </mesh>
         );
       }
-
-      // Window: sill + glass + header
+      const opOff = cut.pos - len/2;
+      const px2 = cx + Math.sin(angle)*opOff;
+      const pz2 = cz + Math.cos(angle)*opOff;
+      const opLen = cut.halfW * 2;
       if (cut.type === 'window') {
-        const opOff = cut.pos - len / 2;
-        const px2 = cx + Math.sin(angle) * opOff;
-        const pz2 = cz + Math.cos(angle) * opOff;
-        const opLen = cut.halfW * 2;
-        const sillH = 0.9; const topH = 0.4;
-        segments.push(
-          <mesh key={`rf-sill-${i}-${ci}`} position={[px2, sillH/2, pz2]} rotation={[0, angle, 0]} castShadow>
-            <boxGeometry args={[t, sillH, opLen]} />
-            <meshStandardMaterial color="#d8d4cc" roughness={0.9} />
-          </mesh>
-        );
-        segments.push(
-          <mesh key={`rf-top-${i}-${ci}`} position={[px2, WALL_H - topH/2, pz2]} rotation={[0, angle, 0]} castShadow>
-            <boxGeometry args={[t, topH, opLen]} />
-            <meshStandardMaterial color="#d8d4cc" roughness={0.9} />
-          </mesh>
-        );
-        segments.push(
-          <mesh key={`rf-glass-${i}-${ci}`} position={[px2, sillH + (WALL_H - sillH - topH)/2, pz2]} rotation={[0, angle, 0]}>
-            <boxGeometry args={[0.02, WALL_H - sillH - topH, opLen]} />
-            <meshStandardMaterial color="#a8d8f0" transparent opacity={0.4} roughness={0} />
-          </mesh>
-        );
+        const sH = 0.9; const tH = 0.4;
+        segments.push(<mesh key={`w${i}s${ci}`} position={[px2,sH/2,pz2]} rotation={[0,angle,0]} castShadow><boxGeometry args={[t,sH,opLen]}/><meshStandardMaterial color={color} roughness={0.88}/></mesh>);
+        segments.push(<mesh key={`w${i}t${ci}`} position={[px2,WALL_H-tH/2,pz2]} rotation={[0,angle,0]} castShadow><boxGeometry args={[t,tH,opLen]}/><meshStandardMaterial color={color} roughness={0.88}/></mesh>);
+        segments.push(<mesh key={`w${i}g${ci}`} position={[px2,sH+(WALL_H-sH-tH)/2,pz2]} rotation={[0,angle,0]}><boxGeometry args={[0.02,WALL_H-sH-tH,opLen]}/><meshStandardMaterial color="#a8d8f0" transparent opacity={0.45} roughness={0}/></mesh>);
       }
-      // Door: lintel only
       if (cut.type === 'door') {
-        const opOff = cut.pos - len / 2;
-        const px2 = cx + Math.sin(angle) * opOff;
-        const pz2 = cz + Math.cos(angle) * opOff;
-        segments.push(
-          <mesh key={`rf-lintel-${i}-${ci}`} position={[px2, WALL_H - 0.15, pz2]} rotation={[0, angle, 0]} castShadow>
-            <boxGeometry args={[t, 0.3, cut.halfW * 2 + 0.05]} />
-            <meshStandardMaterial color="#d8d4cc" roughness={0.9} />
-          </mesh>
-        );
+        segments.push(<mesh key={`w${i}l${ci}`} position={[px2,WALL_H-0.15,pz2]} rotation={[0,angle,0]} castShadow><boxGeometry args={[t,0.3,opLen+0.05]}/><meshStandardMaterial color={color} roughness={0.88}/></mesh>);
       }
       cursor = cut.pos + cut.halfW;
     });
 
-    // Final piece after last cut
     if (cursor < len - 0.05) {
       const pLen = len - cursor;
-      const pOff = cursor + pLen / 2 - len / 2;
-      const px = cx + Math.sin(angle) * pOff;
-      const pz = cz + Math.cos(angle) * pOff;
+      const pOff = cursor + pLen/2 - len/2;
       segments.push(
-        <mesh key={`rf-last-${i}`} position={[px, WALL_H/2, pz]} rotation={[0, angle, 0]} castShadow receiveShadow>
+        <mesh key={`w${i}last`} position={[cx+Math.sin(angle)*pOff, WALL_H/2, cz+Math.cos(angle)*pOff]} rotation={[0,angle,0]} castShadow receiveShadow>
           <boxGeometry args={[t, WALL_H, pLen]} />
-          <meshStandardMaterial color="#d8d4cc" roughness={0.9} metalness={0} />
+          <meshStandardMaterial color={color} roughness={0.88} />
         </mesh>
       );
     }
@@ -572,16 +547,18 @@ function Scene({
     <>
       <CameraSetup width={roomWidth} depth={roomDepth} />
 
-      <ambientLight intensity={0.9} />
+      <ambientLight intensity={1.0} />
       <directionalLight
         position={[roomWidth * 0.8, 6, roomDepth * 1.2]}
-        intensity={1.3} castShadow
+        intensity={1.4} castShadow
         shadow-mapSize-width={2048} shadow-mapSize-height={2048}
         shadow-camera-far={60}
         shadow-camera-left={-roomWidth} shadow-camera-right={roomWidth}
         shadow-camera-top={roomDepth} shadow-camera-bottom={-roomDepth}
       />
-      <pointLight position={[0, 3, 0]} intensity={0.5} />
+      <pointLight position={[0, WALL_H * 0.8, 0]} intensity={0.6} color="#fff8f0" />
+      <pointLight position={[-roomWidth/3, WALL_H * 0.7, -roomDepth/3]} intensity={0.3} />
+      <pointLight position={[roomWidth/3, WALL_H * 0.7, roomDepth/3]} intensity={0.3} />
 
       {/* Floor — plain, no floor plan image */}
       <PlainFloor width={roomWidth} depth={roomDepth} />
