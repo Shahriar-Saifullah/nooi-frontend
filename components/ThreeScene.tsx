@@ -1,15 +1,10 @@
 "use client";
 
-import { Suspense, useRef, useEffect, useState } from "react";
-import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import {
-  OrbitControls,
-  useTexture,
-  Grid,
-  Environment,
-  Html,
-} from "@react-three/drei";
+import React, { Suspense, useRef, useEffect } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import { OrbitControls, useTexture, Html, Grid } from "@react-three/drei";
 import * as THREE from "three";
+import type { GridRoom } from "@/components/RoomLayoutGrid";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,107 +12,153 @@ export interface PlacedFurniture {
   id: string;
   name: string;
   position: [number, number, number];
-  rotation: number; // Y-axis rotation in radians
+  rotation: number;
   scale: [number, number, number];
   color: string;
-  width: number;  // real-world cm
-  depth: number;  // real-world cm
-  height: number; // real-world cm
+  width: number;
+  depth: number;
+  height: number;
 }
 
 interface ThreeSceneProps {
   floorPlanUrl?: string | null;
-  roomWidthCm?: number;   // real-world width of the floor plan in cm
-  roomDepthCm?: number;   // real-world depth of the floor plan in cm
+  roomWidthCm?: number;
+  roomDepthCm?: number;
+  rooms?: GridRoom[];
   furniture?: PlacedFurniture[];
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   onFurnitureSelect?: (id: string | null) => void;
   selectedFurnitureId?: string | null;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Scale: 1 unit = 100cm ────────────────────────────────────────────────────
+const CM = 1 / 100;
+const WALL_HEIGHT = 2.8; // metres
+const WALL_THICKNESS = 0.15;
 
-// Scale: 1 Three.js unit = 100 cm. A typical room is 5×4 units (500×400 cm).
-const CM_TO_UNIT = 1 / 100;
-
-// ─── Floor Plan Texture ───────────────────────────────────────────────────────
-
-function FloorPlanMesh({
-  url,
-  width,
-  depth,
-}: {
-  url: string;
-  width: number;
-  depth: number;
-}) {
+// ─── Floor Plan Texture on floor ─────────────────────────────────────────────
+function FloorPlanMesh({ url, width, depth }: { url: string; width: number; depth: number }) {
   const texture = useTexture(url);
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
-
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]} receiveShadow>
       <planeGeometry args={[width, depth]} />
-      <meshStandardMaterial
-        map={texture}
-        transparent
-        opacity={0.85}
-        roughness={1}
-        metalness={0}
-      />
+      <meshStandardMaterial map={texture} transparent opacity={0.9} roughness={1} metalness={0} />
     </mesh>
   );
 }
 
-// ─── Plain Floor (when no floor plan image) ───────────────────────────────────
-
+// ─── Plain floor fallback ─────────────────────────────────────────────────────
 function PlainFloor({ width, depth }: { width: number; depth: number }) {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
       <planeGeometry args={[width, depth]} />
-      <meshStandardMaterial color="#f0ede8" roughness={0.9} metalness={0} />
+      <meshStandardMaterial color="#f0ede8" roughness={0.9} />
     </mesh>
   );
 }
 
-// ─── Room Walls ───────────────────────────────────────────────────────────────
-
+// ─── Room walls generated from Gemini box data ────────────────────────────────
+// Each room's box is { top, left, width, height } as percentages 0-100
+// of the floor plan image. We convert those to world coordinates.
 function RoomWalls({
-  width,
-  depth,
-  wallHeight = 2.8,
+  rooms,
+  totalWidth,
+  totalDepth,
 }: {
-  width: number;
-  depth: number;
-  wallHeight?: number;
+  rooms: GridRoom[];
+  totalWidth: number;
+  totalDepth: number;
 }) {
-  const wallMaterial = (
-    <meshStandardMaterial color="#f8f6f2" roughness={0.95} metalness={0} side={THREE.BackSide} />
-  );
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: "#f8f6f2",
+    roughness: 0.95,
+    metalness: 0,
+    side: THREE.FrontSide,
+  });
 
+  // Convert box percentages to world coords (centered at origin)
+  const toWorld = (box: NonNullable<GridRoom["box"]>) => {
+    const x = (box.left / 100) * totalWidth - totalWidth / 2;
+    const z = (box.top  / 100) * totalDepth - totalDepth / 2;
+    const w = (box.width  / 100) * totalWidth;
+    const d = (box.height / 100) * totalDepth;
+    return { x, z, w, d };
+  };
+
+  const walls: React.ReactElement[] = [];
+
+  rooms.forEach((room) => {
+    if (!room.box) return;
+    const { x, z, w, d } = toWorld(room.box);
+    const cx = x + w / 2;
+    const cz = z + d / 2;
+    const hy = WALL_HEIGHT / 2;
+    const t  = WALL_THICKNESS;
+
+    // 4 walls per room: front, back, left, right
+    // Front wall (z edge)
+    walls.push(
+      <mesh key={`${room.id}-front`} position={[cx, hy, z]} castShadow receiveShadow>
+        <boxGeometry args={[w + t, WALL_HEIGHT, t]} />
+        <meshStandardMaterial color="#f8f6f2" roughness={0.95} />
+      </mesh>
+    );
+    // Back wall
+    walls.push(
+      <mesh key={`${room.id}-back`} position={[cx, hy, z + d]} castShadow receiveShadow>
+        <boxGeometry args={[w + t, WALL_HEIGHT, t]} />
+        <meshStandardMaterial color="#f5f3ee" roughness={0.95} />
+      </mesh>
+    );
+    // Left wall
+    walls.push(
+      <mesh key={`${room.id}-left`} position={[x, hy, cz]} castShadow receiveShadow>
+        <boxGeometry args={[t, WALL_HEIGHT, d + t]} />
+        <meshStandardMaterial color="#f2f0eb" roughness={0.95} />
+      </mesh>
+    );
+    // Right wall
+    walls.push(
+      <mesh key={`${room.id}-right`} position={[x + w, hy, cz]} castShadow receiveShadow>
+        <boxGeometry args={[t, WALL_HEIGHT, d + t]} />
+        <meshStandardMaterial color="#f2f0eb" roughness={0.95} />
+      </mesh>
+    );
+  });
+
+  return <>{walls}</>;
+}
+
+// ─── Outer boundary walls (perimeter of entire floor plan) ────────────────────
+function PerimeterWalls({ width, depth }: { width: number; depth: number }) {
+  const h = WALL_HEIGHT;
+  const t = WALL_THICKNESS;
+  const hy = h / 2;
   return (
     <group>
-      {/* Back wall */}
-      <mesh position={[0, wallHeight / 2, -depth / 2]} receiveShadow castShadow>
-        <planeGeometry args={[width, wallHeight]} />
-        <meshStandardMaterial color="#f8f6f2" roughness={0.95} metalness={0} />
+      <mesh position={[0, hy, -depth / 2]} castShadow receiveShadow>
+        <boxGeometry args={[width + t, h, t]} />
+        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
       </mesh>
-      {/* Left wall */}
-      <mesh position={[-width / 2, wallHeight / 2, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow castShadow>
-        <planeGeometry args={[depth, wallHeight]} />
-        <meshStandardMaterial color="#f0ede8" roughness={0.95} metalness={0} />
+      <mesh position={[0, hy, depth / 2]} castShadow receiveShadow>
+        <boxGeometry args={[width + t, h, t]} />
+        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
       </mesh>
-      {/* Right wall */}
-      <mesh position={[width / 2, wallHeight / 2, 0]} rotation={[0, -Math.PI / 2, 0]} receiveShadow castShadow>
-        <planeGeometry args={[depth, wallHeight]} />
-        <meshStandardMaterial color="#f0ede8" roughness={0.95} metalness={0} />
+      <mesh position={[-width / 2, hy, 0]} castShadow receiveShadow>
+        <boxGeometry args={[t, h, depth + t]} />
+        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
+      </mesh>
+      <mesh position={[width / 2, hy, 0]} castShadow receiveShadow>
+        <boxGeometry args={[t, h, depth + t]} />
+        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
       </mesh>
     </group>
   );
 }
 
-// ─── Furniture Box (placeholder until real GLTF models are added) ─────────────
-
+// ─── Draggable furniture box ──────────────────────────────────────────────────
 function FurnitureBox({
   item,
   isSelected,
@@ -132,21 +173,19 @@ function FurnitureBox({
   const meshRef = useRef<THREE.Mesh>(null);
   const { camera, gl } = useThree();
   const isDragging = useRef(false);
-  const dragPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
+  const dragPlane  = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const dragOffset = useRef(new THREE.Vector3());
-  const raycaster = useRef(new THREE.Raycaster());
+  const raycaster  = useRef(new THREE.Raycaster());
 
-  const w = item.width * CM_TO_UNIT;
-  const h = item.height * CM_TO_UNIT;
-  const d = item.depth * CM_TO_UNIT;
+  const w = item.width  * CM;
+  const h = item.height * CM;
+  const d = item.depth  * CM;
 
   const handlePointerDown = (e: any) => {
     if (!isSelected) { onSelect(); return; }
     e.stopPropagation();
     isDragging.current = true;
     gl.domElement.style.cursor = "grabbing";
-
-    // Calculate offset between click point and object center
     const intersection = new THREE.Vector3();
     dragPlane.current.setFromNormalAndCoplanarPoint(
       new THREE.Vector3(0, 1, 0),
@@ -154,7 +193,7 @@ function FurnitureBox({
     );
     raycaster.current.setFromCamera(
       new THREE.Vector2(
-        (e.clientX / gl.domElement.clientWidth) * 2 - 1,
+        (e.clientX / gl.domElement.clientWidth)  * 2 - 1,
         -(e.clientY / gl.domElement.clientHeight) * 2 + 1
       ),
       camera
@@ -163,32 +202,29 @@ function FurnitureBox({
     dragOffset.current.subVectors(new THREE.Vector3(...item.position), intersection);
   };
 
-  const handlePointerUp = () => {
-    isDragging.current = false;
-    gl.domElement.style.cursor = "default";
-  };
-
   useEffect(() => {
     const onPointerMove = (e: PointerEvent) => {
-      if (!isDragging.current || !meshRef.current) return;
+      if (!isDragging.current) return;
       const intersection = new THREE.Vector3();
       raycaster.current.setFromCamera(
         new THREE.Vector2(
-          (e.clientX / gl.domElement.clientWidth) * 2 - 1,
+          (e.clientX / gl.domElement.clientWidth)  * 2 - 1,
           -(e.clientY / gl.domElement.clientHeight) * 2 + 1
         ),
         camera
       );
       if (raycaster.current.ray.intersectPlane(dragPlane.current, intersection)) {
-        const newPos: [number, number, number] = [
+        onMove([
           intersection.x + dragOffset.current.x,
           item.position[1],
           intersection.z + dragOffset.current.z,
-        ];
-        onMove(newPos);
+        ]);
       }
     };
-    const onPointerUp = () => handlePointerUp();
+    const onPointerUp = () => {
+      isDragging.current = false;
+      gl.domElement.style.cursor = "default";
+    };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     return () => {
@@ -199,48 +235,36 @@ function FurnitureBox({
 
   return (
     <group position={item.position} rotation={[0, item.rotation, 0]}>
-      <mesh
-        ref={meshRef}
-        position={[0, h / 2, 0]}
-        castShadow
-        receiveShadow
-        onPointerDown={handlePointerDown}
-      >
+      <mesh ref={meshRef} position={[0, h / 2, 0]} castShadow receiveShadow onPointerDown={handlePointerDown}>
         <boxGeometry args={[w, h, d]} />
         <meshStandardMaterial
           color={item.color}
           roughness={0.7}
           metalness={0.1}
           emissive={isSelected ? new THREE.Color(item.color) : new THREE.Color(0x000000)}
-          emissiveIntensity={isSelected ? 0.15 : 0}
+          emissiveIntensity={isSelected ? 0.2 : 0}
         />
       </mesh>
-
-      {/* Selection outline */}
       {isSelected && (
         <mesh position={[0, h / 2, 0]}>
           <boxGeometry args={[w + 0.02, h + 0.02, d + 0.02]} />
           <meshBasicMaterial color="#004643" wireframe />
         </mesh>
       )}
-
-      {/* Label */}
       <Html position={[0, h + 0.15, 0]} center distanceFactor={6}>
-        <div
-          style={{
-            background: isSelected ? "#004643" : "rgba(255,255,255,0.9)",
-            color: isSelected ? "white" : "#111",
-            padding: "2px 8px",
-            borderRadius: 20,
-            fontSize: 11,
-            fontFamily: "Inter, sans-serif",
-            fontWeight: 600,
-            whiteSpace: "nowrap",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-            cursor: isSelected ? "grab" : "pointer",
-            userSelect: "none",
-          }}
-        >
+        <div style={{
+          background: isSelected ? "#004643" : "rgba(255,255,255,0.92)",
+          color: isSelected ? "white" : "#111",
+          padding: "2px 8px",
+          borderRadius: 20,
+          fontSize: 11,
+          fontFamily: "Inter, sans-serif",
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+          cursor: isSelected ? "grab" : "pointer",
+          userSelect: "none",
+        }}>
           {item.name}
         </div>
       </Html>
@@ -248,36 +272,23 @@ function FurnitureBox({
   );
 }
 
-// ─── Camera Setup ─────────────────────────────────────────────────────────────
-
+// ─── Camera setup ─────────────────────────────────────────────────────────────
 function CameraSetup({ width, depth }: { width: number; depth: number }) {
   const { camera } = useThree();
   useEffect(() => {
-    const maxDim = Math.max(width, depth);
-    camera.position.set(maxDim * 0.8, maxDim * 0.9, maxDim * 1.1);
+    const d = Math.max(width, depth);
+    camera.position.set(d * 0.9, d * 1.0, d * 1.2);
     camera.lookAt(0, 0, 0);
   }, [width, depth]);
   return null;
 }
 
-// ─── Loading Fallback ─────────────────────────────────────────────────────────
-
-function LoadingFallback() {
-  return (
-    <Html center>
-      <div style={{ color: "#004643", fontFamily: "Inter, sans-serif", fontSize: 13, fontWeight: 500 }}>
-        Loading 3D scene…
-      </div>
-    </Html>
-  );
-}
-
-// ─── Main Scene ───────────────────────────────────────────────────────────────
-
+// ─── Scene ────────────────────────────────────────────────────────────────────
 function Scene({
   floorPlanUrl,
   roomWidth,
   roomDepth,
+  rooms,
   furniture,
   onFurnitureMove,
   onFurnitureSelect,
@@ -286,8 +297,9 @@ function Scene({
   floorPlanUrl?: string | null;
   roomWidth: number;
   roomDepth: number;
+  rooms: GridRoom[];
   furniture: PlacedFurniture[];
-  onFurnitureMove?: (id: string, position: [number, number, number]) => void;
+  onFurnitureMove?: (id: string, pos: [number, number, number]) => void;
   onFurnitureSelect?: (id: string | null) => void;
   selectedFurnitureId?: string | null;
 }) {
@@ -296,32 +308,34 @@ function Scene({
       <CameraSetup width={roomWidth} depth={roomDepth} />
 
       {/* Lighting */}
-      <ambientLight intensity={0.6} />
+      <ambientLight intensity={0.7} />
       <directionalLight
-        position={[roomWidth, 4, roomDepth]}
+        position={[roomWidth, 5, roomDepth]}
         intensity={1.2}
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
-        shadow-camera-far={50}
+        shadow-camera-far={60}
         shadow-camera-left={-roomWidth}
         shadow-camera-right={roomWidth}
         shadow-camera-top={roomDepth}
         shadow-camera-bottom={-roomDepth}
       />
-      <pointLight position={[-roomWidth / 2, 3, -roomDepth / 2]} intensity={0.4} />
+      <pointLight position={[-roomWidth / 2, 3, -roomDepth / 2]} intensity={0.3} />
 
       {/* Floor */}
-      {floorPlanUrl ? (
-        <FloorPlanMesh url={floorPlanUrl} width={roomWidth} depth={roomDepth} />
-      ) : (
-        <PlainFloor width={roomWidth} depth={roomDepth} />
-      )}
+      {floorPlanUrl
+        ? <FloorPlanMesh url={floorPlanUrl} width={roomWidth} depth={roomDepth} />
+        : <PlainFloor width={roomWidth} depth={roomDepth} />
+      }
 
-      {/* Walls */}
-      <RoomWalls width={roomWidth} depth={roomDepth} />
+      {/* Room walls from Gemini data */}
+      {rooms.length > 0
+        ? <RoomWalls rooms={rooms} totalWidth={roomWidth} totalDepth={roomDepth} />
+        : <PerimeterWalls width={roomWidth} depth={roomDepth} />
+      }
 
-      {/* Grid overlay on floor */}
+      {/* Floor grid overlay */}
       <Grid
         position={[0, 0.002, 0]}
         args={[roomWidth, roomDepth]}
@@ -337,23 +351,22 @@ function Scene({
       />
 
       {/* Furniture */}
-      {furniture.map((item) => (
+      {furniture.map(item => (
         <FurnitureBox
           key={item.id}
           item={item}
           isSelected={selectedFurnitureId === item.id}
           onSelect={() => onFurnitureSelect?.(item.id)}
-          onMove={(pos) => onFurnitureMove?.(item.id, pos)}
+          onMove={pos => onFurnitureMove?.(item.id, pos)}
         />
       ))}
 
-      {/* Controls */}
       <OrbitControls
         makeDefault
         minPolarAngle={0}
         maxPolarAngle={Math.PI / 2.05}
         minDistance={1}
-        maxDistance={Math.max(roomWidth, roomDepth) * 2.5}
+        maxDistance={Math.max(roomWidth, roomDepth) * 3}
         enableDamping
         dampingFactor={0.08}
       />
@@ -361,19 +374,19 @@ function Scene({
   );
 }
 
-// ─── Exported Component ───────────────────────────────────────────────────────
-
+// ─── Export ───────────────────────────────────────────────────────────────────
 export default function ThreeScene({
   floorPlanUrl,
   roomWidthCm = 500,
   roomDepthCm = 400,
+  rooms = [],
   furniture = [],
   onFurnitureMove,
   onFurnitureSelect,
   selectedFurnitureId,
 }: ThreeSceneProps) {
-  const roomWidth = roomWidthCm * CM_TO_UNIT;
-  const roomDepth = roomDepthCm * CM_TO_UNIT;
+  const roomWidth = roomWidthCm * CM;
+  const roomDepth = roomDepthCm * CM;
 
   return (
     <div style={{ width: "100%", height: "100%", background: "#1a1f1e" }}>
@@ -381,16 +394,20 @@ export default function ThreeScene({
         shadows
         gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping }}
         camera={{ fov: 50, near: 0.1, far: 100 }}
-        onClick={(e) => {
-          // Deselect when clicking empty space
-          if (e.target === e.currentTarget) onFurnitureSelect?.(null);
-        }}
+        onClick={e => { if (e.target === e.currentTarget) onFurnitureSelect?.(null); }}
       >
-        <Suspense fallback={<LoadingFallback />}>
+        <Suspense fallback={
+          <Html center>
+            <div style={{ color: "#c7de7d", fontFamily: "Inter, sans-serif", fontSize: 13 }}>
+              Loading 3D scene…
+            </div>
+          </Html>
+        }>
           <Scene
             floorPlanUrl={floorPlanUrl}
             roomWidth={roomWidth}
             roomDepth={roomDepth}
+            rooms={rooms}
             furniture={furniture}
             onFurnitureMove={onFurnitureMove}
             onFurnitureSelect={onFurnitureSelect}
