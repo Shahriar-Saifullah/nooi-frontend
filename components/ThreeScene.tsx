@@ -59,100 +59,34 @@ function PlainFloor({ width, depth }: { width: number; depth: number }) {
   );
 }
 
-// ─── Room walls generated from Gemini box data ────────────────────────────────
-// Each room's box is { top, left, width, height } as percentages 0-100
-// of the floor plan image. We convert those to world coordinates.
-function RoomWalls({
-  rooms,
-  totalWidth,
-  totalDepth,
-}: {
-  rooms: GridRoom[];
-  totalWidth: number;
-  totalDepth: number;
-}) {
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: "#f8f6f2",
-    roughness: 0.95,
-    metalness: 0,
-    side: THREE.FrontSide,
-  });
-
-  // Convert box percentages to world coords (centered at origin)
-  const toWorld = (box: NonNullable<GridRoom["box"]>) => {
-    const x = (box.left / 100) * totalWidth - totalWidth / 2;
-    const z = (box.top  / 100) * totalDepth - totalDepth / 2;
-    const w = (box.width  / 100) * totalWidth;
-    const d = (box.height / 100) * totalDepth;
-    return { x, z, w, d };
-  };
-
-  const walls: React.ReactElement[] = [];
-
-  rooms.forEach((room) => {
-    if (!room.box) return;
-    const { x, z, w, d } = toWorld(room.box);
-    const cx = x + w / 2;
-    const cz = z + d / 2;
-    const hy = WALL_HEIGHT / 2;
-    const t  = WALL_THICKNESS;
-
-    // 4 walls per room: front, back, left, right
-    // Front wall (z edge)
-    walls.push(
-      <mesh key={`${room.id}-front`} position={[cx, hy, z]} castShadow receiveShadow>
-        <boxGeometry args={[w + t, WALL_HEIGHT, t]} />
-        <meshStandardMaterial color="#f8f6f2" roughness={0.95} />
-      </mesh>
-    );
-    // Back wall
-    walls.push(
-      <mesh key={`${room.id}-back`} position={[cx, hy, z + d]} castShadow receiveShadow>
-        <boxGeometry args={[w + t, WALL_HEIGHT, t]} />
-        <meshStandardMaterial color="#f5f3ee" roughness={0.95} />
-      </mesh>
-    );
-    // Left wall
-    walls.push(
-      <mesh key={`${room.id}-left`} position={[x, hy, cz]} castShadow receiveShadow>
-        <boxGeometry args={[t, WALL_HEIGHT, d + t]} />
-        <meshStandardMaterial color="#f2f0eb" roughness={0.95} />
-      </mesh>
-    );
-    // Right wall
-    walls.push(
-      <mesh key={`${room.id}-right`} position={[x + w, hy, cz]} castShadow receiveShadow>
-        <boxGeometry args={[t, WALL_HEIGHT, d + t]} />
-        <meshStandardMaterial color="#f2f0eb" roughness={0.95} />
-      </mesh>
-    );
-  });
-
-  return <>{walls}</>;
-}
-
-// ─── Outer boundary walls (perimeter of entire floor plan) ────────────────────
+// ─── Outer perimeter walls only ───────────────────────────────────────────────
+// The floor plan image shows all interior room divisions.
+// We only need 3 exterior walls (leave one open so user can see inside).
 function PerimeterWalls({ width, depth }: { width: number; depth: number }) {
   const h = WALL_HEIGHT;
   const t = WALL_THICKNESS;
   const hy = h / 2;
   return (
     <group>
+      {/* Back wall */}
       <mesh position={[0, hy, -depth / 2]} castShadow receiveShadow>
         <boxGeometry args={[width + t, h, t]} />
-        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
+        <meshStandardMaterial color="#e8e6e0" roughness={0.95} metalness={0} />
       </mesh>
-      <mesh position={[0, hy, depth / 2]} castShadow receiveShadow>
-        <boxGeometry args={[width + t, h, t]} />
-        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
-      </mesh>
+      {/* Left wall */}
       <mesh position={[-width / 2, hy, 0]} castShadow receiveShadow>
         <boxGeometry args={[t, h, depth + t]} />
-        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
+        <meshStandardMaterial color="#e0deda" roughness={0.95} metalness={0} />
       </mesh>
+      {/* Right wall */}
       <mesh position={[width / 2, hy, 0]} castShadow receiveShadow>
         <boxGeometry args={[t, h, depth + t]} />
-        <meshStandardMaterial color="#e8e6e0" roughness={0.95} />
+        <meshStandardMaterial color="#e0deda" roughness={0.95} metalness={0} />
+      </mesh>
+      {/* Ceiling — semi-transparent so user can see inside */}
+      <mesh position={[0, h, 0]} receiveShadow>
+        <boxGeometry args={[width, t, depth]} />
+        <meshStandardMaterial color="#f5f3ee" roughness={1} transparent opacity={0.15} />
       </mesh>
     </group>
   );
@@ -323,17 +257,14 @@ function Scene({
       />
       <pointLight position={[-roomWidth / 2, 3, -roomDepth / 2]} intensity={0.3} />
 
-      {/* Floor */}
+      {/* Floor — floor plan image shows all room divisions */}
       {floorPlanUrl
         ? <FloorPlanMesh url={floorPlanUrl} width={roomWidth} depth={roomDepth} />
         : <PlainFloor width={roomWidth} depth={roomDepth} />
       }
 
-      {/* Room walls from Gemini data */}
-      {rooms.length > 0
-        ? <RoomWalls rooms={rooms} totalWidth={roomWidth} totalDepth={roomDepth} />
-        : <PerimeterWalls width={roomWidth} depth={roomDepth} />
-      }
+      {/* Simple perimeter walls — floor plan image handles interior divisions */}
+      <PerimeterWalls width={roomWidth} depth={roomDepth} />
 
       {/* Floor grid overlay */}
       <Grid
