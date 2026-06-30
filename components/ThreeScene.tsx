@@ -127,9 +127,6 @@ function PrecisionWalls({
     const cz    = (wz1 + wz2) / 2;
     const angle = Math.atan2(dx, dz);
 
-    // Skip front face
-    if (cz > maxZ - 0.4 && Math.abs(Math.cos(angle)) > 0.7) return;
-
     // Wall thickness: clamp to reasonable range
     const t = Math.max(0.08, Math.min(0.25, (wall.thickness / 100) * Math.min(totalW, totalD)));
     const color = "#d6d2ca";
@@ -524,8 +521,8 @@ function CameraSetup({ width, depth }: { width: number; depth: number }) {
   const { camera } = useThree();
   useEffect(() => {
     const d = Math.max(width, depth);
-    // Position camera at front-right so the open front face is visible
-    camera.position.set(d * 0.7, d * 0.9, d * 1.3);
+    // Elevated angle looking down into the room — shows interior without removing any walls
+    camera.position.set(d * 0.55, d * 1.35, d * 0.85);
     camera.lookAt(0, 0, 0);
   }, [width, depth]);
   return null;

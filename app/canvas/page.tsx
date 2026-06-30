@@ -424,80 +424,98 @@ export default function CanvasPage() {
             >
               <div style={{ transform: `scale(${zoom / 100})` }} className="transition-transform duration-100 origin-center">
                 <div
-                  className="bg-white border border-[#d4d4d4] rounded-[12px] shadow-lg relative overflow-hidden"
+                  className="bg-white border border-[#d4d4d4] rounded-[12px] shadow-lg relative overflow-hidden flex items-center justify-center"
                   style={{ width: 720, height: 560 }}
                   onClick={e => e.stopPropagation()}
                 >
-                  {/* Floor plan image — this IS the 2D view */}
                   {floorPlanUrl ? (
-                    <img
-                      src={floorPlanUrl}
-                      alt="Floor plan"
-                      className="absolute inset-0 w-full h-full object-contain"
-                      style={{ padding: 20 }}
-                    />
+                    <>
+                      {/* Inner container sized to the image's actual aspect ratio —
+                          overlays positioned as % of THIS container will align perfectly,
+                          since this container has no letterboxing (unlike object-contain on a fixed box). */}
+                      <div
+                        className="relative"
+                        style={
+                          imageSize && imageSize.width > 0 && imageSize.height > 0
+                            ? (() => {
+                                const containerW = 680, containerH = 520; // 720/560 minus 20px padding each side
+                                const imgRatio = imageSize.width / imageSize.height;
+                                const boxRatio  = containerW / containerH;
+                                let w, h;
+                                if (imgRatio > boxRatio) { w = containerW; h = containerW / imgRatio; }
+                                else { h = containerH; w = containerH * imgRatio; }
+                                return { width: w, height: h };
+                              })()
+                            : { width: 680, height: 520 }
+                        }
+                      >
+                        <img
+                          src={floorPlanUrl}
+                          alt="Floor plan"
+                          className="absolute inset-0 w-full h-full object-fill"
+                        />
+
+                        {/* Room name labels + colored boxes — now align perfectly since
+                            this container matches the image's true rendered dimensions */}
+                        {mounted && rooms.length > 0 && (
+                          <div className="absolute inset-0">
+                            {rooms.map(room => {
+                              if (!room.box) return null;
+                              const cx = room.box.left + room.box.width / 2;
+                              const cy = room.box.top + room.box.height / 2;
+                              const isSelected = selectedRoomId === room.id;
+                              return (
+                                <div key={room.id}>
+                                  <div
+                                    className="absolute border-2 transition-all cursor-pointer"
+                                    style={{
+                                      left:   `${room.box.left}%`,
+                                      top:    `${room.box.top}%`,
+                                      width:  `${room.box.width}%`,
+                                      height: `${room.box.height}%`,
+                                      backgroundColor: room.color + (isSelected ? '60' : '30'),
+                                      borderColor:     room.color,
+                                      borderRadius: 4,
+                                    }}
+                                    onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
+                                  />
+                                  <button
+                                    onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
+                                    className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
+                                    style={{ left: `${cx}%`, top: `${cy}%` }}
+                                  >
+                                    <div
+                                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap shadow border transition-all ${
+                                        isSelected
+                                          ? "bg-[#004643] text-white border-[#004643] scale-110"
+                                          : "bg-white/90 text-[#004643] border-[#004643]/40 hover:bg-white hover:border-[#004643]"
+                                      }`}
+                                      style={{ backdropFilter: "blur(4px)" }}
+                                    >
+                                      {room.name}
+                                    </div>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {loadingRooms && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/80">
+                          <Loader2 size={22} className="animate-spin text-[#004643]" />
+                          <span className="text-sm text-gray-500">Analysing floor plan…</span>
+                        </div>
+                      )}
+                    </>
                   ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-300 select-none">
+                    <div className="flex flex-col items-center justify-center gap-2 text-gray-300 select-none">
                       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                         <rect width="18" height="18" x="3" y="3" rx="2"/>
                         <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
                       </svg>
                       <span className="text-sm font-medium">No Floor Plan Uploaded</span>
-                    </div>
-                  )}
-
-                  {/* Room name labels floating over floor plan */}
-                  {mounted && rooms.length > 0 && floorPlanUrl && (
-                    <div className="absolute inset-0" style={{ padding: 20 }}>
-                      {rooms.map(room => {
-                        if (!room.box) return null;
-                        const cx = room.box.left + room.box.width / 2;
-                        const cy = room.box.top + room.box.height / 2;
-                        const isSelected = selectedRoomId === room.id;
-                        return (
-                          <div key={room.id}>
-                            {/* Colored semi-transparent box matching room boundary */}
-                            <div
-                              className="absolute border-2 transition-all cursor-pointer"
-                              style={{
-                                left:   `${room.box.left}%`,
-                                top:    `${room.box.top}%`,
-                                width:  `${room.box.width}%`,
-                                height: `${room.box.height}%`,
-                                backgroundColor: room.color + (isSelected ? '60' : '30'),
-                                borderColor:     room.color,
-                                borderRadius: 4,
-                              }}
-                              onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
-                            />
-                            {/* Room name chip at center */}
-                            <button
-                              onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
-                              className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
-                              style={{ left: `${cx}%`, top: `${cy}%` }}
-                            >
-                              <div
-                                className={`px-2 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap shadow border transition-all ${
-                                  isSelected
-                                    ? "bg-[#004643] text-white border-[#004643] scale-110"
-                                    : "bg-white/90 text-[#004643] border-[#004643]/40 hover:bg-white hover:border-[#004643]"
-                                }`}
-                                style={{ backdropFilter: "blur(4px)" }}
-                              >
-                                {room.name}
-                              </div>
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Loading */}
-                  {loadingRooms && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/80">
-                      <Loader2 size={22} className="animate-spin text-[#004643]" />
-                      <span className="text-sm text-gray-500">Analysing floor plan…</span>
                     </div>
                   )}
                 </div>
