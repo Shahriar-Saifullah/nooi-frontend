@@ -112,6 +112,67 @@ function PrecisionWalls({
     return len > 0.05; // must have meaningful length in world coords
   });
 
+  // ── Deduplicate near-identical walls ──
+  // Roboflow often detects the same physical wall twice — once from each
+  // adjacent room's side — as two close but non-identical line segments.
+  // Rendering both leaves a thin sliver gap between rooms that bleeds through
+  // to the exterior wall. We merge walls that are parallel, close together,
+  // and overlapping along their length into a single averaged wall.
+  const mergedWalls: typeof lineWalls = [];
+  const used = new Set<number>();
+  const MERGE_DIST_PCT = 2.5; // walls within 2.5% of image dimensions = duplicates
+
+  for (let i = 0; i < lineWalls.length; i++) {
+    if (used.has(i)) continue;
+    const a = lineWalls[i];
+    const aIsHoriz = Math.abs(a.x2 - a.x1) > Math.abs(a.y2 - a.y1);
+    const group = [a];
+    used.add(i);
+
+    for (let j = i + 1; j < lineWalls.length; j++) {
+      if (used.has(j)) continue;
+      const b = lineWalls[j];
+      const bIsHoriz = Math.abs(b.x2 - b.x1) > Math.abs(b.y2 - b.y1);
+      if (aIsHoriz !== bIsHoriz) continue;
+
+      const aPos = aIsHoriz ? (a.y1 + a.y2) / 2 : (a.x1 + a.x2) / 2;
+      const bPos = bIsHoriz ? (b.y1 + b.y2) / 2 : (b.x1 + b.x2) / 2;
+      if (Math.abs(aPos - bPos) > MERGE_DIST_PCT) continue;
+
+      const aMin = aIsHoriz ? Math.min(a.x1, a.x2) : Math.min(a.y1, a.y2);
+      const aMax = aIsHoriz ? Math.max(a.x1, a.x2) : Math.max(a.y1, a.y2);
+      const bMin = bIsHoriz ? Math.min(b.x1, b.x2) : Math.min(b.y1, b.y2);
+      const bMax = bIsHoriz ? Math.max(b.x1, b.x2) : Math.max(b.y1, b.y2);
+      const overlap = Math.min(aMax, bMax) - Math.max(aMin, bMin);
+      const minLen = Math.min(aMax - aMin, bMax - bMin);
+      if (overlap < minLen * 0.3) continue;
+
+      group.push(b);
+      used.add(j);
+    }
+
+    if (group.length === 1) {
+      mergedWalls.push(a);
+    } else {
+      const isHoriz = aIsHoriz;
+      const avgPos = group.reduce((s, w) => s + (isHoriz ? (w.y1 + w.y2) / 2 : (w.x1 + w.x2) / 2), 0) / group.length;
+      const allMins = group.map(w => isHoriz ? Math.min(w.x1, w.x2) : Math.min(w.y1, w.y2));
+      const allMaxs = group.map(w => isHoriz ? Math.max(w.x1, w.x2) : Math.max(w.y1, w.y2));
+      const minExtent = Math.min(...allMins);
+      const maxExtent = Math.max(...allMaxs);
+      const maxThickness = Math.max(...group.map(w => w.thickness));
+
+      mergedWalls.push(
+        isHoriz
+          ? { x1: minExtent, x2: maxExtent, y1: avgPos, y2: avgPos, thickness: maxThickness }
+          : { x1: avgPos, x2: avgPos, y1: minExtent, y2: maxExtent, thickness: maxThickness }
+      );
+    }
+  }
+
+  lineWalls.length = 0;
+  lineWalls.push(...mergedWalls);
+
   lineWalls.forEach((wall, i) => {
     const wx1 = (wall.x1 / 100) * totalW - totalW / 2;
     const wz1 = (wall.y1 / 100) * totalD - totalD / 2;
@@ -199,7 +260,21 @@ function PrecisionWalls({
         segments.push(<mesh key={`w${i}g${ci}`} position={[px2,sH+(WALL_H-sH-tH)/2,pz2]} rotation={[0,angle,0]}><boxGeometry args={[0.02,WALL_H-sH-tH,opLen]}/><meshStandardMaterial color="#a8d8f0" transparent opacity={0.45} roughness={0}/></mesh>);
       }
       if (cut.type === 'door') {
+        // Lintel beam above the door opening
         segments.push(<mesh key={`w${i}l${ci}`} position={[px2,WALL_H-0.15,pz2]} rotation={[0,angle,0]} castShadow><boxGeometry args={[t,0.3,opLen+0.05]}/><meshStandardMaterial color={color} roughness={0.88}/></mesh>);
+        // Visible door panel, slightly ajar, so the opening reads clearly as a door
+        const doorH = WALL_H - 0.4;
+        segments.push(
+          <mesh
+            key={`w${i}d${ci}`}
+            position={[px2 - Math.sin(angle)*(opLen*0.32), doorH/2, pz2 - Math.cos(angle)*(opLen*0.32)]}
+            rotation={[0, angle + 0.55, 0]}
+            castShadow
+          >
+            <boxGeometry args={[0.04, doorH, opLen*0.9]} />
+            <meshStandardMaterial color="#8a6d4f" roughness={0.6} metalness={0.05} />
+          </mesh>
+        );
       }
       cursor = cut.pos + cut.halfW;
     });
