@@ -192,23 +192,22 @@ function PrecisionWalls({
     const t = Math.max(0.08, Math.min(0.25, (wall.thickness / 100) * Math.min(totalW, totalD)));
     const color = "#d6d2ca";
 
-    // Find openings on this wall
+    // Find openings on this wall using perpendicular distance to wall line.
+    // This works regardless of wall orientation and is geometrically correct.
+    const TOL = Math.max(totalW, totalD) * 0.06; // 6% of scene
     const wallOpenings = openings.filter(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      // isHoriz: wall runs left-right (dx dominates)
-      const isHoriz = Math.abs(dx) > Math.abs(dz);
-      // Use generous tolerance — coordinate systems have inherent imprecision
-      const tol = Math.max(totalW, totalD) * 0.05; // 5% of scene size
-      if (isHoriz) {
-        const minX = Math.min(wx1, wx2) - tol;
-        const maxX = Math.max(wx1, wx2) + tol;
-        return Math.abs(oz - cz) < tol && ox >= minX && ox <= maxX;
-      } else {
-        const minZ = Math.min(wz1, wz2) - tol;
-        const maxZ2 = Math.max(wz1, wz2) + tol;
-        return Math.abs(ox - cx) < tol && oz >= minZ && oz <= maxZ2;
-      }
+      // Perpendicular distance from opening center to this wall line
+      const perpDist = len > 0
+        ? Math.abs(dx * (wz1 - oz) - dz * (wx1 - ox)) / len
+        : Math.hypot(ox - wx1, oz - wz1);
+      if (perpDist > TOL) return false;
+      // Also check opening projects onto the wall segment (not outside wall endpoints)
+      const t = len > 0
+        ? ((ox - wx1) * dx + (oz - wz1) * dz) / (len * len)
+        : 0;
+      return t >= -0.15 && t <= 1.15;
     });
 
     if (wallOpenings.length === 0) {
@@ -221,20 +220,21 @@ function PrecisionWalls({
       return;
     }
 
-    // Split wall around openings
+    // Split wall around openings using projection onto wall direction
     type Cut = { pos: number; halfW: number; type: 'door'|'window' };
     const cuts: Cut[] = wallOpenings.map(op => {
       const ox = (op.x / 1000) * totalW - totalW / 2;
       const oz = (op.y / 1000) * totalD - totalD / 2;
-      const isHoriz = Math.abs(dx) > Math.abs(dz);
-      // Opening width in world units
+      // Project opening center onto wall line to get distance from wall start
+      const t = len > 0
+        ? ((ox - wx1) * dx + (oz - wz1) * dz) / (len * len)
+        : 0;
+      const pos = Math.max(0, Math.min(len, t * len));
+      // Opening width in world units — use a sensible minimum per type
+      const minHalfW = op.type === 'door' ? 0.35 : 0.25;
       const opW = (op.width / 1000) * Math.max(totalW, totalD);
-      // Distance from wall start along wall direction
-      const distFromStart = isHoriz
-        ? Math.sqrt((ox - wx1)**2) * Math.sign(ox - wx1 >= 0 ? 1 : -1)
-        : Math.sqrt((oz - wz1)**2) * Math.sign(oz - wz1 >= 0 ? 1 : -1);
-      return { pos: Math.max(0, Math.min(len, Math.abs(distFromStart))), halfW: Math.max(opW/2, 0.2), type: op.type };
-    }).sort((a,b) => a.pos - b.pos);
+      return { pos, halfW: Math.max(opW / 2, minHalfW), type: op.type };
+    }).sort((a, b) => a.pos - b.pos);
 
     let cursor = 0;
     cuts.forEach((cut, ci) => {
