@@ -231,7 +231,7 @@ function PrecisionWalls({
         : 0;
       const pos = Math.max(0, Math.min(len, t * len));
       // Opening width in world units — use a sensible minimum per type
-      const minHalfW = op.type === 'door' ? 0.35 : 0.25;
+      const minHalfW = op.type === 'door' ? 0.4 : 0.28;
       const opW = (op.width / 1000) * Math.max(totalW, totalD);
       return { pos, halfW: Math.max(opW / 2, minHalfW), type: op.type };
     }).sort((a, b) => a.pos - b.pos);
@@ -260,19 +260,30 @@ function PrecisionWalls({
         segments.push(<mesh key={`w${i}g${ci}`} position={[px2,sH+(WALL_H-sH-tH)/2,pz2]} rotation={[0,angle,0]}><boxGeometry args={[0.02,WALL_H-sH-tH,opLen]}/><meshStandardMaterial color="#a8d8f0" transparent opacity={0.45} roughness={0}/></mesh>);
       }
       if (cut.type === 'door') {
-        // Lintel beam above the door opening
-        segments.push(<mesh key={`w${i}l${ci}`} position={[px2,WALL_H-0.15,pz2]} rotation={[0,angle,0]} castShadow><boxGeometry args={[t,0.3,opLen+0.05]}/><meshStandardMaterial color={color} roughness={0.88}/></mesh>);
-        // Visible door panel, slightly ajar, so the opening reads clearly as a door
-        const doorH = WALL_H - 0.4;
+        // Door frame: left post, right post, lintel
+        const fW = 0.06; // frame width
+        const dH = WALL_H * 0.88; // door height
+        // Left post
+        const lx = px2 - Math.sin(angle) * opLen * 0.5;
+        const lz = pz2 - Math.cos(angle) * opLen * 0.5;
+        segments.push(<mesh key={`w${i}dfl${ci}`} position={[lx, dH/2, lz]} rotation={[0,angle,0]} castShadow><boxGeometry args={[fW, dH, fW]}/><meshStandardMaterial color="#c8b89a" roughness={0.7}/></mesh>);
+        // Right post
+        const rx = px2 + Math.sin(angle) * opLen * 0.5;
+        const rz = pz2 + Math.cos(angle) * opLen * 0.5;
+        segments.push(<mesh key={`w${i}dfr${ci}`} position={[rx, dH/2, rz]} rotation={[0,angle,0]} castShadow><boxGeometry args={[fW, dH, fW]}/><meshStandardMaterial color="#c8b89a" roughness={0.7}/></mesh>);
+        // Lintel
+        segments.push(<mesh key={`w${i}dfl2${ci}`} position={[px2, dH + fW/2, pz2]} rotation={[0,angle,0]} castShadow><boxGeometry args={[t+fW, fW, opLen+fW*2]}/><meshStandardMaterial color={color} roughness={0.88}/></mesh>);
+        // Top wall fill (between lintel and ceiling)
+        segments.push(<mesh key={`w${i}dft${ci}`} position={[px2, dH + (WALL_H-dH)/2 + fW, pz2]} rotation={[0,angle,0]} castShadow><boxGeometry args={[t, WALL_H-dH-fW, opLen]}/><meshStandardMaterial color={color} roughness={0.88}/></mesh>);
+        // Door panel (ajar, wooden color)
+        const panelAngle = angle + Math.PI * 0.25;
+        const panelOff = opLen * 0.45;
+        const panX = rx - Math.sin(angle) * panelOff * 0.5 + Math.sin(panelAngle) * 0.02;
+        const panZ = rz - Math.cos(angle) * panelOff * 0.5 + Math.cos(panelAngle) * 0.02;
         segments.push(
-          <mesh
-            key={`w${i}d${ci}`}
-            position={[px2 - Math.sin(angle)*(opLen*0.32), doorH/2, pz2 - Math.cos(angle)*(opLen*0.32)]}
-            rotation={[0, angle + 0.55, 0]}
-            castShadow
-          >
-            <boxGeometry args={[0.04, doorH, opLen*0.9]} />
-            <meshStandardMaterial color="#8a6d4f" roughness={0.6} metalness={0.05} />
+          <mesh key={`w${i}dp${ci}`} position={[panX, dH/2, panZ]} rotation={[0, panelAngle, 0]} castShadow>
+            <boxGeometry args={[0.04, dH - 0.02, opLen * 0.92]} />
+            <meshStandardMaterial color="#8B6914" roughness={0.5} metalness={0.05} />
           </mesh>
         );
       }
