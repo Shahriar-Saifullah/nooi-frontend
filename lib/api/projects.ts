@@ -28,6 +28,8 @@ export interface Room {
   width?: number;
   height?: number;
   box?: RoomBox;
+  polygon?: [number, number][];        // ← add this
+  px_size?: { w: number; h: number };
   gridRow?: number;
   gridCol?: number;
   rowWeight?: number;
