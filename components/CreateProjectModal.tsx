@@ -24,6 +24,8 @@ interface Room {
   color: string;
   confidenceColor: string;
   box?: RoomBox; // current position on the floor plan image, as % (top/left/width/height)
+  polygon?: [number, number][]; // true room shape from the v3 pipeline (% coords)
+  pxSize?: { w: number; h: number }; // room extent in image pixels (for scale auto-fill)
   originalBox?: RoomBox; // AI's original suggestion, kept so the user can reset after manual edits
   gridRow?: number; // which row this room belongs to in the layout grid
   gridCol?: number; // which column within that row
@@ -59,11 +61,37 @@ function toApiRoom(room: Room): ApiRoom {
     width:      Number.isFinite(width) && width > 0 ? width : undefined,
     height:     Number.isFinite(height) && height > 0 ? height : undefined,
     box:        room.box,
+    polygon:    room.polygon,
     gridRow:    room.gridRow,
     gridCol:    room.gridCol,
     rowWeight:  room.rowWeight,
     colWeight:  room.colWeight,
   };
+}
+
+// ── One-input measurement calibration ─────────────────────────────────────────
+// When the plan's dimension text is too low-res for auto-extraction, the
+// pipeline still sends each room's pixel extents (px_size). The moment the
+// user types ONE real measurement, we derive the metres-per-pixel scale and
+// fill every still-empty field from the plan's true proportions.
+function autoFillDimensions(
+  rooms: Room[], editedId: string, field: "length" | "width", value: string,
+): Room[] {
+  const num = parseFloat(value);
+  const edited = rooms.find(r => r.id === editedId);
+  const px = edited?.pxSize;
+  const base = field === "length" ? px?.h : px?.w;
+  const updated = rooms.map(r => r.id === editedId ? { ...r, [field]: value } : r);
+  if (!Number.isFinite(num) || num <= 0 || !base || base <= 0) return updated;
+  const scale = num / base; // metres per image pixel
+  return updated.map(r => {
+    if (r.id === editedId || !r.pxSize) return r;
+    return {
+      ...r,
+      length: r.length === "" ? (r.pxSize.h * scale).toFixed(1) : r.length,
+      width:  r.width  === "" ? (r.pxSize.w * scale).toFixed(1) : r.width,
+    };
+  });
 }
 
 export default function CreateProjectModal({ isOpen, onClose }: CreateProjectModalProps) {
@@ -328,6 +356,8 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
             color:           room.color || "#e5e7eb",
             confidenceColor: room.confidence >= 85 ? "#b3b9b9" : "#9c7b31",
             box:             room.box || undefined,
+            polygon:         room.polygon || undefined,
+            pxSize:          room.px_size || undefined,
             originalBox:     room.box || undefined,
           }));
 
@@ -458,7 +488,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                   {step === 1 && "Name your project and tell us what kind of space it is."}
                   {step === 2 && "Our AI will detect rooms automatically. You can review and rename them next."}
                   {step === 3 && `${rooms.length} room${rooms.length !== 1 ? "s" : ""} found. Click a room to rename or remove it.`}
-                  {step === 4 && "Enter measurements in metres."}
+                  {step === 4 && "Enter measurements in metres. Fill in one room and the rest auto-fill from the plan's proportions."}
                   {step === 5 && "Review everything before we save your project."}
                 </p>
               </div>
@@ -738,7 +768,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                               type="text"
                               value={room.length}
                               placeholder="—"
-                              onChange={(e) => setRooms(rooms.map(r => r.id === room.id ? { ...r, length: e.target.value } : r))}
+                              onChange={(e) => setRooms(autoFillDimensions(rooms, room.id, "length", e.target.value))}
                               className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors"
                             />
                           </div>
@@ -747,7 +777,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                               type="text"
                               value={room.width}
                               placeholder="—"
-                              onChange={(e) => setRooms(rooms.map(r => r.id === room.id ? { ...r, width: e.target.value } : r))}
+                              onChange={(e) => setRooms(autoFillDimensions(rooms, room.id, "width", e.target.value))}
                               className="w-[54px] h-[28px] border border-gray-200 rounded-md text-center text-[13px] font-medium focus:border-[#004643] focus:outline-none focus:ring-1 focus:ring-[#004643] transition-colors"
                             />
                           </div>
