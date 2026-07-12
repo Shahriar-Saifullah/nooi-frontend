@@ -329,7 +329,7 @@ function SceneContent({
       {/* ground */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
         <planeGeometry args={[world.totalW * 1.6, world.totalD * 1.6]} />
-        <meshStandardMaterial color="#efece6" roughness={1} />
+        <meshStandardMaterial color="#e2ded6" roughness={1} />
       </mesh>
 
       {rooms.map((r) => <RoomFloor key={r.id} room={r} world={world} />)}
