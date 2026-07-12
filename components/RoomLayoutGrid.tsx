@@ -19,6 +19,7 @@ export interface GridRoom {
   name: string;
   color: string;
   box?: RoomBox;
+  polygon?: [number, number][];
   gridRow?: number;
   gridCol?: number;
   rowWeight?: number;
