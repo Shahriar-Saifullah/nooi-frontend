@@ -122,19 +122,26 @@ export default function CanvasPage() {
 
   useEffect(() => {
     if (!mounted) return;
-    if ((currentProject?.rooms?.length ?? 0) > 0) {
-      // Use Gemini box coordinates directly — do NOT relayout
-      setRooms(currentProject!.rooms!.map(toGridRoom).filter((r: GridRoom) => r.box));
-      return;
+    const haveStoreRooms = (currentProject?.rooms?.length ?? 0) > 0;
+    if (haveStoreRooms) {
+      // Use detected coordinates directly — do NOT relayout
+      setRooms(currentProject!.rooms!.map(toGridRoom).filter((r: GridRoom) => r.box || r.polygon));
     }
     if (currentProject?.id) {
-      setLoadingRooms(true);
+      // ALWAYS fetch room_data: walls, openings, and image_size live only in
+      // the project record — without them the 3D view has floors but no walls.
+      // (Previously this fetch was skipped whenever the store already had
+      // rooms, i.e. exactly when arriving fresh from project creation.)
+      if (!haveStoreRooms) setLoadingRooms(true);
       getProject(currentProject.id)
         .then(p => {
           const apiRooms = p.room_data?.rooms ?? [];
-          const gridRooms = apiRooms.map(toGridRoom).filter((r: GridRoom) => r.box);
-          setRooms(gridRooms);
-          if (apiRooms.length > 0) setProjectRooms(apiRooms);
+          if (!haveStoreRooms && apiRooms.length > 0) {
+            // server rooms only when the store has none — the user's freshly
+            // edited names in the store always win
+            setRooms(apiRooms.map(toGridRoom).filter((r: GridRoom) => r.box || r.polygon));
+            setProjectRooms(apiRooms);
+          }
           if (p.room_data?.building_perimeter) {
             setBuildingPerimeter(p.room_data.building_perimeter);
           }
@@ -151,7 +158,7 @@ export default function CanvasPage() {
             setProject({ ...currentProject, floor_plan_url: p.floor_plan_url });
           }
         })
-        .catch(err => console.error("Failed to load rooms:", err))
+        .catch(err => console.error("Failed to load project geometry:", err))
         .finally(() => setLoadingRooms(false));
     }
   }, [mounted, currentProject?.id]);
