@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   Search, Minus, Plus, RotateCcw, Sofa,
@@ -10,13 +9,14 @@ import {
   SlidersHorizontal, Loader2, RotateCw, Trash2,
 } from "lucide-react";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
+import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import { useProjectStore } from "@/lib/store";
 import { getProject } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
-import type { PlacedFurniture } from "@/components/ThreeScene";
+import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
 // ─── Lazy-load Three.js (no SSR — Three.js requires browser APIs) ─────────────
-const ThreeScene = dynamic(() => import("@/components/ThreeScene"), {
+const ThreeSceneV2 = dynamic(() => import("@/components/ThreeSceneV2"), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full flex items-center justify-center bg-[#1a1f1e]">
@@ -83,7 +83,8 @@ function toGridRoom(room: any, index: number): GridRoom {
   return {
     id: room.id, name: room.name,
     color: room.color || FALLBACK_COLORS[index % FALLBACK_COLORS.length],
-    box: room.box, gridRow: room.gridRow, gridCol: room.gridCol,
+    box: room.box, polygon: room.polygon,
+    gridRow: room.gridRow, gridCol: room.gridCol,
     rowWeight: room.rowWeight, colWeight: room.colWeight,
   };
 }
@@ -187,10 +188,6 @@ export default function CanvasPage() {
     setPlacedFurniture(prev => [...prev, newItem]);
     setSelectedFurnitureId(newItem.id);
     setRightTab("edit");
-  };
-
-  const handleFurnitureMove = (id: string, position: [number, number, number]) => {
-    setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, position } : f));
   };
 
   const handleRotate = () => {
@@ -430,75 +427,32 @@ export default function CanvasPage() {
                 >
                   {floorPlanUrl ? (
                     <>
-                      {/* Inner container sized to the image's actual aspect ratio —
-                          overlays positioned as % of THIS container will align perfectly,
-                          since this container has no letterboxing (unlike object-contain on a fixed box). */}
+                      {/* True-shape SVG polygon overlay: polygons render inside
+                          the SAME viewBox as the image, so alignment is
+                          guaranteed at any zoom or container size. */}
                       <div
-                        className="relative"
                         style={
                           imageSize && imageSize.width > 0 && imageSize.height > 0
                             ? (() => {
-                                const containerW = 680, containerH = 520; // 720/560 minus 20px padding each side
+                                const containerW = 680, containerH = 520;
                                 const imgRatio = imageSize.width / imageSize.height;
-                                const boxRatio  = containerW / containerH;
-                                let w, h;
-                                if (imgRatio > boxRatio) { w = containerW; h = containerW / imgRatio; }
-                                else { h = containerH; w = containerH * imgRatio; }
-                                return { width: w, height: h };
+                                const boxRatio = containerW / containerH;
+                                return imgRatio > boxRatio
+                                  ? { width: containerW }
+                                  : { width: containerH * imgRatio };
                               })()
-                            : { width: 680, height: 520 }
+                            : { width: 680 }
                         }
                       >
-                        <img
-                          src={floorPlanUrl}
-                          alt="Floor plan"
-                          className="absolute inset-0 w-full h-full object-fill"
-                        />
-
-                        {/* Room name labels + colored boxes — now align perfectly since
-                            this container matches the image's true rendered dimensions */}
-                        {mounted && rooms.length > 0 && (
-                          <div className="absolute inset-0">
-                            {rooms.map(room => {
-                              if (!room.box) return null;
-                              const cx = room.box.left + room.box.width / 2;
-                              const cy = room.box.top + room.box.height / 2;
-                              const isSelected = selectedRoomId === room.id;
-                              return (
-                                <div key={room.id}>
-                                  <div
-                                    className="absolute border-2 transition-all cursor-pointer"
-                                    style={{
-                                      left:   `${room.box.left}%`,
-                                      top:    `${room.box.top}%`,
-                                      width:  `${room.box.width}%`,
-                                      height: `${room.box.height}%`,
-                                      backgroundColor: room.color + (isSelected ? '60' : '30'),
-                                      borderColor:     room.color,
-                                      borderRadius: 4,
-                                    }}
-                                    onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
-                                  />
-                                  <button
-                                    onClick={e => { e.stopPropagation(); setSelectedRoomId(isSelected ? null : room.id); }}
-                                    className="absolute -translate-x-1/2 -translate-y-1/2 z-10"
-                                    style={{ left: `${cx}%`, top: `${cy}%` }}
-                                  >
-                                    <div
-                                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold whitespace-nowrap shadow border transition-all ${
-                                        isSelected
-                                          ? "bg-[#004643] text-white border-[#004643] scale-110"
-                                          : "bg-white/90 text-[#004643] border-[#004643]/40 hover:bg-white hover:border-[#004643]"
-                                      }`}
-                                      style={{ backdropFilter: "blur(4px)" }}
-                                    >
-                                      {room.name}
-                                    </div>
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
+                        {mounted && (
+                          <FloorplanPolygonOverlay
+                            imageUrl={floorPlanUrl}
+                            rooms={rooms}
+                            selectedRoomId={selectedRoomId}
+                            onRoomClick={(id) =>
+                              setSelectedRoomId(selectedRoomId === id ? null : id)
+                            }
+                          />
                         )}
                       </div>
 
@@ -536,16 +490,13 @@ export default function CanvasPage() {
           {viewMode === "3d" && (
             <div className="flex-1 overflow-hidden" onClick={() => setSelectedFurnitureId(null)}>
               {mounted && (
-                <ThreeScene
-                  floorPlanUrl={floorPlanUrl || null}
+                <ThreeSceneV2
                   roomWidthCm={roomDimensionsCm.width}
                   roomDepthCm={roomDimensionsCm.depth}
                   rooms={rooms}
-                  buildingPerimeter={buildingPerimeter}
                   rfWalls={rfWalls}
                   openings={openings}
                   furniture={placedFurniture}
-                  onFurnitureMove={handleFurnitureMove}
                   onFurnitureSelect={setSelectedFurnitureId}
                   selectedFurnitureId={selectedFurnitureId}
                 />
