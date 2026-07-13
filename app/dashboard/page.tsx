@@ -114,6 +114,13 @@ export default function DashboardPage() {
               <FolderOpen className="w-4 h-4" />
               <span className="text-xs font-medium">Collection</span>
             </div>
+            <div
+              onClick={() => router.push('/dashboard/profile')}
+              className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors hover:bg-gray-200"
+            >
+              <Settings className="w-4 h-4" />
+              <span className="text-xs font-medium">Settings</span>
+            </div>
           </div>
         </div>
 
@@ -160,14 +167,20 @@ export default function DashboardPage() {
                   <div className="py-1.5">
                     <button
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[#0a0a0a] hover:bg-[#f5f5f5] transition-colors"
-                      onClick={() => setDropdownOpen(false)}
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        router.push('/dashboard/profile');
+                      }}
                     >
                       <User className="w-4 h-4 text-[#737373]" />
                       Profile
                     </button>
                     <button
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[#0a0a0a] hover:bg-[#f5f5f5] transition-colors"
-                      onClick={() => setDropdownOpen(false)}
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        router.push('/dashboard/profile');
+                      }}
                     >
                       <Settings className="w-4 h-4 text-[#737373]" />
                       Settings

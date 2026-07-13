@@ -279,3 +279,80 @@ export async function saveOnboarding(
     body: payload,
   });
 }
+
+export type UpdateProfilePayload = {
+  fullName?: string;
+  avatarUrl?: string | null;
+  username?: string;
+  bio?: string;
+  phone?: string;
+  location?: string;
+};
+
+export async function updateProfile(
+  payload: UpdateProfilePayload,
+): Promise<ApiResponse<AuthUserResponse>> {
+  const supabase = getSupabase();
+
+  // 1. Update user metadata in Supabase Auth
+  const { data: { user }, error: authError } = await supabase.auth.updateUser({
+    data: {
+      full_name: payload.fullName,
+      avatar_url: payload.avatarUrl,
+      username: payload.username,
+      bio: payload.bio,
+      phone: payload.phone,
+      location: payload.location,
+    },
+  });
+
+  if (authError || !user) {
+    return {
+      success: false,
+      error: authError?.message || "Failed to update profile in Auth",
+    };
+  }
+
+  // 2. Try to update profiles table in database (optional fallback)
+  try {
+    await supabase
+      .from("profiles")
+      .update({
+        full_name: payload.fullName,
+        avatar_url: payload.avatarUrl,
+        username: payload.username,
+        bio: payload.bio,
+        phone: payload.phone,
+        location: payload.location,
+      })
+      .eq("id", user.id);
+  } catch (dbError) {
+    console.warn("Could not sync profile to Database table 'profiles':", dbError);
+  }
+
+  return {
+    success: true,
+    data: {
+      user: mapSupabaseUser(user),
+    },
+  };
+}
+
+export async function updatePassword(password: string): Promise<ApiResponse<unknown>> {
+  const supabase = getSupabase();
+  const { error } = await supabase.auth.updateUser({
+    password,
+  });
+
+  if (error) {
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+
+  return {
+    success: true,
+    data: {},
+  };
+}
