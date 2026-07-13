@@ -148,26 +148,77 @@ function WallWithOpenings({
       {clipped.map((cut, i) => {
         const cw = cut.end - cut.start;
         if (cut.type === "door") {
+          // Width decides what a "door" opening really is:
+          //   <=1.3m hinged leaf | <=3.6m sliding glass | wider: open passage
+          const HINGED_MAX = 1.3, SLIDER_MAX = 3.6;
           return (
             <group key={`d${i}`}>
-              {/* header above the door */}
+              {/* header above the opening */}
               {box(cut.start, cut.end, DOOR_H, WALL_H, `dh${i}`, wallMat)}
-              {/* slim frame posts */}
+              {/* slim jamb posts */}
               {box(cut.start, cut.start + 0.05, 0, DOOR_H, `dfa${i}`, frameMat)}
               {box(cut.end - 0.05, cut.end, 0, DOOR_H, `dfb${i}`, frameMat)}
-              {/* door leaf, ajar */}
-              <mesh
-                position={horiz
-                  ? [cut.start + cw * 0.42, DOOR_H / 2, c + t * 0.9]
-                  : [c + t * 0.9, DOOR_H / 2, cut.start + cw * 0.42]}
-                rotation={[0, horiz ? 0.5 : -0.5, 0]}
-                castShadow
-              >
-                <boxGeometry args={horiz
-                  ? [cw * 0.9, DOOR_H - 0.05, 0.04]
-                  : [0.04, DOOR_H - 0.05, cw * 0.9]} />
-                <meshStandardMaterial color="#a98963" roughness={0.6} />
-              </mesh>
+
+              {cw <= HINGED_MAX && (
+                // hinged leaf, pivoted at the jamb (not its own centre)
+                <group
+                  position={horiz ? [cut.start + 0.03, 0, c] : [c, 0, cut.start + 0.03]}
+                  rotation={[0, horiz ? -0.5 : 0.5, 0]}
+                >
+                  <mesh
+                    position={horiz
+                      ? [(cw - 0.08) / 2, DOOR_H / 2 - 0.02, 0]
+                      : [0, DOOR_H / 2 - 0.02, (cw - 0.08) / 2]}
+                    castShadow
+                  >
+                    <boxGeometry args={horiz
+                      ? [cw - 0.08, DOOR_H - 0.06, 0.045]
+                      : [0.045, DOOR_H - 0.06, cw - 0.08]} />
+                    <meshStandardMaterial color="#b59a72" roughness={0.55} />
+                  </mesh>
+                </group>
+              )}
+
+              {cw > HINGED_MAX && cw <= SLIDER_MAX && (
+                // sliding glass panels (patio / balcony sliders)
+                <group key={`sl${i}`}>
+                  {Array.from({ length: Math.max(2, Math.round(cw / 1.0)) }).map((_, pi, arr) => {
+                    const n = arr.length;
+                    const pw = cw / n;
+                    const p0 = cut.start + pi * pw;
+                    const zOff = (pi % 2 === 0 ? -1 : 1) * t * 0.22;
+                    return (
+                      <group key={pi}>
+                        <mesh position={horiz
+                          ? [p0 + pw / 2, DOOR_H / 2, c + zOff]
+                          : [c + zOff, DOOR_H / 2, p0 + pw / 2]}>
+                          <boxGeometry args={horiz
+                            ? [pw - 0.04, DOOR_H - 0.1, 0.03]
+                            : [0.03, DOOR_H - 0.1, pw - 0.04]} />
+                          <meshPhysicalMaterial color="#bcd6de" transparent
+                            opacity={0.3} roughness={0.05} metalness={0.1} />
+                        </mesh>
+                        {/* thin panel frame rails */}
+                        <mesh position={horiz
+                          ? [p0 + pw / 2, DOOR_H - 0.06, c + zOff]
+                          : [c + zOff, DOOR_H - 0.06, p0 + pw / 2]} castShadow>
+                          <boxGeometry args={horiz
+                            ? [pw - 0.02, 0.06, 0.05] : [0.05, 0.06, pw - 0.02]} />
+                          <meshStandardMaterial color="#5f6b70" roughness={0.5} />
+                        </mesh>
+                        <mesh position={horiz
+                          ? [p0 + pw / 2, 0.04, c + zOff]
+                          : [c + zOff, 0.04, p0 + pw / 2]}>
+                          <boxGeometry args={horiz
+                            ? [pw - 0.02, 0.08, 0.05] : [0.05, 0.08, pw - 0.02]} />
+                          <meshStandardMaterial color="#5f6b70" roughness={0.5} />
+                        </mesh>
+                      </group>
+                    );
+                  })}
+                </group>
+              )}
+              {/* > SLIDER_MAX: cased opening — header + jambs only, stays open */}
             </group>
           );
         }
@@ -225,7 +276,7 @@ function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
           color={room.color || "#e8e2d6"}
           roughness={0.85}
           transparent
-          opacity={outdoor ? 0.45 : 0.62}
+          opacity={outdoor ? 0.3 : 0.22}
           side={THREE.DoubleSide}
         />
       </mesh>
@@ -233,7 +284,7 @@ function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
       {!outdoor && (
         <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
           <shapeGeometry args={[shape]} />
-          <meshStandardMaterial color="#d8c4a4" roughness={0.75}
+          <meshStandardMaterial color="#d9c7a7" roughness={0.7}
             side={THREE.DoubleSide} />
         </mesh>
       )}
@@ -328,8 +379,8 @@ function SceneContent({
     <group>
       {/* ground */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
-        <planeGeometry args={[world.totalW * 1.6, world.totalD * 1.6]} />
-        <meshStandardMaterial color="#e2ded6" roughness={1} />
+        <planeGeometry args={[world.totalW * 1.25, world.totalD * 1.25]} />
+        <meshStandardMaterial color="#eae7e0" roughness={1} />
       </mesh>
 
       {rooms.map((r) => <RoomFloor key={r.id} room={r} world={world} />)}
@@ -345,8 +396,8 @@ function SceneContent({
           onSelect={onFurnitureSelect} />
       ))}
 
-      <ContactShadows position={[0, 0, 0]} opacity={0.28}
-        scale={world.maxDim * 1.6} blur={2.2} far={3} />
+      <ContactShadows position={[0, 0, 0]} opacity={0.22}
+        scale={world.maxDim * 1.3} blur={2.4} far={3} />
     </group>
   );
 }
