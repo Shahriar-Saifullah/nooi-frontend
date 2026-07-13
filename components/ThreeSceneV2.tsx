@@ -268,6 +268,31 @@ function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
   if (!shape) return null;
   const outdoor = OUTDOOR.test(room.name || "");
 
+  if (outdoor) {
+    // Patio / porch / covered porch: a solid raised deck slab with its own
+    // material — clearly visible, distinct from ground and interior floors
+    return (
+      <group>
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.07, 0]}
+          castShadow receiveShadow>
+          <extrudeGeometry args={[shape, { depth: 0.06, bevelEnabled: false }]} />
+          <meshStandardMaterial color="#d6cab2" roughness={0.8}
+            side={THREE.DoubleSide} />
+        </mesh>
+        {/* faint zone tint on the deck surface */}
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.075, 0]}>
+          <shapeGeometry args={[shape]} />
+          <meshStandardMaterial
+            color={room.color || "#a7f3d0"}
+            transparent opacity={0.18}
+            side={THREE.DoubleSide}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
+    );
+  }
+
   return (
     <group>
       <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} receiveShadow>
@@ -276,18 +301,16 @@ function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
           color={room.color || "#e8e2d6"}
           roughness={0.85}
           transparent
-          opacity={outdoor ? 0.3 : 0.22}
+          opacity={0.22}
           side={THREE.DoubleSide}
         />
       </mesh>
       {/* wood base under indoor rooms */}
-      {!outdoor && (
-        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
-          <shapeGeometry args={[shape]} />
-          <meshStandardMaterial color="#d9c7a7" roughness={0.7}
-            side={THREE.DoubleSide} />
-        </mesh>
-      )}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
+        <shapeGeometry args={[shape]} />
+        <meshStandardMaterial color="#d9c7a7" roughness={0.7}
+          side={THREE.DoubleSide} />
+      </mesh>
     </group>
   );
 }
