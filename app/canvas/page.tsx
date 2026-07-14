@@ -219,13 +219,37 @@ export default function CanvasPage() {
   // Use the actual image dimensions from Roboflow to compute the 3D scene aspect ratio.
   // This ensures walls are proportionally correct relative to the real floor plan.
   const roomDimensionsCm = (() => {
-    // If we have image dimensions from Roboflow, use the aspect ratio directly
+    // REAL-WORLD SCALE: derive the plan's true width from the room
+    // measurements the user entered in the dimensions step. Each room with a
+    // real width/length and a box gives an estimate of the full plan width
+    // (room_metres / box_fraction); the median across rooms is robust to a
+    // single bad entry. This "stretches" the 3D world to true proportions —
+    // rooms at real size against the fixed 2.8m wall height.
+    const est: number[] = [];
+    for (const r of currentProject?.rooms ?? []) {
+      const b = (r as any).box;
+      if (!b) continue;
+      const wM = Number((r as any).width);
+      const lM = Number((r as any).length);
+      if (Number.isFinite(wM) && wM > 1 && b.width > 3) {
+        est.push((wM * 100) / (b.width / 100));
+      }
+      if (Number.isFinite(lM) && lM > 1 && b.height > 3) {
+        // length maps to plan depth; convert via image aspect to plan width
+        const aspect = imageSize && imageSize.height > 0
+          ? imageSize.width / imageSize.height : 1.25;
+        est.push(((lM * 100) / (b.height / 100)) * aspect);
+      }
+    }
+    const sane = est.filter(v => v > 800 && v < 6000).sort((a, b) => a - b);
+    const BASE = sane.length >= 2
+      ? sane[Math.floor(sane.length / 2)]   // median plan width in cm
+      : 2000;                                // fallback (was 1500)
     if (imageSize && imageSize.width > 0 && imageSize.height > 0) {
-      const BASE = 1500; // base cm for the longer dimension
       if (imageSize.width >= imageSize.height) {
-        return { width: BASE, depth: Math.round(BASE * imageSize.height / imageSize.width) };
+        return { width: Math.round(BASE), depth: Math.round(BASE * imageSize.height / imageSize.width) };
       } else {
-        return { width: Math.round(BASE * imageSize.width / imageSize.height), depth: BASE };
+        return { width: Math.round(BASE * imageSize.width / imageSize.height), depth: Math.round(BASE) };
       }
     }
     // Fallback: use Roboflow wall extents to estimate aspect ratio

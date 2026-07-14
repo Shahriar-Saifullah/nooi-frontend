@@ -108,10 +108,14 @@ function WallWithOpenings({
   const t = Math.min(MAX_WALL_T,
     Math.max(MIN_WALL_T, (wall.thickness / 100) * world.maxDim));
 
-  const a0 = horiz ? world.px(Math.min(wall.x1, wall.x2)) : world.pz(Math.min(wall.y1, wall.y2));
-  const a1 = horiz ? world.px(Math.max(wall.x1, wall.x2)) : world.pz(Math.max(wall.y1, wall.y2));
+  let a0 = horiz ? world.px(Math.min(wall.x1, wall.x2)) : world.pz(Math.min(wall.y1, wall.y2));
+  let a1 = horiz ? world.px(Math.max(wall.x1, wall.x2)) : world.pz(Math.max(wall.y1, wall.y2));
   const c = horiz ? world.pz(wall.y1) : world.px(wall.x1);
   if (a1 - a0 < 0.05) return null;
+  // extend by half a thickness at both ends: perpendicular walls now
+  // interpenetrate at corners instead of meeting with a visible slit
+  a0 -= t / 2;
+  a1 += t / 2;
 
   const { solids, cuts: clipped } = wallPieces(a0, a1, cuts);
 
