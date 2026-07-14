@@ -244,7 +244,7 @@ export default function CanvasPage() {
     const sane = est.filter(v => v > 800 && v < 6000).sort((a, b) => a - b);
     const BASE = sane.length >= 2
       ? sane[Math.floor(sane.length / 2)]   // median plan width in cm
-      : 2000;                                // fallback (was 1500)
+      : 2600;                                // fallback (was 1500)
     if (imageSize && imageSize.width > 0 && imageSize.height > 0) {
       if (imageSize.width >= imageSize.height) {
         return { width: Math.round(BASE), depth: Math.round(BASE * imageSize.height / imageSize.width) };

@@ -154,7 +154,7 @@ function WallWithOpenings({
         if (cut.type === "door") {
           // Width decides what a "door" opening really is:
           //   <=1.3m hinged leaf | <=3.6m sliding glass | wider: open passage
-          const HINGED_MAX = 1.3, SLIDER_MAX = 3.6;
+          const HINGED_MAX = 1.3, SLIDER_MAX = 7.0;
           return (
             <group key={`d${i}`}>
               {/* header above the opening */}
@@ -452,7 +452,7 @@ export default function ThreeSceneV2({
       shadows
       camera={{
         position: [world.totalW * 0.55, world.maxDim * 0.85, world.totalD * 0.95],
-        fov: 45,
+        fov: 40,
       }}
       onPointerMissed={() => onFurnitureSelect?.(null)}
       style={{ width: "100%", height: "100%" }}
