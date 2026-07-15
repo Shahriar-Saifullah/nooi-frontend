@@ -57,7 +57,7 @@ const WALL_H = 2.8;
 const DOOR_H = 2.1;
 const SILL_H = 0.9;
 const MIN_WALL_T = 0.09;
-const MAX_WALL_T = 0.28;
+const MAX_WALL_T = 0.2;
 
 const OUTDOOR = /porch|patio|balcon|deck|terrace|garden/i;
 
