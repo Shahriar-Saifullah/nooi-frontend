@@ -251,15 +251,18 @@ export default function CanvasPage() {
     const BASE = sane.length >= 2
       ? sane[Math.floor(sane.length / 2)]   // median plan width in cm
       : 2600;                                // fallback (was 1500)
+    const VISUAL_SCALE = 1.5;
+    const SCALED = BASE * VISUAL_SCALE;
     if (typeof window !== "undefined") {
-      console.info(`[nooi3d] world width: ${(BASE / 100).toFixed(1)}m ` +
+      console.info(`[nooi3d] world width: ${(BASE / 100).toFixed(1)}m x` +
+        `${VISUAL_SCALE} = ${(SCALED / 100).toFixed(1)}m ` +
         `(${sane.length >= 2 ? "from " + sane.length + " measurements" : "fallback"})`);
     }
     if (imageSize && imageSize.width > 0 && imageSize.height > 0) {
       if (imageSize.width >= imageSize.height) {
-        return { width: Math.round(BASE), depth: Math.round(BASE * imageSize.height / imageSize.width) };
+        return { width: Math.round(SCALED), depth: Math.round(SCALED * imageSize.height / imageSize.width) };
       } else {
-        return { width: Math.round(BASE * imageSize.width / imageSize.height), depth: Math.round(BASE) };
+        return { width: Math.round(SCALED * imageSize.width / imageSize.height), depth: Math.round(SCALED) };
       }
     }
     // Fallback: use Roboflow wall extents to estimate aspect ratio
