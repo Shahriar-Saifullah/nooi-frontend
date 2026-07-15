@@ -106,6 +106,7 @@ export default function CanvasPage() {
   const [rfWalls, setRfWalls] = useState<Array<{x1:number;y1:number;x2:number;y2:number;thickness:number}>>([]);
   const [openings, setOpenings] = useState<Array<{type:'door'|'window';wall:'horizontal'|'vertical';x:number;y:number;width:number}>>([]);
   const [imageSize, setImageSize] = useState<{width:number;height:number} | null>(null);
+  const [fetchedRooms, setFetchedRooms] = useState<any[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
@@ -136,6 +137,7 @@ export default function CanvasPage() {
       getProject(currentProject.id)
         .then(p => {
           const apiRooms = p.room_data?.rooms ?? [];
+          if (apiRooms.length > 0) setFetchedRooms(apiRooms);
           if (!haveStoreRooms && apiRooms.length > 0) {
             // server rooms only when the store has none — the user's freshly
             // edited names in the store always win
@@ -226,7 +228,11 @@ export default function CanvasPage() {
     // single bad entry. This "stretches" the 3D world to true proportions —
     // rooms at real size against the fixed 2.8m wall height.
     const est: number[] = [];
-    for (const r of currentProject?.rooms ?? []) {
+    const dimSources = [
+      ...(currentProject?.rooms ?? []),
+      ...fetchedRooms,
+    ];
+    for (const r of dimSources) {
       const b = (r as any).box;
       if (!b) continue;
       const wM = Number((r as any).width);
@@ -245,6 +251,10 @@ export default function CanvasPage() {
     const BASE = sane.length >= 2
       ? sane[Math.floor(sane.length / 2)]   // median plan width in cm
       : 2600;                                // fallback (was 1500)
+    if (typeof window !== "undefined") {
+      console.info(`[nooi3d] world width: ${(BASE / 100).toFixed(1)}m ` +
+        `(${sane.length >= 2 ? "from " + sane.length + " measurements" : "fallback"})`);
+    }
     if (imageSize && imageSize.width > 0 && imageSize.height > 0) {
       if (imageSize.width >= imageSize.height) {
         return { width: Math.round(BASE), depth: Math.round(BASE * imageSize.height / imageSize.width) };
