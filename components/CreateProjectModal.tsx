@@ -104,6 +104,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   const [hasError, setHasError] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [dimsWarned, setDimsWarned] = useState(false);
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const roomIdCounter = useRef(100);
@@ -135,6 +136,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
         setFile(null);
         setIsDragging(false);
         setProjectId(null);
+        setDimsWarned(false);
         setApiError(null);
         setApiLoading(false);
         setRooms([]);
@@ -422,10 +424,17 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     // Step 4 — Save dimensions → persist to backend (merges with rooms saved above)
     if (step === 4) {
       const missingDims = rooms.filter(r => !r.length || !r.width || !r.height);
-      if (missingDims.length > 0) {
-        setApiError(`Please enter length and width for: ${missingDims.map(r => r.name).join(', ')}`);
+      if (missingDims.length > 0 && !dimsWarned) {
+        // warn once, but never block project creation on measurements —
+        // rooms without dimensions simply won't have sizes until edited later
+        setDimsWarned(true);
+        setApiError(
+          `No measurements for: ${missingDims.map(r => r.name).join(', ')}. ` +
+          `You can continue without them — click Continue again to proceed.`
+        );
         return;
       }
+      setApiError(null);
       try {
         setApiLoading(true);
         await saveDimensions(projectId!, rooms.map(toApiRoom));
