@@ -173,3 +173,34 @@ export async function generateRender(projectId: string, prompt: string, model: A
   if (!json.success) throw new Error(json.error || "Failed to generate render");
   return json.data as { image_url: string; model_requested: AiModel };
 }
+
+// ── ADD to lib/api/projects.ts ────────────────────────────────────────────────
+
+// Placed furniture item (mirrors PlacedFurniture in ThreeSceneV2)
+export interface FurniturePlacement {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  rotation: number;
+  modelId?: string;
+  sizeScale?: number;
+  color?: string | null;
+  materialPreset?: string | null;
+  scale?: [number, number, number];
+  width?: number;
+  depth?: number;
+  height?: number;
+}
+
+export async function saveFurniture(projectId: string, furniture: FurniturePlacement[]) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/furniture`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ furniture }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "Failed to save furniture");
+  return json.data as { furniture: FurniturePlacement[] };
+}
