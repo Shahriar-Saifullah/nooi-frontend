@@ -1,19 +1,5 @@
 "use client";
 
-/**
- * ThreeSceneV2 — parametric 3D from the floor plan vector model
- * ------------------------------------------------------------
- * Renders from the NEW pipeline output:
- *   • rooms[].polygon  → true-shape floor slabs (THREE.Shape)
- *   • rfWalls          → ONE box per wall centerline (no doubled walls)
- *   • openings         → cut into their wall: doors = full-height gap +
- *                        frame + leaf; windows = sill + glass + header
- *
- * Drop-in replacement for ThreeScene: same props, plus rooms may carry
- * `polygon?: [number, number][]` (percent coords). Falls back to `box`
- * when no polygon is present.
- */
-
 import React, {
   Suspense, useMemo, useRef, useState, useEffect,
   forwardRef, useImperativeHandle,
@@ -31,8 +17,6 @@ export interface PlacedFurniture {
   name: string;
   position: [number, number, number];
   rotation: number;
-  /** catalog model id — when set, a real GLTF model renders; when absent,
-      the legacy colored box (width/depth/height/color) renders instead */
   modelId?: string;
   sizeScale?: number;                 // uniform size multiplier (default 1)
   color?: string | null;              // material color override
@@ -409,7 +393,7 @@ function GltfModel({
       position={[item.position[0], fit.yOffset, item.position[2]]}
       rotation={[0, item.rotation, 0]}
       scale={fit.scale}
-      onClick={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
+      onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
     >
       <primitive object={clone} />
     </group>
@@ -429,7 +413,7 @@ function BoxFurniture({
       position={[item.position[0], h / 2, item.position[2]]}
       rotation={[0, item.rotation, 0]}
       castShadow receiveShadow
-      onClick={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
+      onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
     >
       <boxGeometry args={[w, h, d]} />
       <meshStandardMaterial
@@ -546,6 +530,8 @@ function SceneContent({
   // ── drag-to-move: press on the selected item, drag along the floor ──
   const { controls } = useThree() as any;
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const dragStart = useRef<{ x: number; z: number } | null>(null);
+  const dragArmed = useRef(false);
   useEffect(() => {
     const up = () => {
       setDraggingId(null);
@@ -557,6 +543,8 @@ function SceneContent({
 
   const startDrag = (id: string) => {
     setDraggingId(id);
+    dragStart.current = null;
+    dragArmed.current = false;
     if (controls) controls.enabled = false;
   };
 
@@ -586,6 +574,16 @@ function SceneContent({
           position={[0, 0.001, 0]}
           visible={false}
           onPointerMove={(e) => {
+            if (!dragStart.current) {
+              dragStart.current = { x: e.point.x, z: e.point.z };
+              return;
+            }
+            if (!dragArmed.current) {
+              const dx = e.point.x - dragStart.current.x;
+              const dz = e.point.z - dragStart.current.z;
+              if (Math.hypot(dx, dz) < 0.06) return;  // click jitter — ignore
+              dragArmed.current = true;
+            }
             onFurnitureMove?.(draggingId, [e.point.x, 0, e.point.z]);
           }}
         >
