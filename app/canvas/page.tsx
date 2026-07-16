@@ -10,8 +10,12 @@ import {
 } from "lucide-react";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
+import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
+import FurnitureInspector from "@/components/FurnitureInspector";
+import { catalogById, type CatalogItem } from "@/lib/furniture/catalog";
+import type { ThreeSceneHandle } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
-import { getProject } from "@/lib/api/projects";
+import { getProject, saveFurniture } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
@@ -29,51 +33,6 @@ const ThreeSceneV2 = dynamic(() => import("@/components/ThreeSceneV2"), {
 });
 
 // ─── Furniture catalogue ──────────────────────────────────────────────────────
-const FURNITURE_CATALOGUE = [
-  {
-    category: "Living Room",
-    items: [
-      { id: "sofa-3seat", name: "3-Seat Sofa", width: 220, depth: 90, height: 85, color: "#8a7156" },
-      { id: "armchair", name: "Armchair", width: 85, depth: 80, height: 85, color: "#6b5d4f" },
-      { id: "coffee-table", name: "Coffee Table", width: 120, depth: 60, height: 45, color: "#5c3d24" },
-      { id: "tv-stand", name: "TV Stand", width: 180, depth: 45, height: 55, color: "#3d2f26" },
-      { id: "bookshelf", name: "Bookshelf", width: 90, depth: 30, height: 180, color: "#4d3627" },
-      { id: "floor-lamp", name: "Floor Lamp", width: 35, depth: 35, height: 160, color: "#c0a870" },
-    ],
-  },
-  {
-    category: "Bedroom",
-    items: [
-      { id: "king-bed", name: "King Bed", width: 200, depth: 220, height: 50, color: "#8d9fa0" },
-      { id: "queen-bed", name: "Queen Bed", width: 160, depth: 200, height: 50, color: "#9aacad" },
-      { id: "nightstand", name: "Nightstand", width: 55, depth: 45, height: 60, color: "#5c3d24" },
-      { id: "wardrobe", name: "Wardrobe", width: 200, depth: 60, height: 220, color: "#4a3728" },
-    ],
-  },
-  {
-    category: "Dining",
-    items: [
-      { id: "dining-table-6", name: "Dining Table (6)", width: 200, depth: 90, height: 76, color: "#7a5c3c" },
-      { id: "dining-chair", name: "Dining Chair", width: 45, depth: 50, height: 90, color: "#5c3d24" },
-      { id: "sideboard", name: "Sideboard", width: 160, depth: 45, height: 80, color: "#4d3627" },
-    ],
-  },
-  {
-    category: "Office",
-    items: [
-      { id: "desk", name: "Desk", width: 160, depth: 70, height: 75, color: "#8a7156" },
-      { id: "office-chair", name: "Office Chair", width: 65, depth: 65, height: 110, color: "#2d2d2d" },
-    ],
-  },
-  {
-    category: "Decor",
-    items: [
-      { id: "plant-large", name: "Large Plant", width: 50, depth: 50, height: 120, color: "#3a6b3a" },
-      { id: "plant-small", name: "Small Plant", width: 25, depth: 25, height: 50, color: "#4d8b4d" },
-      { id: "rug-large", name: "Rug (Large)", width: 200, depth: 140, height: 2, color: "#c4a882" },
-    ],
-  },
-];
 
 const PALETTE_COLORS = ["#f5f0e8", "#3d5a4c", "#8a8a8a", "#1a6b63", "#2e8b7a", "#e8c840"];
 const SUGGESTION_CHIPS = ["Cozy Scandinavian living room", "Maximise natural light", "Modern minimalist bedroom"];
@@ -89,15 +48,11 @@ function toGridRoom(room: any, index: number): GridRoom {
   };
 }
 
-const EDIT_COLORS = ["#8a7156","#5c3d24","#2d2d2d","#4a7c59","#7b9ab2","#c4a882","#f0ede8","#3d5a4c"];
-
 export default function CanvasPage() {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [rightTab, setRightTab] = useState<"elements" | "edit">("elements");
   const [zoom, setZoom] = useState(100);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilterChip, setActiveFilterChip] = useState("All");
   const [mounted, setMounted] = useState(false);
 
   const { currentProject, setProjectRooms, setProject } = useProjectStore();
@@ -115,6 +70,7 @@ export default function CanvasPage() {
   const [renderError, setRenderError] = useState<string | null>(null);
 
   const [placedFurniture, setPlacedFurniture] = useState<PlacedFurniture[]>([]);
+  const sceneRef = useRef<ThreeSceneHandle>(null);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -138,6 +94,11 @@ export default function CanvasPage() {
         .then(p => {
           const apiRooms = p.room_data?.rooms ?? [];
           if (apiRooms.length > 0) setFetchedRooms(apiRooms);
+          const savedFurniture = (p.room_data as any)?.furniture;
+          if (Array.isArray(savedFurniture) && savedFurniture.length > 0) {
+            setPlacedFurniture(savedFurniture);
+            furnitureLoaded.current = true;
+          }
           if (!haveStoreRooms && apiRooms.length > 0) {
             // server rooms only when the store has none — the user's freshly
             // edited names in the store always win
@@ -168,36 +129,90 @@ export default function CanvasPage() {
   // Resolve floor plan URL from either field name (store uses both)
   const floorPlanUrl = currentProject?.floor_plan_url || currentProject?.floorPlanUrl || null;
 
-  const handleDragStart = (e: React.DragEvent, item: any) => {
-    e.dataTransfer.setData("furniture", JSON.stringify(item));
+
+  const addFurniture = (cat: CatalogItem, position: [number, number, number]) => {
+    const newItem: PlacedFurniture = {
+      id: `${cat.id}-${Date.now()}`,
+      modelId: cat.id,
+      name: cat.name,
+      position,
+      rotation: 0,
+      sizeScale: 1,
+      color: null,
+      materialPreset: null,
+      // legacy fields keep older consumers happy + power the box fallback
+      scale: [1, 1, 1],
+      width: cat.size.w,
+      depth: cat.size.d,
+      height: cat.size.h,
+    };
+    setPlacedFurniture(prev => [...prev, newItem]);
+    setSelectedFurnitureId(newItem.id);
+    setRightTab("edit");
   };
 
   const handleDrop3D = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOverCanvas(false);
     if (viewMode !== "3d") return;
-    const data = e.dataTransfer.getData("furniture");
-    if (!data) return;
-    const item = JSON.parse(data);
+    const modelId = e.dataTransfer.getData(DND_MIME) ||
+                    e.dataTransfer.getData("text/plain");
+    const cat = modelId ? catalogById(modelId) : undefined;
+    if (!cat) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const x = ((e.clientX - rect.left) / rect.width - 0.5) * 5;
-    const z = ((e.clientY - rect.top) / rect.height - 0.5) * 4;
-    const newItem: PlacedFurniture = {
-      id: `${item.id}-${Date.now()}`,
-      name: item.name,
-      position: [x, 0, z],
-      rotation: 0,
-      scale: [1, 1, 1],
-      color: item.color,
-      width: item.width,
-      depth: item.depth,
-      height: item.height,
-    };
-    setPlacedFurniture(prev => [...prev, newItem]);
-    setSelectedFurnitureId(newItem.id);
-    setRightTab("edit");
+    // client coords → NDC → raycast onto the actual floor plane
+    const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    const hit = sceneRef.current?.floorPointFromNdc(nx, ny);
+    const pos: [number, number, number] = hit ? [hit[0], 0, hit[1]] : [0, 0, 0];
+    addFurniture(cat, pos);
   };
+
+  // ── persist furniture: debounced auto-save 1.5s after the last change ──
+  const furnitureLoaded = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!currentProject?.id) return;
+    // skip the very first render (empty state) and the load itself
+    if (!furnitureLoaded.current && placedFurniture.length === 0) return;
+    furnitureLoaded.current = true;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveFurniture(currentProject.id, placedFurniture as any)
+        .catch(err => console.error("Furniture save failed:", err));
+    }, 1500);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [placedFurniture, currentProject?.id]);
+
+  const handleFurnitureMove = (id: string, position: [number, number, number]) => {
+    setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, position } : f));
+  };
+
+  const patchSelected = (patch: Partial<PlacedFurniture>) => {
+    if (!selectedFurnitureId) return;
+    setPlacedFurniture(prev =>
+      prev.map(f => f.id === selectedFurnitureId ? { ...f, ...patch } : f));
+  };
+
+  // keyboard: Delete removes, R rotates the selected item
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!selectedFurnitureId) return;
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        setPlacedFurniture(prev => prev.filter(f => f.id !== selectedFurnitureId));
+        setSelectedFurnitureId(null);
+      } else if (e.key.toLowerCase() === "r") {
+        setPlacedFurniture(prev => prev.map(f =>
+          f.id === selectedFurnitureId
+            ? { ...f, rotation: (f.rotation ?? 0) + Math.PI / 4 } : f));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedFurnitureId]);
 
   const handleRotate = () => {
     if (!selectedFurnitureId) return;
@@ -209,9 +224,6 @@ export default function CanvasPage() {
     setSelectedFurnitureId(null);
   };
 
-  const setColor = (color: string) => {
-    setPlacedFurniture(prev => prev.map(f => f.id === selectedFurnitureId ? { ...f, color } : f));
-  };
 
   const selectedFurniture = placedFurniture.find(f => f.id === selectedFurnitureId);
 
@@ -251,6 +263,10 @@ export default function CanvasPage() {
     const BASE = sane.length >= 2
       ? sane[Math.floor(sane.length / 2)]   // median plan width in cm
       : 2600;                                // fallback (was 1500)
+    // VISUAL_SCALE: presentation-only footprint stretch. Rooms grow 1.5x
+    // relative to the fixed 2.8m wall height, which reads airier in the
+    // dollhouse view. Proportions between rooms stay exact; displayed
+    // measurements are untouched (they come from the data, not the scene).
     const VISUAL_SCALE = 1.5;
     const SCALED = BASE * VISUAL_SCALE;
     if (typeof window !== "undefined") {
@@ -286,14 +302,6 @@ export default function CanvasPage() {
     }
     return { width: 1500, depth: 1200 };
   })();
-
-  const filteredCatalogue = FURNITURE_CATALOGUE.map(cat => ({
-    ...cat,
-    items: cat.items.filter(item =>
-      (activeFilterChip === "All" || cat.category === activeFilterChip) &&
-      item.name.toLowerCase().includes(searchQuery.toLowerCase())
-    ),
-  })).filter(cat => cat.items.length > 0);
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#f5f5f5] overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -532,9 +540,10 @@ export default function CanvasPage() {
 
           {/* 3D View */}
           {viewMode === "3d" && (
-            <div className="flex-1 overflow-hidden" onClick={() => setSelectedFurnitureId(null)}>
+            <div className="flex-1 overflow-hidden">
               {mounted && (
                 <ThreeSceneV2
+                  ref={sceneRef}
                   roomWidthCm={roomDimensionsCm.width}
                   roomDepthCm={roomDimensionsCm.depth}
                   rooms={rooms}
@@ -542,6 +551,7 @@ export default function CanvasPage() {
                   openings={openings}
                   furniture={placedFurniture}
                   onFurnitureSelect={setSelectedFurnitureId}
+                  onFurnitureMove={handleFurnitureMove}
                   selectedFurnitureId={selectedFurnitureId}
                 />
               )}
@@ -568,87 +578,26 @@ export default function CanvasPage() {
           </div>
 
           {rightTab === "elements" ? (
-            <>
-              {viewMode === "3d" && (
-                <div className="mx-3 mb-2 bg-[#f0f7f6] border border-[#c7de7d] rounded-[10px] px-3 py-2">
-                  <p className="text-[11px] text-[#004643] font-medium">Drag items into the 3D scene →</p>
+            <div className="flex-1 overflow-hidden px-3 pb-3">
+              {viewMode === "3d" ? (
+                <FurnitureLibrary
+                  onQuickAdd={(cat) => addFurniture(cat, [0, 0, 0])}
+                />
+              ) : (
+                <div className="flex flex-col items-center py-6 gap-2 text-center">
+                  <p className="text-[11px] text-[#a3a3a3]">Switch to 3D view to place furniture</p>
+                  <button onClick={() => setViewMode("3d")} className="px-4 py-2 bg-[#003832] text-white text-[11px] font-medium rounded-full hover:bg-[#004643] transition-colors">Switch to 3D →</button>
                 </div>
               )}
-              <div className="px-3 pb-2">
-                <div className="flex items-center gap-2 bg-[#f5f5f5] rounded-[8px] px-3 h-[34px]">
-                  <Search className="w-[13px] h-[13px] text-[#a3a3a3] shrink-0" />
-                  <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search furniture…" className="flex-1 bg-transparent text-[12px] placeholder:text-[#a3a3a3] focus:outline-none" />
-                </div>
-              </div>
-              <div className="px-3 pb-2">
-                <div className="flex gap-1.5 overflow-x-auto scrollbar-hide py-0.5">
-                  {["All", ...FURNITURE_CATALOGUE.map(c => c.category)].map(chip => (
-                    <button key={chip} onClick={() => setActiveFilterChip(chip)} className={`px-3 py-1 rounded-full text-[11px] font-medium transition-all shrink-0 ${activeFilterChip === chip ? "bg-[#003832] text-white" : "bg-[#f5f5f5] text-[#737373] hover:text-[#0a0a0a]"}`}>{chip}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto scrollbar-hide px-3 pb-4">
-                {filteredCatalogue.map(cat => (
-                  <div key={cat.category} className="mb-4">
-                    <p className="text-[11px] font-bold text-[#a3a3a3] uppercase tracking-[0.05em] pt-2 pb-1.5">{cat.category}</p>
-                    <div className="grid grid-cols-2 gap-[8px]">
-                      {cat.items.map(item => (
-                        <div
-                          key={item.id}
-                          draggable={viewMode === "3d"}
-                          onDragStart={e => handleDragStart(e, item)}
-                          className={`flex flex-col bg-white border border-[#e5e5e5] rounded-[12px] overflow-hidden transition-all group ${viewMode === "3d" ? "cursor-grab active:cursor-grabbing hover:border-[#003832] hover:shadow-sm" : "opacity-60"}`}
-                        >
-                          <div className="w-full h-[52px] flex items-center justify-center" style={{ backgroundColor: item.color + "22" }}>
-                            <div className="w-8 h-8 rounded-[6px] border border-black/10" style={{ backgroundColor: item.color }} />
-                          </div>
-                          <div className="p-2">
-                            <p className="text-[11px] font-bold text-[#171717] truncate group-hover:text-[#003832] transition-colors">{item.name}</p>
-                            <p className="text-[10px] text-[#a3a3a3] mt-0.5">{item.width}×{item.depth} cm</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {viewMode === "2d" && (
-                  <div className="flex flex-col items-center py-6 gap-2 text-center">
-                    <p className="text-[11px] text-[#a3a3a3]">Switch to 3D view to place furniture</p>
-                    <button onClick={() => setViewMode("3d")} className="px-4 py-2 bg-[#003832] text-white text-[11px] font-medium rounded-full hover:bg-[#004643] transition-colors">Switch to 3D →</button>
-                  </div>
-                )}
-              </div>
-            </>
+            </div>
           ) : (
             <div className="flex-1 overflow-y-auto scrollbar-hide px-3 py-4">
               {selectedFurniture ? (
-                <div className="flex flex-col gap-4">
-                  <div>
-                    <p className="text-[13px] font-semibold text-[#0a0a0a] mb-1">{selectedFurniture.name}</p>
-                    <p className="text-[11px] text-[#737373]">{selectedFurniture.width} × {selectedFurniture.depth} × {selectedFurniture.height} cm</p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-bold text-[#737373] uppercase tracking-[0.05em] mb-2">Color</p>
-                    <div className="grid grid-cols-4 gap-2">
-                      {EDIT_COLORS.map(color => (
-                        <button
-                          key={color}
-                          onClick={() => setColor(color)}
-                          className={`aspect-square rounded-[8px] border-2 transition-all hover:scale-105 ${selectedFurniture.color === color ? "border-[#003832]" : "border-transparent"}`}
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={handleRotate} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-[#f5f5f5] rounded-[10px] text-[12px] font-medium text-[#525252] hover:bg-[#e8e8e8] transition-colors">
-                      <RotateCw size={13} />Rotate 45°
-                    </button>
-                    <button onClick={handleDelete} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-[#fef2f2] rounded-[10px] text-[12px] font-medium text-[#ef4444] hover:bg-[#fee2e2] transition-colors">
-                      <Trash2 size={13} />Delete
-                    </button>
-                  </div>
-                </div>
+                <FurnitureInspector
+                  item={selectedFurniture}
+                  onChange={patchSelected}
+                  onDelete={handleDelete}
+                />
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-10">
                   <Sofa size={28} className="text-[#d4d4d4]" />

@@ -1,11 +1,28 @@
 "use client";
 
+/**
+ * ThreeSceneV2 — parametric 3D from the floor plan vector model
+ * ------------------------------------------------------------
+ * Renders from the NEW pipeline output:
+ *   • rooms[].polygon  → true-shape floor slabs (THREE.Shape)
+ *   • rfWalls          → ONE box per wall centerline (no doubled walls)
+ *   • openings         → cut into their wall: doors = full-height gap +
+ *                        frame + leaf; windows = sill + glass + header
+ *
+ * Drop-in replacement for ThreeScene: same props, plus rooms may carry
+ * `polygon?: [number, number][]` (percent coords). Falls back to `box`
+ * when no polygon is present.
+ */
 
-import React, { Suspense, useMemo, useRef } from "react";
-import { Canvas } from "@react-three/fiber";
-import { OrbitControls, ContactShadows } from "@react-three/drei";
+import React, {
+  Suspense, useMemo, useRef, useState, useEffect,
+  forwardRef, useImperativeHandle,
+} from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
+import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -14,11 +31,22 @@ export interface PlacedFurniture {
   name: string;
   position: [number, number, number];
   rotation: number;
-  scale: [number, number, number];
-  color: string;
-  width: number;
-  depth: number;
-  height: number;
+  /** catalog model id — when set, a real GLTF model renders; when absent,
+      the legacy colored box (width/depth/height/color) renders instead */
+  modelId?: string;
+  sizeScale?: number;                 // uniform size multiplier (default 1)
+  color?: string | null;              // material color override
+  materialPreset?: string | null;     // id from MATERIAL_PRESETS
+  // legacy box fields (still used as GLTF fallback)
+  scale?: [number, number, number];
+  width?: number;
+  depth?: number;
+  height?: number;
+}
+
+export interface ThreeSceneHandle {
+  /** raycast an NDC point (-1..1) onto the floor; returns world [x, z] */
+  floorPointFromNdc: (nx: number, ny: number) => [number, number] | null;
 }
 
 export interface Opening {
@@ -48,6 +76,7 @@ interface ThreeSceneV2Props {
   openings?: Opening[];
   furniture?: PlacedFurniture[];
   onFurnitureSelect?: (id: string | null) => void;
+  onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   selectedFurnitureId?: string | null;
 }
 
@@ -319,32 +348,126 @@ function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
   );
 }
 
-// ─── Furniture (kept compatible with the old scene) ─────────────────────────
+// ─── Furniture ──────────────────────────────────────────────────────────────
 
-function FurnitureMesh({
-  item, selected, onSelect,
-}: {
-  item: PlacedFurniture;
-  selected: boolean;
-  onSelect?: (id: string | null) => void;
-}) {
+// Apply color/material overrides + selection highlight to a cloned model
+function applyOverrides(
+  root: THREE.Object3D, item: PlacedFurniture, selected: boolean,
+) {
+  const preset = item.materialPreset
+    ? MATERIAL_PRESETS.find(m => m.id === item.materialPreset) : null;
+  root.traverse((n: any) => {
+    if (!n.isMesh) return;
+    n.castShadow = true;
+    n.receiveShadow = true;
+    if (!n.userData._origMat) n.userData._origMat = n.material;
+    const base: THREE.MeshStandardMaterial =
+      (n.userData._origMat as THREE.MeshStandardMaterial);
+    // only override when the user asked for it, else keep the model's material
+    if (item.color || preset || selected) {
+      const m = base.clone();
+      if (item.color) m.color = new THREE.Color(item.color);
+      if (preset) { m.roughness = preset.roughness; m.metalness = preset.metalness; }
+      if (selected) { m.emissive = new THREE.Color("#2dd4bf"); m.emissiveIntensity = 0.25; }
+      n.material = m;
+    } else {
+      n.material = base;
+    }
+  });
+}
+
+function GltfModel({
+  item, selected, world,
+}: { item: PlacedFurniture; selected: boolean; world: World }) {
+  const cat = item.modelId ? catalogById(item.modelId) : undefined;
+  const { scene } = useGLTF(cat!.path);
+  const clone = useMemo(() => scene.clone(true), [scene]);
+  const group = useRef<THREE.Group>(null);
+
+  // auto-scale the raw model to the catalog real-world size (m), * sizeScale
+  const fit = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(clone);
+    const size = box.getSize(new THREE.Vector3());
+    const s = item.sizeScale ?? 1;
+    const tw = (cat!.size.w / 100) * s;
+    const th = (cat!.size.h / 100) * s;
+    const td = (cat!.size.d / 100) * s;
+    const sx = size.x > 1e-4 ? tw / size.x : 1;
+    const sy = size.y > 1e-4 ? th / size.y : 1;
+    const sz = size.z > 1e-4 ? td / size.z : 1;
+    // sit the model on the floor: shift up by its (scaled) min-y
+    const minY = box.min.y * sy;
+    return { scale: [sx, sy, sz] as [number, number, number], yOffset: -minY };
+  }, [clone, cat, item.sizeScale]);
+
+  useEffect(() => { applyOverrides(clone, item, selected); },
+    [clone, item.color, item.materialPreset, selected, item]);
+
+  return (
+    <group
+      ref={group}
+      position={[item.position[0], fit.yOffset, item.position[2]]}
+      rotation={[0, item.rotation, 0]}
+      scale={fit.scale}
+      onClick={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
+    >
+      <primitive object={clone} />
+    </group>
+  );
+}
+
+function BoxFurniture({
+  item, selected,
+}: { item: PlacedFurniture; selected: boolean }) {
+  const cat = item.modelId ? catalogById(item.modelId) : undefined;
+  const s = item.sizeScale ?? 1;
+  const w = ((cat?.size.w ?? item.width ?? 80) / 100) * s;
+  const d = ((cat?.size.d ?? item.depth ?? 80) / 100) * s;
+  const h = ((cat?.size.h ?? item.height ?? 80) / 100) * s;
   return (
     <mesh
-      position={item.position}
+      position={[item.position[0], h / 2, item.position[2]]}
       rotation={[0, item.rotation, 0]}
-      scale={item.scale}
-      castShadow
-      onClick={(e) => { e.stopPropagation(); onSelect?.(item.id); }}
+      castShadow receiveShadow
+      onClick={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
     >
-      <boxGeometry args={[item.width / 100, item.height / 100, item.depth / 100]} />
+      <boxGeometry args={[w, h, d]} />
       <meshStandardMaterial
-        color={item.color}
-        roughness={0.6}
+        color={item.color || cat?.color || "#b09a7a"}
+        roughness={0.7}
         emissive={selected ? "#2dd4bf" : "#000000"}
-        emissiveIntensity={selected ? 0.35 : 0}
+        emissiveIntensity={selected ? 0.3 : 0}
       />
     </mesh>
   );
+}
+
+function FurnitureItem({
+  item, selected, world,
+}: { item: PlacedFurniture; selected: boolean; world: World }) {
+  const cat = item.modelId ? catalogById(item.modelId) : undefined;
+  // GLTF path exists → try the real model (Suspense handles load); else box
+  if (cat) {
+    return (
+      <Suspense fallback={<BoxFurniture item={item} selected={selected} />}>
+        <ModelErrorBoundary fallback={<BoxFurniture item={item} selected={selected} />}>
+          <GltfModel item={item} selected={selected} world={world} />
+        </ModelErrorBoundary>
+      </Suspense>
+    );
+  }
+  return <BoxFurniture item={item} selected={selected} />;
+}
+
+// If a .glb file is missing/broken, fall back to the colored box instead of
+// crashing the whole canvas.
+class ModelErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { failed: boolean }
+> {
+  constructor(props: any) { super(props); this.state = { failed: false }; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
 // ─── Opening → wall assignment ───────────────────────────────────────────────
@@ -388,13 +511,31 @@ function cutsPerWall(
 
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
+// Registers a raycast helper for external drop placement (via the handle)
+function PlacementBridge({
+  register,
+}: { register: (fn: (nx: number, ny: number) => [number, number] | null) => void }) {
+  const { camera } = useThree();
+  useEffect(() => {
+    const ray = new THREE.Raycaster();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    register((nx, ny) => {
+      ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      return ray.ray.intersectPlane(plane, hit) ? [hit.x, hit.z] : null;
+    });
+  }, [camera, register]);
+  return null;
+}
+
 function SceneContent({
   rooms, rfWalls, openings, furniture, world,
-  onFurnitureSelect, selectedFurnitureId,
+  onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
   onFurnitureSelect?: (id: string | null) => void;
+  onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   selectedFurnitureId?: string | null;
 }) {
   const cuts = useMemo(
@@ -402,13 +543,55 @@ function SceneContent({
     [rfWalls, openings, world],
   );
 
+  // ── drag-to-move: press on the selected item, drag along the floor ──
+  const { controls } = useThree() as any;
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  useEffect(() => {
+    const up = () => {
+      setDraggingId(null);
+      if (controls) controls.enabled = true;
+    };
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, [controls]);
+
+  const startDrag = (id: string) => {
+    setDraggingId(id);
+    if (controls) controls.enabled = false;
+  };
+
+  // expose select+drag to furniture items (avoids prop-drilling into
+  // suspense/error-boundary wrapped models)
+  useEffect(() => {
+    (window as any).__nooiSelect = (id: string) => {
+      onFurnitureSelect?.(id);
+      startDrag(id);
+    };
+    return () => { delete (window as any).__nooiSelect; };
+  });
+
   return (
     <group>
       {/* ground */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow
+        onClick={() => onFurnitureSelect?.(null)}>
         <planeGeometry args={[world.totalW * 1.25, world.totalD * 1.25]} />
         <meshStandardMaterial color="#eae7e0" roughness={1} />
       </mesh>
+
+      {/* invisible drag plane: active only while moving an item */}
+      {draggingId && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, 0.001, 0]}
+          visible={false}
+          onPointerMove={(e) => {
+            onFurnitureMove?.(draggingId, [e.point.x, 0, e.point.z]);
+          }}
+        >
+          <planeGeometry args={[world.totalW * 3, world.totalD * 3]} />
+        </mesh>
+      )}
 
       {rooms.map((r) => <RoomFloor key={r.id} room={r} world={world} />)}
 
@@ -418,9 +601,8 @@ function SceneContent({
       ))}
 
       {furniture.map((f) => (
-        <FurnitureMesh key={f.id} item={f}
-          selected={f.id === selectedFurnitureId}
-          onSelect={onFurnitureSelect} />
+        <FurnitureItem key={f.id} item={f} world={world}
+          selected={f.id === selectedFurnitureId} />
       ))}
 
       <ContactShadows position={[0, 0, 0]} opacity={0.22}
@@ -431,7 +613,7 @@ function SceneContent({
 
 // ─── Root component ──────────────────────────────────────────────────────────
 
-export default function ThreeSceneV2({
+const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function ThreeSceneV2({
   roomWidthCm = 1600,
   roomDepthCm = 1200,
   rooms = [],
@@ -439,13 +621,20 @@ export default function ThreeSceneV2({
   openings = [],
   furniture = [],
   onFurnitureSelect,
+  onFurnitureMove,
   selectedFurnitureId = null,
-}: ThreeSceneV2Props) {
+}, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100),
     [roomWidthCm, roomDepthCm],
   );
   const controlsRef = useRef(null);
+  const raycastFn = useRef<((nx: number, ny: number) => [number, number] | null) | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    floorPointFromNdc: (nx: number, ny: number) =>
+      raycastFn.current ? raycastFn.current(nx, ny) : null,
+  }), []);
 
   return (
     <Canvas
@@ -470,6 +659,7 @@ export default function ThreeSceneV2({
         position={[-world.totalW, world.maxDim, -world.totalD]}
         intensity={0.3}
       />
+      <PlacementBridge register={(fn) => { raycastFn.current = fn; }} />
       <Suspense fallback={null}>
         <SceneContent
           rooms={rooms}
@@ -478,6 +668,7 @@ export default function ThreeSceneV2({
           furniture={furniture}
           world={world}
           onFurnitureSelect={onFurnitureSelect}
+          onFurnitureMove={onFurnitureMove}
           selectedFurnitureId={selectedFurnitureId}
         />
       </Suspense>
@@ -486,4 +677,6 @@ export default function ThreeSceneV2({
         maxDistance={world.maxDim * 3} />
     </Canvas>
   );
-}
+});
+
+export default ThreeSceneV2;
