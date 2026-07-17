@@ -1,5 +1,6 @@
 "use client";
 
+
 import React, {
   Suspense, useMemo, useRef, useState, useEffect,
   forwardRef, useImperativeHandle,
@@ -17,6 +18,8 @@ export interface PlacedFurniture {
   name: string;
   position: [number, number, number];
   rotation: number;
+  /** catalog model id — when set, a real GLTF model renders; when absent,
+      the legacy colored box (width/depth/height/color) renders instead */
   modelId?: string;
   sizeScale?: number;                 // uniform size multiplier (default 1)
   color?: string | null;              // material color override
@@ -538,7 +541,13 @@ function SceneContent({
       if (controls) controls.enabled = true;
     };
     window.addEventListener("pointerup", up);
-    return () => window.removeEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
+    };
   }, [controls]);
 
   const startDrag = (id: string) => {
@@ -574,6 +583,17 @@ function SceneContent({
           position={[0, 0.001, 0]}
           visible={false}
           onPointerMove={(e) => {
+            // the button must be HELD for anything to move: click = select
+            // only; a stuck drag with no button down ends itself right here
+            const buttons =
+              (e as any).buttons ?? (e as any).nativeEvent?.buttons ?? 0;
+            if (buttons === 0) {
+              setDraggingId(null);
+              dragStart.current = null;
+              dragArmed.current = false;
+              if (controls) controls.enabled = true;
+              return;
+            }
             if (!dragStart.current) {
               dragStart.current = { x: e.point.x, z: e.point.z };
               return;
