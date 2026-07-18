@@ -7,6 +7,7 @@ import {
   Search, Minus, Plus, RotateCcw, Sofa,
   ChevronDown, ChevronLeft, Share2, Download,
   SlidersHorizontal, Loader2, RotateCw, Trash2,
+  Image as ImageIcon, Box,
 } from "lucide-react";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
@@ -303,6 +304,46 @@ export default function CanvasPage() {
     return { width: 1500, depth: 1200 };
   })();
 
+  // ── Export (PNG snapshot / GLB model) ──────────────────────────────────────
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const exportFileBase = (currentProject?.name || "nooi-design")
+    .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "nooi-design";
+
+  const triggerDownload = (href: string, filename: string) => {
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const handleExportPng = () => {
+    setExportMenuOpen(false);
+    const dataUrl = sceneRef.current?.captureImage();
+    if (!dataUrl) return;
+    triggerDownload(dataUrl, `${exportFileBase}.png`);
+  };
+
+  const handleExportGlb = async () => {
+    setExportMenuOpen(false);
+    if (!sceneRef.current?.exportGlb) return;
+    setExporting(true);
+    try {
+      const blob = await sceneRef.current.exportGlb();
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, `${exportFileBase}.glb`);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (err) {
+      console.error("GLB export failed:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen w-full bg-[#f5f5f5] overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
 
@@ -332,9 +373,51 @@ export default function CanvasPage() {
           <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-gray-50 text-[12px] font-medium text-[#525252]">
             <Share2 size={14} />Share
           </button>
-          <button className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#004643] rounded-full hover:bg-[#003633] text-[12px] font-medium text-white">
-            <Download size={14} />Export
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setExportMenuOpen(o => !o)}
+              disabled={exporting}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#004643] rounded-full hover:bg-[#003633] text-[12px] font-medium text-white disabled:opacity-60"
+            >
+              {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Export
+            </button>
+            {exportMenuOpen && (
+              <>
+                {/* click-away backdrop */}
+                <div className="fixed inset-0 z-40" onClick={() => setExportMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1.5 z-50 w-[230px] bg-white border border-[#e5e5e5] rounded-[12px] shadow-[0_12px_24px_-4px_rgba(0,0,0,0.12)] py-1.5">
+                  <button
+                    onClick={handleExportPng}
+                    disabled={viewMode !== "3d"}
+                    className="w-full flex items-start gap-2.5 px-3.5 py-2 hover:bg-[#fafafa] disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                  >
+                    <ImageIcon size={15} className="mt-[1px] shrink-0 text-[#004643]" />
+                    <span>
+                      <span className="block text-[12px] font-medium text-[#0a0a0a]">Export as image</span>
+                      <span className="block text-[11px] text-[#737373]">PNG snapshot of the current view</span>
+                    </span>
+                  </button>
+                  <button
+                    onClick={handleExportGlb}
+                    disabled={viewMode !== "3d" || exporting}
+                    className="w-full flex items-start gap-2.5 px-3.5 py-2 hover:bg-[#fafafa] disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                  >
+                    <Box size={15} className="mt-[1px] shrink-0 text-[#004643]" />
+                    <span>
+                      <span className="block text-[12px] font-medium text-[#0a0a0a]">Export as 3D model</span>
+                      <span className="block text-[11px] text-[#737373]">GLB file with rooms &amp; furniture</span>
+                    </span>
+                  </button>
+                  {viewMode !== "3d" && (
+                    <p className="px-3.5 pt-1.5 pb-1 text-[11px] text-[#a3a3a3] border-t border-[#f0f0f0] mt-1">
+                      Switch to 3D view to export
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
