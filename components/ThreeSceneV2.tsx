@@ -11,6 +11,19 @@ import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
+import WalkthroughCamera from "@/components/WalkthroughCamera";
+
+// ─── Canvas Bridge Helper ──────────────────────────────────────────────────────
+function CanvasBridge({ onCanvasReady }: { onCanvasReady: (canvas: HTMLCanvasElement) => void }) {
+  const { gl } = useThree();
+  useEffect(() => {
+    if (gl.domElement) {
+      onCanvasReady(gl.domElement);
+    }
+  }, [gl, onCanvasReady]);
+  return null;
+}
+
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +52,8 @@ export interface ThreeSceneHandle {
   captureImage: () => string | null;
   /** export the whole scene (rooms, walls, furniture) as a binary glTF blob */
   exportGlb: () => Promise<Blob | null>;
+  /** get the HTML canvas element for recording */
+  getCanvasElement: () => HTMLCanvasElement | null;
 }
 
 export interface Opening {
@@ -70,6 +85,9 @@ interface ThreeSceneV2Props {
   onFurnitureSelect?: (id: string | null) => void;
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   selectedFurnitureId?: string | null;
+  walkthroughActive?: boolean;
+  walkthroughPaused?: boolean;
+  onWalkthroughProgress?: (progress: number) => void;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -696,6 +714,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   onFurnitureSelect,
   onFurnitureMove,
   selectedFurnitureId = null,
+  walkthroughActive = false,
+  walkthroughPaused = false,
+  onWalkthroughProgress,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100),
@@ -704,6 +725,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   const controlsRef = useRef(null);
   const raycastFn = useRef<((nx: number, ny: number) => [number, number] | null) | null>(null);
   const exportApi = useRef<SceneExportApi | null>(null);
+  const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 
   useImperativeHandle(ref, () => ({
     floorPointFromNdc: (nx: number, ny: number) =>
@@ -712,6 +734,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       exportApi.current ? exportApi.current.capture() : null,
     exportGlb: async () =>
       exportApi.current ? exportApi.current.exportGlb() : null,
+    getCanvasElement: () => canvasElementRef.current,
   }), []);
 
   return (
@@ -739,6 +762,15 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       />
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }} />
       <ExportBridge register={(api) => { exportApi.current = api; }} />
+      <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
+      <WalkthroughCamera
+        rooms={rooms}
+        totalW={world.totalW}
+        totalD={world.totalD}
+        active={walkthroughActive}
+        paused={walkthroughPaused}
+        onProgress={onWalkthroughProgress}
+      />
       <Suspense fallback={null}>
         <SceneContent
           rooms={rooms}
@@ -753,7 +785,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       </Suspense>
       <OrbitControls ref={controlsRef} makeDefault
         maxPolarAngle={Math.PI / 2.05} minDistance={2}
-        maxDistance={world.maxDim * 3} />
+        maxDistance={world.maxDim * 3}
+        enabled={!(walkthroughActive && !walkthroughPaused)} />
     </Canvas>
   );
 });
