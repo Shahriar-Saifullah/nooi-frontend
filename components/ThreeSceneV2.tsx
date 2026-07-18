@@ -397,6 +397,7 @@ function GltfModel({
       rotation={[0, item.rotation, 0]}
       scale={fit.scale}
       onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
+      onClick={(e) => e.stopPropagation()}
     >
       <primitive object={clone} />
     </group>
@@ -417,6 +418,7 @@ function BoxFurniture({
       rotation={[0, item.rotation, 0]}
       castShadow receiveShadow
       onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
+      onClick={(e) => e.stopPropagation()}
     >
       <boxGeometry args={[w, h, d]} />
       <meshStandardMaterial
