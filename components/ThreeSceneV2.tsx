@@ -8,6 +8,7 @@ import React, {
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 
@@ -34,6 +35,10 @@ export interface PlacedFurniture {
 export interface ThreeSceneHandle {
   /** raycast an NDC point (-1..1) onto the floor; returns world [x, z] */
   floorPointFromNdc: (nx: number, ny: number) => [number, number] | null;
+  /** render the current view and return it as a PNG data-URL */
+  captureImage: () => string | null;
+  /** export the whole scene (rooms, walls, furniture) as a binary glTF blob */
+  exportGlb: () => Promise<Blob | null>;
 }
 
 export interface Opening {
@@ -517,6 +522,52 @@ function PlacementBridge({
   return null;
 }
 
+// Exposes capture (PNG) + exportGlb (binary glTF) to the parent via a ref.
+// Lives inside the Canvas so it can reach gl/scene/camera through useThree.
+export interface SceneExportApi {
+  capture: () => string;
+  exportGlb: () => Promise<Blob>;
+}
+
+function ExportBridge({
+  register,
+}: { register: (api: SceneExportApi) => void }) {
+  const { gl, scene, camera } = useThree();
+  useEffect(() => {
+    register({
+      capture: () => {
+        // force a fresh frame so the buffer is valid without needing
+        // preserveDrawingBuffer (which costs perf if always on)
+        gl.render(scene, camera);
+        return gl.domElement.toDataURL("image/png");
+      },
+      exportGlb: () =>
+        new Promise<Blob>((resolve, reject) => {
+          // temporarily hide helper-only objects (e.g. contact shadows)
+          const hidden: THREE.Object3D[] = [];
+          scene.traverse((o) => {
+            if (o.name === "nooi-noexport" && o.visible) {
+              o.visible = false;
+              hidden.push(o);
+            }
+          });
+          const restore = () => hidden.forEach((o) => { o.visible = true; });
+          const exporter = new GLTFExporter();
+          exporter.parse(
+            scene,
+            (result) => {
+              restore();
+              resolve(new Blob([result as ArrayBuffer], { type: "model/gltf-binary" }));
+            },
+            (err) => { restore(); reject(err); },
+            { binary: true },  // onlyVisible defaults to true → drag plane skipped
+          );
+        }),
+    });
+  }, [gl, scene, camera, register]);
+  return null;
+}
+
 function SceneContent({
   rooms, rfWalls, openings, furniture, world,
   onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
@@ -625,8 +676,10 @@ function SceneContent({
           selected={f.id === selectedFurnitureId} />
       ))}
 
-      <ContactShadows position={[0, 0, 0]} opacity={0.22}
-        scale={world.maxDim * 1.3} blur={2.4} far={3} />
+      <group name="nooi-noexport">
+        <ContactShadows position={[0, 0, 0]} opacity={0.22}
+          scale={world.maxDim * 1.3} blur={2.4} far={3} />
+      </group>
     </group>
   );
 }
@@ -650,10 +703,15 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   );
   const controlsRef = useRef(null);
   const raycastFn = useRef<((nx: number, ny: number) => [number, number] | null) | null>(null);
+  const exportApi = useRef<SceneExportApi | null>(null);
 
   useImperativeHandle(ref, () => ({
     floorPointFromNdc: (nx: number, ny: number) =>
       raycastFn.current ? raycastFn.current(nx, ny) : null,
+    captureImage: () =>
+      exportApi.current ? exportApi.current.capture() : null,
+    exportGlb: async () =>
+      exportApi.current ? exportApi.current.exportGlb() : null,
   }), []);
 
   return (
@@ -680,6 +738,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         intensity={0.3}
       />
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }} />
+      <ExportBridge register={(api) => { exportApi.current = api; }} />
       <Suspense fallback={null}>
         <SceneContent
           rooms={rooms}
