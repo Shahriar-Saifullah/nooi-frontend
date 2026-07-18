@@ -8,7 +8,9 @@ import {
   ChevronDown, ChevronLeft, Share2, Download,
   SlidersHorizontal, Loader2, RotateCw, Trash2,
   Image as ImageIcon, Box,
+  Video, Pause, Play, Square, Circle,
 } from "lucide-react";
+import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
@@ -75,6 +77,13 @@ export default function CanvasPage() {
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // ── Walkthrough state ────────────────────────────────────────────────────
+  const [walkthroughActive, setWalkthroughActive] = useState(false);
+  const [walkthroughPaused, setWalkthroughPaused] = useState(false);
+  const [walkthroughProgress, setWalkthroughProgress] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const recorderSessionRef = useRef<RecordingSession | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -225,6 +234,47 @@ export default function CanvasPage() {
     setSelectedFurnitureId(null);
   };
 
+  // ── Walkthrough handlers ─────────────────────────────────────────────────
+  const startWalkthrough = () => {
+    setWalkthroughActive(true);
+    setWalkthroughPaused(false);
+    setWalkthroughProgress(0);
+  };
+
+  const stopWalkthrough = async () => {
+    // Flush any active recording before ending the tour
+    if (isRecording && recorderSessionRef.current) {
+      setIsRecording(false);
+      await stopAndDownload(
+        recorderSessionRef.current,
+        `${currentProject?.name ?? "nooi"}-tour.webm`,
+      );
+      recorderSessionRef.current = null;
+    }
+    setWalkthroughActive(false);
+    setWalkthroughPaused(false);
+    setWalkthroughProgress(0);
+  };
+
+  const togglePause = () => setWalkthroughPaused((p) => !p);
+
+  const toggleRecording = async () => {
+    // Stop + download if recording is already active
+    if (isRecording && recorderSessionRef.current) {
+      setIsRecording(false);
+      await stopAndDownload(
+        recorderSessionRef.current,
+        `${currentProject?.name ?? "nooi"}-tour.webm`,
+      );
+      recorderSessionRef.current = null;
+      return;
+    }
+    // Start recording — grab the underlying WebGL canvas from the scene ref
+    const canvas = sceneRef.current?.getCanvasElement?.();
+    if (!canvas) return;
+    recorderSessionRef.current = startCanvasRecording(canvas);
+    setIsRecording(true);
+  };
 
   const selectedFurniture = placedFurniture.find(f => f.id === selectedFurnitureId);
 
@@ -365,11 +415,80 @@ export default function CanvasPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {viewMode === "3d" && placedFurniture.length > 0 && (
+
+          {/* Furniture count — hidden during walkthrough to save header space */}
+          {viewMode === "3d" && !walkthroughActive && placedFurniture.length > 0 && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f0f7f6] border border-[#c7de7d] rounded-full text-[12px] font-medium text-[#004643]">
               <Sofa size={12} />{placedFurniture.length} item{placedFurniture.length !== 1 ? "s" : ""}
             </div>
           )}
+
+          {/* ── Walkthrough idle: start button ── */}
+          {viewMode === "3d" && !walkthroughActive && (
+            <button
+              id="btn-walkthrough-start"
+              onClick={startWalkthrough}
+              disabled={rooms.length < 2}
+              title={rooms.length < 2 ? "Need at least 2 rooms" : "Start 3D walkthrough"}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-[#004643] rounded-full text-[12px] font-medium text-[#004643] hover:bg-[#f0f7f6] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Video size={13} />Walkthrough
+            </button>
+          )}
+
+          {/* ── Walkthrough active: live control bar ── */}
+          {viewMode === "3d" && walkthroughActive && (
+            <>
+              {/* Progress pill */}
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-[#f0f7f6] border border-[#e5e5e5] rounded-full">
+                <div className="w-[72px] h-[4px] bg-[#e0e0e0] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[#c7de7d] rounded-full"
+                    style={{ width: `${Math.round(walkthroughProgress * 100)}%`, transition: "width 0.1s linear" }}
+                  />
+                </div>
+                <span className="text-[11px] font-medium text-[#525252] tabular-nums w-[26px]">
+                  {Math.round(walkthroughProgress * 100)}%
+                </span>
+              </div>
+
+              {/* Pause / Resume */}
+              <button
+                id="btn-walkthrough-pause"
+                onClick={togglePause}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-[#f5f5f5] text-[12px] font-medium text-[#525252] transition-all"
+              >
+                {walkthroughPaused
+                  ? <><Play size={13} />Resume</>
+                  : <><Pause size={13} />Pause</>}
+              </button>
+
+              {/* Stop */}
+              <button
+                id="btn-walkthrough-stop"
+                onClick={stopWalkthrough}
+                className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-[#f5f5f5] text-[12px] font-medium text-[#525252] transition-all"
+              >
+                <Square size={11} fill="currentColor" />Stop
+              </button>
+
+              {/* Record / Save .webm */}
+              <button
+                id="btn-walkthrough-record"
+                onClick={toggleRecording}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium transition-all border ${
+                  isRecording
+                    ? "bg-[#ef4444] text-white border-[#ef4444] hover:bg-[#dc2626]"
+                    : "border-[#e5e5e5] text-[#525252] hover:bg-[#f5f5f5]"
+                }`}
+              >
+                {isRecording
+                  ? <><Square size={11} fill="currentColor" />Save .webm</>
+                  : <><Circle size={11} className="text-[#ef4444]" fill="currentColor" />Record</>}
+              </button>
+            </>
+          )}
+
           <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-gray-50 text-[12px] font-medium text-[#525252]">
             <Share2 size={14} />Share
           </button>
@@ -521,7 +640,11 @@ export default function CanvasPage() {
             {(["2d", "3d"] as const).map(mode => (
               <button
                 key={mode}
-                onClick={() => setViewMode(mode)}
+                onClick={() => {
+                  // Stop walkthrough (and any recording) when switching to 2D
+                  if (mode === "2d" && walkthroughActive) { stopWalkthrough(); }
+                  setViewMode(mode);
+                }}
                 className={`flex items-center gap-[6px] px-[16px] py-[6px] rounded-full text-[12px] font-medium transition-all whitespace-nowrap ${
                   viewMode === mode ? "bg-[#003832] text-white shadow-sm" : "text-[#525252] hover:text-[#0a0a0a] hover:bg-[#f5f5f5]"
                 }`}
@@ -538,12 +661,16 @@ export default function CanvasPage() {
             </div>
           )}
 
-          {/* 3D controls hint */}
+          {/* 3D controls hint — adapts to walkthrough state */}
           {viewMode === "3d" && (
             <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4 bg-black/50 backdrop-blur-sm text-white/80 text-[11px] px-4 py-2 rounded-full pointer-events-none">
-              <span>🖱 Drag to orbit</span>
-              <span>⚡ Scroll to zoom</span>
-              <span>✋ Right-click to pan</span>
+              {walkthroughActive && !walkthroughPaused ? (
+                <><span>🎬 Walkthrough playing</span><span className="opacity-40">·</span><span>⏸ Pause to orbit freely</span></>
+              ) : walkthroughActive && walkthroughPaused ? (
+                <><span>⏸ Paused — orbit freely</span><span className="opacity-40">·</span><span>▶ Resume when ready</span></>
+              ) : (
+                <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span></>
+              )}
             </div>
           )}
 
@@ -636,6 +763,9 @@ export default function CanvasPage() {
                   onFurnitureSelect={setSelectedFurnitureId}
                   onFurnitureMove={handleFurnitureMove}
                   selectedFurnitureId={selectedFurnitureId}
+                  walkthroughActive={walkthroughActive}
+                  walkthroughPaused={walkthroughPaused}
+                  onWalkthroughProgress={setWalkthroughProgress}
                 />
               )}
             </div>
