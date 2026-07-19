@@ -58,7 +58,7 @@ export interface ThreeSceneHandle {
   setCameraView: (view: CameraViewPreset) => void;
 }
 
-export type CameraViewPreset = "default" | "top" | "front";
+export type CameraViewPreset = "default" | "top" | "front" | "inside";
 
 export interface Opening {
   type: "door" | "window";
@@ -544,6 +544,148 @@ function PlacementBridge({
   return null;
 }
 
+// ─── Walk Controls (Inside mode) ──────────────────────────────────────────────
+// First-person navigation: drag = look around (rotate the camera in place),
+// scroll = walk along the view direction, WASD/arrows = walk. No collision —
+// free flow through doorways and walls by design. Clamped to the plan area
+// and between floor and ceiling so users can't get lost.
+const EYE_HEIGHT = 1.6;
+
+function WalkControls({ world, active }: { world: World; active: boolean }) {
+  const { camera, gl, controls } = useThree() as any;
+  const yaw = useRef(0);
+  const pitch = useRef(0);
+  const keys = useRef<Record<string, boolean>>({});
+  const look = useRef<{ x: number; y: number } | null>(null);
+  const enter = useRef<null | {
+    from: THREE.Vector3; to: THREE.Vector3;
+    fromQ: THREE.Quaternion; toQ: THREE.Quaternion; t: number;
+  }>(null);
+
+  const clampPos = (p: THREE.Vector3) => {
+    const bx = world.totalW * 0.9, bz = world.totalD * 0.9;
+    p.x = Math.max(-bx, Math.min(bx, p.x));
+    p.z = Math.max(-bz, Math.min(bz, p.z));
+    p.y = Math.max(0.4, Math.min(2.6, p.y));
+  };
+
+  // entering: glide down to eye height inside the plan, facing the interior
+  useEffect(() => {
+    if (!active) return;
+    const to = camera.position.clone();
+    const bx = world.totalW * 0.45, bz = world.totalD * 0.45;
+    to.x = Math.max(-bx, Math.min(bx, to.x));
+    to.z = Math.max(-bz, Math.min(bz, to.z));
+    to.y = EYE_HEIGHT;
+    const dir = new THREE.Vector3(-to.x, 0, -to.z);
+    if (dir.lengthSq() < 0.01) dir.set(0, 0, -1);
+    dir.normalize();
+    yaw.current = Math.atan2(-dir.x, -dir.z);
+    pitch.current = 0;
+    const toQ = new THREE.Quaternion()
+      .setFromEuler(new THREE.Euler(pitch.current, yaw.current, 0, "YXZ"));
+    enter.current = {
+      from: camera.position.clone(), to,
+      fromQ: camera.quaternion.clone(), toQ, t: 0,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  // input listeners
+  useEffect(() => {
+    if (!active) return;
+    const el = gl.domElement as HTMLCanvasElement;
+
+    const down = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      if ((window as any).__nooiFurnitureDrag) return;
+      look.current = { x: e.clientX, y: e.clientY };
+    };
+    const move = (e: PointerEvent) => {
+      if (!look.current) return;
+      if ((window as any).__nooiFurnitureDrag) { look.current = null; return; }
+      const dx = e.clientX - look.current.x;
+      const dy = e.clientY - look.current.y;
+      look.current = { x: e.clientX, y: e.clientY };
+      yaw.current -= dx * 0.0045;
+      pitch.current = Math.max(-1.35, Math.min(1.35, pitch.current - dy * 0.0045));
+    };
+    const up = () => { look.current = null; };
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const fwd = new THREE.Vector3(0, 0, -1)
+        .applyEuler(new THREE.Euler(pitch.current, yaw.current, 0, "YXZ"));
+      camera.position.addScaledVector(fwd, -e.deltaY * 0.01);
+      clampPos(camera.position);
+    };
+    const isTyping = (e: KeyboardEvent) =>
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target as HTMLElement)?.isContentEditable;
+    const keyHandler = (dn: boolean) => (e: KeyboardEvent) => {
+      if (isTyping(e)) return;
+      const k = e.key.toLowerCase();
+      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
+        keys.current[k] = dn;
+        e.preventDefault();
+      }
+    };
+    const kd = keyHandler(true), ku = keyHandler(false);
+
+    el.addEventListener("pointerdown", down);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    el.addEventListener("wheel", wheel, { passive: false });
+    window.addEventListener("keydown", kd);
+    window.addEventListener("keyup", ku);
+    return () => {
+      el.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      el.removeEventListener("wheel", wheel);
+      window.removeEventListener("keydown", kd);
+      window.removeEventListener("keyup", ku);
+      keys.current = {};
+      look.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, gl]);
+
+  useFrame((_, delta) => {
+    if (!active) return;
+    // hard-disable orbit while walking (furniture-drag handlers re-enable it
+    // on pointerup, so the prop alone isn't sufficient)
+    if (controls) controls.enabled = false;
+
+    const a = enter.current;
+    if (a) {
+      a.t = Math.min(1, a.t + delta / 0.6);
+      const e = a.t * a.t * (3 - 2 * a.t);
+      camera.position.lerpVectors(a.from, a.to, e);
+      camera.quaternion.slerpQuaternions(a.fromQ, a.toQ, e);
+      if (a.t >= 1) enter.current = null;
+      return;
+    }
+
+    // keyboard walking, horizontal, relative to where you're facing
+    const k = keys.current;
+    const mvF = (k["w"] || k["arrowup"] ? 1 : 0) - (k["s"] || k["arrowdown"] ? 1 : 0);
+    const mvR = (k["d"] || k["arrowright"] ? 1 : 0) - (k["a"] || k["arrowleft"] ? 1 : 0);
+    if (mvF || mvR) {
+      const speed = 3.2 * delta;
+      const fwd = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current));
+      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
+      camera.position.addScaledVector(fwd, mvF * speed);
+      camera.position.addScaledVector(right, mvR * speed);
+      clampPos(camera.position);
+    }
+
+    camera.quaternion.setFromEuler(new THREE.Euler(pitch.current, yaw.current, 0, "YXZ"));
+  });
+
+  return null;
+}
+
 // ─── Camera Rig ───────────────────────────────────────────────────────────────
 // Owns framing and preset views:
 //  • frames the plan to fit the viewport (bounding sphere vs fov) on load,
@@ -554,10 +696,10 @@ function PlacementBridge({
 const ORBIT_TARGET_Y = 1.1;   // half wall height — centers the dollhouse
 
 function CameraRig({
-  world, walkthroughLive, register,
+  world, suspended, register,
 }: {
   world: World;
-  walkthroughLive: boolean;
+  suspended: boolean;   // true during walkthrough playback or inside/walk mode
   register: (setView: (v: CameraViewPreset) => void) => void;
 }) {
   const { camera, size, controls } = useThree() as any;
@@ -577,7 +719,7 @@ function CameraRig({
     return (radius * 1.08) / Math.sin(Math.min(vFov, hFov) / 2);
   };
 
-  const presetPose = (view: CameraViewPreset) => {
+  const presetPose = (view: Exclude<CameraViewPreset, "inside">) => {
     const d = fitDistance();
     const tgt = new THREE.Vector3(0, ORBIT_TARGET_Y, 0);
     let dir: THREE.Vector3;
@@ -587,7 +729,7 @@ function CameraRig({
     return { pos: tgt.clone().add(dir.normalize().multiplyScalar(d)), tgt };
   };
 
-  const goTo = (view: CameraViewPreset, instant = false) => {
+  const goTo = (view: Exclude<CameraViewPreset, "inside">, instant = false) => {
     const { pos, tgt } = presetPose(view);
     const curTgt = controls?.target?.clone?.() ?? new THREE.Vector3();
     if (instant || !controls) {
@@ -602,8 +744,8 @@ function CameraRig({
     };
   };
 
-  // expose to parent
-  useEffect(() => { register((v) => goTo(v, false)); });
+  // expose to parent ("inside" is handled by WalkControls, not the rig)
+  useEffect(() => { register((v) => { if (v !== "inside") goTo(v, false); }); });
 
   // any manual interaction cancels animations + stops auto-reframing
   useEffect(() => {
@@ -617,14 +759,14 @@ function CameraRig({
   // only while the user hasn't interacted yet)
   const framed = useRef(false);
   useEffect(() => {
-    if (walkthroughLive) return;
+    if (suspended) return;
     if (!framed.current) { goTo("default", true); framed.current = true; }
     else if (!userTouched.current) goTo("default", false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [world.totalW, world.totalD, controls]);
 
   useFrame((_, delta) => {
-    if (walkthroughLive) { anim.current = null; return; }
+    if (suspended) { anim.current = null; return; }
     // preset animation
     const a = anim.current;
     if (a && controls) {
@@ -717,6 +859,7 @@ function SceneContent({
   useEffect(() => {
     const up = () => {
       setDraggingId(null);
+      (window as any).__nooiFurnitureDrag = false;
       if (controls) controls.enabled = true;
     };
     window.addEventListener("pointerup", up);
@@ -733,6 +876,7 @@ function SceneContent({
     setDraggingId(id);
     dragStart.current = null;
     dragArmed.current = false;
+    (window as any).__nooiFurnitureDrag = true;
     if (controls) controls.enabled = false;
   };
 
@@ -834,6 +978,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   const raycastFn = useRef<((nx: number, ny: number) => [number, number] | null) | null>(null);
   const exportApi = useRef<SceneExportApi | null>(null);
   const cameraViewFn = useRef<((v: CameraViewPreset) => void) | null>(null);
+  const [insideMode, setInsideMode] = useState(false);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 
   useImperativeHandle(ref, () => ({
@@ -844,7 +989,11 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
     exportGlb: async () =>
       exportApi.current ? exportApi.current.exportGlb() : null,
     getCanvasElement: () => canvasElementRef.current,
-    setCameraView: (view: CameraViewPreset) => cameraViewFn.current?.(view),
+    setCameraView: (view: CameraViewPreset) => {
+      if (view === "inside") { setInsideMode(true); return; }
+      setInsideMode(false);
+      cameraViewFn.current?.(view);
+    },
   }), []);
 
   return (
@@ -875,8 +1024,12 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
       <CameraRig
         world={world}
-        walkthroughLive={!!walkthroughActive && !walkthroughPaused}
+        suspended={(!!walkthroughActive && !walkthroughPaused) || insideMode}
         register={(fn) => { cameraViewFn.current = fn; }}
+      />
+      <WalkControls
+        world={world}
+        active={insideMode && !(walkthroughActive && !walkthroughPaused)}
       />
       <WalkthroughCamera
         rooms={rooms}
@@ -904,7 +1057,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         target={[0, 1.1, 0]}
         maxPolarAngle={Math.PI / 2.05} minDistance={3}
         maxDistance={world.maxDim * 2.2}
-        enabled={!(walkthroughActive && !walkthroughPaused)} />
+        enabled={!insideMode && !(walkthroughActive && !walkthroughPaused)} />
     </Canvas>
   );
 });
