@@ -5,7 +5,7 @@ import React, {
   Suspense, useMemo, useRef, useState, useEffect,
   forwardRef, useImperativeHandle,
 } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
@@ -54,7 +54,11 @@ export interface ThreeSceneHandle {
   exportGlb: () => Promise<Blob | null>;
   /** get the HTML canvas element for recording */
   getCanvasElement: () => HTMLCanvasElement | null;
+  /** smoothly move the camera to a preset view */
+  setCameraView: (view: CameraViewPreset) => void;
 }
+
+export type CameraViewPreset = "default" | "top" | "front";
 
 export interface Opening {
   type: "door" | "window";
@@ -540,6 +544,110 @@ function PlacementBridge({
   return null;
 }
 
+// ─── Camera Rig ───────────────────────────────────────────────────────────────
+// Owns framing and preset views:
+//  • frames the plan to fit the viewport (bounding sphere vs fov) on load,
+//    and re-frames when the plan geometry arrives async — but only until the
+//    user first touches the controls (never yank the camera mid-inspection)
+//  • animates preset transitions (default / top / front) with ease-in-out
+//  • clamps the pan target inside the plan bounds so users can't get lost
+const ORBIT_TARGET_Y = 1.1;   // half wall height — centers the dollhouse
+
+function CameraRig({
+  world, walkthroughLive, register,
+}: {
+  world: World;
+  walkthroughLive: boolean;
+  register: (setView: (v: CameraViewPreset) => void) => void;
+}) {
+  const { camera, size, controls } = useThree() as any;
+  const anim = useRef<null | {
+    fromPos: THREE.Vector3; toPos: THREE.Vector3;
+    fromTgt: THREE.Vector3; toTgt: THREE.Vector3;
+    t: number; dur: number;
+  }>(null);
+  const userTouched = useRef(false);
+
+  // distance that fits the plan's bounding sphere in the tighter fov axis
+  const fitDistance = () => {
+    const radius = 0.5 * Math.hypot(world.totalW, world.totalD) + 1.5; // + wall margin
+    const vFov = (camera.fov * Math.PI) / 180;
+    const aspect = size.width / Math.max(1, size.height);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+    return (radius * 1.08) / Math.sin(Math.min(vFov, hFov) / 2);
+  };
+
+  const presetPose = (view: CameraViewPreset) => {
+    const d = fitDistance();
+    const tgt = new THREE.Vector3(0, ORBIT_TARGET_Y, 0);
+    let dir: THREE.Vector3;
+    if (view === "top")        dir = new THREE.Vector3(0, 1, 0.02);
+    else if (view === "front") dir = new THREE.Vector3(0, 0.28, 1);
+    else                       dir = new THREE.Vector3(0.55, 0.62, 0.95); // ¾ default
+    return { pos: tgt.clone().add(dir.normalize().multiplyScalar(d)), tgt };
+  };
+
+  const goTo = (view: CameraViewPreset, instant = false) => {
+    const { pos, tgt } = presetPose(view);
+    const curTgt = controls?.target?.clone?.() ?? new THREE.Vector3();
+    if (instant || !controls) {
+      camera.position.copy(pos);
+      if (controls) { controls.target.copy(tgt); controls.update(); }
+      return;
+    }
+    anim.current = {
+      fromPos: camera.position.clone(), toPos: pos,
+      fromTgt: curTgt, toTgt: tgt,
+      t: 0, dur: 0.65,
+    };
+  };
+
+  // expose to parent
+  useEffect(() => { register((v) => goTo(v, false)); });
+
+  // any manual interaction cancels animations + stops auto-reframing
+  useEffect(() => {
+    if (!controls) return;
+    const onStart = () => { userTouched.current = true; anim.current = null; };
+    controls.addEventListener("start", onStart);
+    return () => controls.removeEventListener("start", onStart);
+  }, [controls]);
+
+  // initial framing (instant) + re-frame when plan geometry changes (animated,
+  // only while the user hasn't interacted yet)
+  const framed = useRef(false);
+  useEffect(() => {
+    if (walkthroughLive) return;
+    if (!framed.current) { goTo("default", true); framed.current = true; }
+    else if (!userTouched.current) goTo("default", false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [world.totalW, world.totalD, controls]);
+
+  useFrame((_, delta) => {
+    if (walkthroughLive) { anim.current = null; return; }
+    // preset animation
+    const a = anim.current;
+    if (a && controls) {
+      a.t = Math.min(1, a.t + delta / a.dur);
+      const e = a.t * a.t * (3 - 2 * a.t); // smoothstep ease-in-out
+      camera.position.lerpVectors(a.fromPos, a.toPos, e);
+      controls.target.lerpVectors(a.fromTgt, a.toTgt, e);
+      controls.update();
+      if (a.t >= 1) anim.current = null;
+    }
+    // pan guard rails — keep the orbit target inside the plan
+    if (controls && !anim.current) {
+      const t = controls.target;
+      const bx = world.totalW * 0.75, bz = world.totalD * 0.75;
+      t.x = Math.max(-bx, Math.min(bx, t.x));
+      t.z = Math.max(-bz, Math.min(bz, t.z));
+      t.y = Math.max(0, Math.min(4, t.y));
+    }
+  });
+
+  return null;
+}
+
 // Exposes capture (PNG) + exportGlb (binary glTF) to the parent via a ref.
 // Lives inside the Canvas so it can reach gl/scene/camera through useThree.
 export interface SceneExportApi {
@@ -725,6 +833,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   const controlsRef = useRef(null);
   const raycastFn = useRef<((nx: number, ny: number) => [number, number] | null) | null>(null);
   const exportApi = useRef<SceneExportApi | null>(null);
+  const cameraViewFn = useRef<((v: CameraViewPreset) => void) | null>(null);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 
   useImperativeHandle(ref, () => ({
@@ -735,6 +844,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
     exportGlb: async () =>
       exportApi.current ? exportApi.current.exportGlb() : null,
     getCanvasElement: () => canvasElementRef.current,
+    setCameraView: (view: CameraViewPreset) => cameraViewFn.current?.(view),
   }), []);
 
   return (
@@ -763,6 +873,11 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }} />
       <ExportBridge register={(api) => { exportApi.current = api; }} />
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
+      <CameraRig
+        world={world}
+        walkthroughLive={!!walkthroughActive && !walkthroughPaused}
+        register={(fn) => { cameraViewFn.current = fn; }}
+      />
       <WalkthroughCamera
         rooms={rooms}
         totalW={world.totalW}
@@ -784,8 +899,11 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         />
       </Suspense>
       <OrbitControls ref={controlsRef} makeDefault
-        maxPolarAngle={Math.PI / 2.05} minDistance={2}
-        maxDistance={world.maxDim * 3}
+        enableDamping dampingFactor={0.08}
+        zoomToCursor
+        target={[0, 1.1, 0]}
+        maxPolarAngle={Math.PI / 2.05} minDistance={3}
+        maxDistance={world.maxDim * 2.2}
         enabled={!(walkthroughActive && !walkthroughPaused)} />
     </Canvas>
   );
