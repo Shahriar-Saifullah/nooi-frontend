@@ -717,7 +717,9 @@ export default function CanvasPage() {
               ) : walkthroughActive && walkthroughPaused ? (
                 <><span>⏸ Paused — orbit freely</span><span className="opacity-40">·</span><span>▶ Resume when ready</span></>
               ) : (
-                <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span></>
+                cameraView === "inside"
+                  ? <><span>🖱 Drag to look around</span><span>⚡ Scroll to walk</span><span>⌨ WASD to move</span></>
+                  : <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span></>
               )}
             </div>
           )}
@@ -725,7 +727,7 @@ export default function CanvasPage() {
           {/* Camera view presets — hidden while a walkthrough is playing */}
           {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
             <div className="absolute bottom-5 right-5 z-10 flex items-center gap-0.5 bg-black/50 backdrop-blur-sm rounded-full p-1">
-              {(["default", "top", "front"] as CameraViewPreset[]).map(v => (
+              {(["default", "top", "front", "inside"] as CameraViewPreset[]).map(v => (
                 <button
                   key={v}
                   onClick={() => handleCameraView(v)}
@@ -735,7 +737,7 @@ export default function CanvasPage() {
                       : "text-white/75 hover:text-white hover:bg-white/10"
                   }`}
                 >
-                  {v === "default" ? "3D" : v === "top" ? "Top" : "Front"}
+                  {v === "default" ? "3D" : v === "top" ? "Top" : v === "front" ? "Front" : "Inside"}
                 </button>
               ))}
             </div>
