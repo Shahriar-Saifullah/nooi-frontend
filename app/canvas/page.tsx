@@ -9,6 +9,7 @@ import {
   SlidersHorizontal, Loader2, RotateCw, Trash2,
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
+  Link2, Check, X,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -18,7 +19,7 @@ import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, type CatalogItem } from "@/lib/furniture/catalog";
 import type { ThreeSceneHandle } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
-import { getProject, saveFurniture } from "@/lib/api/projects";
+import { getProject, saveFurniture, toggleShare } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
@@ -130,6 +131,9 @@ export default function CanvasPage() {
           if (p.floor_plan_url && !floorPlanUrl) {
             setProject({ ...currentProject, floor_plan_url: p.floor_plan_url });
           }
+          // sharing state lives on the project row
+          setShareEnabled(!!p.share_enabled);
+          setShareToken(p.share_token ?? null);
         })
         .catch(err => console.error("Failed to load project geometry:", err))
         .finally(() => setLoadingRooms(false));
@@ -354,6 +358,40 @@ export default function CanvasPage() {
     return { width: 1500, depth: 1200 };
   })();
 
+  // ── Share (public read-only link) ──────────────────────────────────────────
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareEnabled, setShareEnabled] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  const shareUrl = shareToken && typeof window !== "undefined"
+    ? `${window.location.origin}/share/${shareToken}`
+    : null;
+
+  const handleToggleShare = async (enabled: boolean) => {
+    if (!currentProject?.id || shareBusy) return;
+    setShareBusy(true);
+    try {
+      const data = await toggleShare(currentProject.id, enabled);
+      setShareEnabled(data.share_enabled);
+      setShareToken(data.share_token);
+    } catch (err) {
+      console.error("Share toggle failed:", err);
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const handleCopyShareUrl = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch { /* clipboard unavailable — user can select manually */ }
+  };
+
   // ── Export (PNG snapshot / GLB model) ──────────────────────────────────────
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -489,7 +527,10 @@ export default function CanvasPage() {
             </>
           )}
 
-          <button className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-gray-50 text-[12px] font-medium text-[#525252]">
+          <button
+            onClick={() => setShareOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-[#e5e5e5] rounded-full hover:bg-gray-50 text-[12px] font-medium text-[#525252]"
+          >
             <Share2 size={14} />Share
           </button>
           <div className="relative">
@@ -822,6 +863,66 @@ export default function CanvasPage() {
           )}
         </aside>
       </div>
+
+      {/* ── Share modal ── */}
+      {shareOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShareOpen(false)} />
+          <div className="relative z-10 w-[420px] max-w-[calc(100vw-32px)] bg-white rounded-[16px] shadow-[0_24px_48px_-8px_rgba(0,0,0,0.25)] p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[15px] font-semibold text-[#0a0a0a] flex items-center gap-2">
+                <Share2 size={16} className="text-[#004643]" />Share design
+              </h2>
+              <button onClick={() => setShareOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-[#f5f5f5]">
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* toggle row */}
+            <div className="flex items-center justify-between py-3 border-b border-[#f0f0f0]">
+              <div>
+                <p className="text-[13px] font-medium text-[#0a0a0a]">Public link</p>
+                <p className="text-[11.5px] text-[#737373] mt-0.5">
+                  Anyone with the link can view this design in 3D. They can't edit.
+                </p>
+              </div>
+              <button
+                onClick={() => handleToggleShare(!shareEnabled)}
+                disabled={shareBusy}
+                aria-label="Toggle public link"
+                className={`relative w-[42px] h-[24px] rounded-full transition-colors shrink-0 ml-4 ${
+                  shareEnabled ? "bg-[#004643]" : "bg-[#d4d4d4]"
+                } ${shareBusy ? "opacity-60" : ""}`}
+              >
+                <span className={`absolute top-[3px] w-[18px] h-[18px] bg-white rounded-full shadow transition-all ${
+                  shareEnabled ? "left-[21px]" : "left-[3px]"
+                }`} />
+              </button>
+            </div>
+
+            {/* link row */}
+            {shareEnabled && shareUrl && (
+              <div className="mt-4 flex items-center gap-2">
+                <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-[#fafafa] border border-[#e5e5e5] rounded-[10px] min-w-0">
+                  <Link2 size={13} className="shrink-0 text-[#737373]" />
+                  <span className="text-[12px] text-[#525252] truncate select-all">{shareUrl}</span>
+                </div>
+                <button
+                  onClick={handleCopyShareUrl}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-[#004643] hover:bg-[#003633] rounded-[10px] text-[12px] font-medium text-white shrink-0"
+                >
+                  {shareCopied ? <><Check size={13} />Copied</> : "Copy"}
+                </button>
+              </div>
+            )}
+            {!shareEnabled && (
+              <p className="mt-4 text-[12px] text-[#a3a3a3]">
+                Turn on the public link to get a shareable URL.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       <style>{`
         .scrollbar-hide::-webkit-scrollbar{display:none}

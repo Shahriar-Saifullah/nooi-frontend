@@ -60,6 +60,8 @@ export interface Project {
   };
   created_at: string;
   updated_at: string;
+  share_token?: string | null;
+  share_enabled?: boolean;
 }
 
 async function getAuthHeaders(headers: Record<string, string> = {}) {
@@ -203,4 +205,27 @@ export async function saveFurniture(projectId: string, furniture: FurniturePlace
   const json = await res.json();
   if (!json.success) throw new Error(json.error || "Failed to save furniture");
   return json.data as { furniture: FurniturePlacement[] };
+}
+
+// ─── Sharing ─────────────────────────────────────────────────────────────────
+
+export async function toggleShare(projectId: string, enabled: boolean) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/share`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ enabled }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "Failed to update sharing");
+  return json.data as { share_enabled: boolean; share_token: string };
+}
+
+/** Public — no auth. Used by the /share/[token] viewer page. */
+export async function getSharedProject(token: string) {
+  const res = await fetch(`${BASE_URL}/shared/${encodeURIComponent(token)}`);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "Not found");
+  return json.data.project as Pick<Project, 'name' | 'project_type' | 'room_data' | 'updated_at'>;
 }
