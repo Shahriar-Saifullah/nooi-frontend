@@ -17,7 +17,7 @@ import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, type CatalogItem } from "@/lib/furniture/catalog";
-import type { ThreeSceneHandle } from "@/components/ThreeSceneV2";
+import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
 import { getProject, saveFurniture, toggleShare } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
@@ -357,6 +357,13 @@ export default function CanvasPage() {
     }
     return { width: 1500, depth: 1200 };
   })();
+
+  // ── Camera view presets ────────────────────────────────────────────────────
+  const [cameraView, setCameraView] = useState<CameraViewPreset>("default");
+  const handleCameraView = (view: CameraViewPreset) => {
+    setCameraView(view);
+    sceneRef.current?.setCameraView(view);
+  };
 
   // ── Share (public read-only link) ──────────────────────────────────────────
   const [shareOpen, setShareOpen] = useState(false);
@@ -712,6 +719,25 @@ export default function CanvasPage() {
               ) : (
                 <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span></>
               )}
+            </div>
+          )}
+
+          {/* Camera view presets — hidden while a walkthrough is playing */}
+          {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
+            <div className="absolute bottom-5 right-5 z-10 flex items-center gap-0.5 bg-black/50 backdrop-blur-sm rounded-full p-1">
+              {(["default", "top", "front"] as CameraViewPreset[]).map(v => (
+                <button
+                  key={v}
+                  onClick={() => handleCameraView(v)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors ${
+                    cameraView === v
+                      ? "bg-white text-[#0a0a0a]"
+                      : "text-white/75 hover:text-white hover:bg-white/10"
+                  }`}
+                >
+                  {v === "default" ? "3D" : v === "top" ? "Top" : "Front"}
+                </button>
+              ))}
             </div>
           )}
 
