@@ -88,6 +88,27 @@ export default function CanvasPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
+  // ── Open a specific project from the dashboard (?projectId=…) ─────────────
+  // The store may still hold a different project from an earlier session;
+  // the URL param is the source of truth when present.
+  useEffect(() => {
+    if (!mounted) return;
+    const pid = new URLSearchParams(window.location.search).get("projectId");
+    if (!pid || pid === currentProject?.id) return;
+    // clear any stale scene state from a previously open project
+    setRooms([]);
+    setFetchedRooms([]);
+    setPlacedFurniture([]);
+    setRfWalls([]);
+    setOpenings([]);
+    // critical: without this, the empty furniture array above would pass the
+    // auto-save guard and wipe the incoming project's saved furniture
+    furnitureLoaded.current = false;
+    // stub with just the id — the main load effect fetches the rest
+    setProject({ id: pid } as any);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
+
   useEffect(() => {
     if (!mounted) return;
     const haveStoreRooms = (currentProject?.rooms?.length ?? 0) > 0;
@@ -128,8 +149,15 @@ export default function CanvasPage() {
           if ((p.room_data as any)?.image_size) {
             setImageSize((p.room_data as any).image_size);
           }
-          if (p.floor_plan_url && !floorPlanUrl) {
-            setProject({ ...currentProject, floor_plan_url: p.floor_plan_url });
+          if ((p.name && p.name !== currentProject?.name) || (p.floor_plan_url && !floorPlanUrl)) {
+            // hydrate store fields the stub / stale entry may lack (navbar
+            // title, export filenames, walkthrough recordings all use name)
+            setProject({
+              ...(currentProject as any),
+              id: p.id,
+              name: p.name ?? currentProject?.name,
+              floor_plan_url: p.floor_plan_url ?? (currentProject as any)?.floor_plan_url,
+            });
           }
           // sharing state lives on the project row
           setShareEnabled(!!p.share_enabled);
