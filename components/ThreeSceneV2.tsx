@@ -595,6 +595,7 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
   useEffect(() => {
     if (!active) return;
     const el = gl.domElement as HTMLCanvasElement;
+    (window as any).__nooiWalkMode = true;
 
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return;
@@ -647,6 +648,7 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
       window.removeEventListener("keyup", ku);
       keys.current = {};
       look.current = null;
+      (window as any).__nooiWalkMode = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, gl]);
@@ -681,7 +683,7 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     }
 
     camera.quaternion.setFromEuler(new THREE.Euler(pitch.current, yaw.current, 0, "YXZ"));
-  });
+  }, -2);  // before drei's OrbitControls update (-1): our enabled=false must land first
 
   return null;
 }
@@ -860,7 +862,9 @@ function SceneContent({
     const up = () => {
       setDraggingId(null);
       (window as any).__nooiFurnitureDrag = false;
-      if (controls) controls.enabled = true;
+      // never hand control back to orbit while walk (Inside) mode is active —
+      // its update() would snap the camera back to the stored orbit pose
+      if (controls && !(window as any).__nooiWalkMode) controls.enabled = true;
     };
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
