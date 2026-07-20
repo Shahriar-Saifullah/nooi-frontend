@@ -441,7 +441,7 @@ export default function DashboardPage() {
                   return (
                     <div
                       key={project.id}
-                      onClick={() => router.push(`/dashboard/canvas?projectId=${project.id}`)}
+                      onClick={() => router.push(`/canvas?projectId=${project.id}`)}
                       className="border border-[#f0f0f0] rounded-[20px] p-2 flex flex-col group cursor-pointer hover:shadow-md transition-all"
                     >
                       <div className="rounded-xl h-[100px] sm:h-[120px] mb-2 sm:mb-3 relative overflow-hidden bg-gray-100">
