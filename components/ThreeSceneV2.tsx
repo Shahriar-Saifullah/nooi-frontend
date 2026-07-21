@@ -11,7 +11,7 @@ import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
-import WalkthroughCamera from "@/components/WalkthroughCamera";
+import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
 
 // ─── Canvas Bridge Helper ──────────────────────────────────────────────────────
 function CanvasBridge({ onCanvasReady }: { onCanvasReady: (canvas: HTMLCanvasElement) => void }) {
@@ -91,7 +91,7 @@ interface ThreeSceneV2Props {
   selectedFurnitureId?: string | null;
   walkthroughActive?: boolean;
   walkthroughPaused?: boolean;
-  onWalkthroughProgress?: (progress: number) => void;
+  onWalkthroughProgress?: (progress: number, info?: WalkthroughProgressInfo) => void;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
