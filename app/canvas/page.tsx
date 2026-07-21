@@ -83,6 +83,7 @@ export default function CanvasPage() {
   const [walkthroughActive, setWalkthroughActive] = useState(false);
   const [walkthroughPaused, setWalkthroughPaused] = useState(false);
   const [walkthroughProgress, setWalkthroughProgress] = useState(0);
+  const [walkthroughStatusText, setWalkthroughStatusText] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const recorderSessionRef = useRef<RecordingSession | null>(null);
 
@@ -271,6 +272,7 @@ export default function CanvasPage() {
     setWalkthroughActive(true);
     setWalkthroughPaused(false);
     setWalkthroughProgress(0);
+    setWalkthroughStatusText("Starting 360° Walkthrough…");
   };
 
   const stopWalkthrough = async () => {
@@ -286,6 +288,7 @@ export default function CanvasPage() {
     setWalkthroughActive(false);
     setWalkthroughPaused(false);
     setWalkthroughProgress(0);
+    setWalkthroughStatusText(null);
   };
 
   const togglePause = () => setWalkthroughPaused((p) => !p);
@@ -512,17 +515,25 @@ export default function CanvasPage() {
           {/* ── Walkthrough active: live control bar ── */}
           {viewMode === "3d" && walkthroughActive && (
             <>
-              {/* Progress pill */}
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-[#f0f7f6] border border-[#e5e5e5] rounded-full">
-                <div className="w-[72px] h-[4px] bg-[#e0e0e0] rounded-full overflow-hidden">
+              {/* Progress pill & active room status */}
+              <div className="flex items-center gap-2 px-3.5 py-1.5 bg-[#f0f7f6] border border-[#c7de7d] rounded-full">
+                <div className="w-[64px] h-[4px] bg-[#e0e0e0] rounded-full overflow-hidden shrink-0">
                   <div
-                    className="h-full bg-[#c7de7d] rounded-full"
+                    className="h-full bg-[#004643] rounded-full"
                     style={{ width: `${Math.round(walkthroughProgress * 100)}%`, transition: "width 0.1s linear" }}
                   />
                 </div>
-                <span className="text-[11px] font-medium text-[#525252] tabular-nums w-[26px]">
+                <span className="text-[11px] font-semibold text-[#004643] tabular-nums shrink-0">
                   {Math.round(walkthroughProgress * 100)}%
                 </span>
+                {walkthroughStatusText && (
+                  <>
+                    <div className="w-px h-3 bg-[#c7de7d] shrink-0" />
+                    <span className="text-[11px] font-medium text-[#003832] truncate max-w-[260px]">
+                      {walkthroughStatusText}
+                    </span>
+                  </>
+                )}
               </div>
 
               {/* Pause / Resume */}
@@ -859,10 +870,12 @@ export default function CanvasPage() {
                   furniture={placedFurniture}
                   onFurnitureSelect={setSelectedFurnitureId}
                   onFurnitureMove={handleFurnitureMove}
-                  selectedFurnitureId={selectedFurnitureId}
                   walkthroughActive={walkthroughActive}
                   walkthroughPaused={walkthroughPaused}
-                  onWalkthroughProgress={setWalkthroughProgress}
+                  onWalkthroughProgress={(prog, info) => {
+                    setWalkthroughProgress(prog);
+                    if (info?.statusText) setWalkthroughStatusText(info.statusText);
+                  }}
                 />
               )}
             </div>

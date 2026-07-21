@@ -3,16 +3,15 @@
 /**
  * WalkthroughCamera
  * ─────────────────
- * A React Three Fiber component that animates the camera along a
- * CatmullRomCurve3 built from room polygon centroids.
+ * A React Three Fiber component that animates the camera inside the 3D model
+ * from a human perspective (1.6m eye level).
  *
- * Design decisions (per user spec):
- *  • Rooms are sorted by nearest-neighbour proximity so the camera
- *    takes the shortest natural tour rather than teleporting.
- *  • When `paused`, the camera stops and OrbitControls (enabled by the
- *    parent) lets the user look around freely.
- *  • When `active` becomes false the camera is returned to the original
- *    dollhouse angle so the scene looks exactly as before.
+ * Flow per user specification:
+ *  1. Identifies the Entrance room (or closest exterior room) and starts at the entrance.
+ *  2. Traverses all rooms in logical spatial order (nearest-neighbour proximity).
+ *  3. Moves inside each room at human height (1.6m).
+ *  4. Performs a full 360-degree panoramic view inside each room.
+ *  5. Continues sequentially until every room in the 3D model has been captured.
  */
 
 import { useMemo, useRef, useEffect } from "react";
@@ -25,16 +24,26 @@ import type { PolyRoom } from "@/components/ThreeSceneV2";
 /** Camera eye-level height in metres */
 const EYE_LEVEL = 1.6;
 
-/** Seconds to complete one full loop of all rooms */
-const LOOP_DURATION = 40;
+/** Duration (in seconds) to transition/move into a room */
+const MOVE_DURATION = 3.0;
 
-/**
- * Fractional look-ahead: the camera looks at a point this far ahead on the
- * curve, giving a natural forward-facing view as it moves.
- */
-const LOOK_AHEAD = 0.018;
+/** Duration (in seconds) to execute a full 360-degree pan inside a room */
+const PAN_360_DURATION = 6.5;
 
-// ─── Path helpers ─────────────────────────────────────────────────────────────
+/** Extra initial entrance approach duration (seconds) */
+const ENTRANCE_APPROACH_DURATION = 3.0;
+
+/** Default canvas FOV vs Inside perspective FOV */
+const DEFAULT_FOV = 40;
+const INSIDE_FOV = 65;
+
+// ─── Types & Helpers ──────────────────────────────────────────────────────────
+
+export interface RoomTourItem {
+  room: PolyRoom;
+  centroid: THREE.Vector3;
+  name: string;
+}
 
 /** Compute world-space centroid for a room's polygon or bounding box. */
 function roomCentroid(
@@ -62,23 +71,59 @@ function roomCentroid(
   return null;
 }
 
-/**
- * Reorder `points` using nearest-neighbour starting from `points[0]`
- * to minimize total travel distance and avoid teleporting jumps.
- */
-function sortByProximity(points: THREE.Vector3[]): THREE.Vector3[] {
-  if (points.length <= 1) return [...points];
+/** Find index of the entrance/foyer room or fallback to front-most room */
+function findEntranceIndex(items: RoomTourItem[]): number {
+  if (items.length === 0) return 0;
 
-  const result: THREE.Vector3[] = [points[0]];
-  const remaining = [...points.slice(1)];
+  const entranceRegex = /entrance|entry|foyer|porch|front|hall/i;
+  const idxByName = items.findIndex((r) => entranceRegex.test(r.name));
+  if (idxByName !== -1) return idxByName;
+
+  const livingRegex = /living|reception|lounge/i;
+  const idxByLiving = items.findIndex((r) => livingRegex.test(r.name));
+  if (idxByLiving !== -1) return idxByLiving;
+
+  // Fallback: room with maximum Z (closest to bottom/front of plan)
+  let bestIdx = 0;
+  let maxZ = -Infinity;
+  items.forEach((r, i) => {
+    if (r.centroid.z > maxZ) {
+      maxZ = r.centroid.z;
+      bestIdx = i;
+    }
+  });
+  return bestIdx;
+}
+
+/** Order rooms starting from Entrance, then nearest-neighbour spatial traversal */
+function orderRoomsForTour(
+  rooms: PolyRoom[],
+  totalW: number,
+  totalD: number,
+): RoomTourItem[] {
+  const tourItems: RoomTourItem[] = rooms
+    .map((r, i) => {
+      const c = roomCentroid(r, totalW, totalD);
+      return c ? { room: r, centroid: c, name: r.name || `Room ${i + 1}` } : null;
+    })
+    .filter((v): v is RoomTourItem => v !== null);
+
+  if (tourItems.length <= 1) return tourItems;
+
+  const startIdx = findEntranceIndex(tourItems);
+  const result: RoomTourItem[] = [tourItems[startIdx]];
+  const remaining = tourItems.filter((_, idx) => idx !== startIdx);
 
   while (remaining.length > 0) {
     const last = result[result.length - 1];
     let bestIdx = 0;
     let bestDist = Infinity;
-    remaining.forEach((p, i) => {
-      const d = last.distanceTo(p);
-      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    remaining.forEach((item, i) => {
+      const d = last.centroid.distanceTo(item.centroid);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
     });
     result.push(remaining[bestIdx]);
     remaining.splice(bestIdx, 1);
@@ -87,37 +132,30 @@ function sortByProximity(points: THREE.Vector3[]): THREE.Vector3[] {
   return result;
 }
 
-/** Build a closed CatmullRomCurve3 from all rooms with valid geometry. */
-function buildPath(
-  rooms: PolyRoom[],
-  totalW: number,
-  totalD: number,
-): THREE.CatmullRomCurve3 | null {
-  const centroids = rooms
-    .map((r) => roomCentroid(r, totalW, totalD))
-    .filter((v): v is THREE.Vector3 => v !== null);
-
-  if (centroids.length < 2) return null;
-
-  const sorted = sortByProximity(centroids);
-  // closed=true so the camera loops; catmullrom tension=0.5 gives smooth curves
-  return new THREE.CatmullRomCurve3(sorted, true, "catmullrom", 0.5);
+/** Smoothstep cubic easing for camera motion */
+function smoothstep(t: number): number {
+  const clamped = Math.max(0, Math.min(1, t));
+  return clamped * clamped * (3 - 2 * clamped);
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+export interface WalkthroughProgressInfo {
+  progress: number; // 0 to 1
+  roomName: string;
+  roomIndex: number;
+  totalRooms: number;
+  phase: "entrance" | "moving" | "360_view";
+  statusText: string;
+}
+
 export interface WalkthroughCameraProps {
   rooms: PolyRoom[];
-  /** World width in metres (roomWidthCm / 100) */
   totalW: number;
-  /** World depth in metres (roomDepthCm / 100) */
   totalD: number;
-  /** True when the user has started the walkthrough */
   active: boolean;
-  /** True when the user has paused — camera freezes; OrbitControls enabled */
   paused: boolean;
-  /** Called every frame with the current loop progress (0–1) */
-  onProgress?: (progress: number) => void;
+  onProgress?: (progress: number, info?: WalkthroughProgressInfo) => void;
 }
 
 export default function WalkthroughCamera({
@@ -130,16 +168,30 @@ export default function WalkthroughCamera({
 }: WalkthroughCameraProps) {
   const { camera } = useThree();
 
-  // ── normalised time along the path (0 … 1, wraps) ──
   const elapsedRef = useRef(0);
 
-  // ── pre-built path, rebuilt when room layout changes ──
-  const path = useMemo(
-    () => buildPath(rooms, totalW, totalD),
+  // Pre-build room sequence for the tour
+  const tour = useMemo(
+    () => orderRoomsForTour(rooms, totalW, totalD),
     [rooms, totalW, totalD],
   );
 
-  // ── dollhouse camera state: saved on first activation, restored on stop ──
+  // Calculate entrance approach start point (slightly outside entrance room)
+  const entranceStartPos = useMemo(() => {
+    if (tour.length === 0) return new THREE.Vector3(0, EYE_LEVEL, totalD * 0.45);
+    const firstCentroid = tour[0].centroid.clone();
+    // Offset outward toward front boundary
+    const dir = new THREE.Vector3(0, 0, 1.8);
+    return firstCentroid.clone().add(dir);
+  }, [tour, totalD]);
+
+  // Total duration of the walkthrough video sequence
+  const totalDuration = useMemo(() => {
+    if (tour.length === 0) return 30;
+    return ENTRANCE_APPROACH_DURATION + tour.length * (MOVE_DURATION + PAN_360_DURATION);
+  }, [tour]);
+
+  // Save dollhouse camera position to restore when walkthrough stops
   const dollyPos = useMemo(
     () =>
       new THREE.Vector3(
@@ -150,34 +202,122 @@ export default function WalkthroughCamera({
     [totalW, totalD],
   );
 
-  // When walkthrough becomes inactive: reset elapsed + restore dollhouse view
+  // Restore camera position & FOV when walkthrough stops
   useEffect(() => {
     if (!active) {
       elapsedRef.current = 0;
-      // Restore the same camera position Canvas sets initially
       camera.position.copy(dollyPos);
       camera.lookAt(new THREE.Vector3(0, 0, 0));
+      if ("fov" in camera) {
+        (camera as THREE.PerspectiveCamera).fov = DEFAULT_FOV;
+        (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+      }
+    } else {
+      if ("fov" in camera) {
+        (camera as THREE.PerspectiveCamera).fov = INSIDE_FOV;
+        (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+      }
     }
   }, [active, camera, dollyPos]);
 
-  // ── per-frame animation ──────────────────────────────────────────────────
+  // Per-frame camera animation loop
   useFrame((_, delta) => {
-    if (!active || paused || !path) return;
+    if (!active || paused || tour.length === 0) return;
 
-    // Advance elapsed time
-    elapsedRef.current = (elapsedRef.current + delta / LOOP_DURATION) % 1;
-    const t = elapsedRef.current;
-    const tAhead = (t + LOOK_AHEAD) % 1;
+    // Advance time (wraps smoothly if user lets it run continuously)
+    elapsedRef.current = (elapsedRef.current + delta) % totalDuration;
+    const time = elapsedRef.current;
+    const progress = time / totalDuration;
 
-    const pos = path.getPointAt(t);
-    const lookTarget = path.getPointAt(tAhead);
+    let currentPos = new THREE.Vector3();
+    let lookTarget = new THREE.Vector3();
+    let activeRoomName = tour[0].name;
+    let activeRoomIdx = 0;
+    let currentPhase: "entrance" | "moving" | "360_view" = "entrance";
+    let statusText = "";
 
-    camera.position.copy(pos);
+    if (time < ENTRANCE_APPROACH_DURATION) {
+      // ── Phase 0: Entrance Approach ──
+      const u = time / ENTRANCE_APPROACH_DURATION;
+      const easeU = smoothstep(u);
+
+      currentPos.lerpVectors(entranceStartPos, tour[0].centroid, easeU);
+      lookTarget.copy(tour[0].centroid);
+      activeRoomName = tour[0].name;
+      activeRoomIdx = 0;
+      currentPhase = "entrance";
+      statusText = `Approaching Entrance (${activeRoomName})`;
+    } else {
+      // ── Room-by-Room Progression ──
+      const tourTime = time - ENTRANCE_APPROACH_DURATION;
+      const roomCycleDuration = MOVE_DURATION + PAN_360_DURATION;
+      const rawRoomIdx = Math.floor(tourTime / roomCycleDuration);
+      const roomIdx = Math.min(rawRoomIdx, tour.length - 1);
+      const roomTime = tourTime - roomIdx * roomCycleDuration;
+
+      const currentRoom = tour[roomIdx];
+      const prevCentroid =
+        roomIdx === 0 ? entranceStartPos : tour[roomIdx - 1].centroid;
+      activeRoomName = currentRoom.name;
+      activeRoomIdx = roomIdx;
+
+      if (roomTime < MOVE_DURATION) {
+        // ── Phase 1: Move / Enter Room ──
+        currentPhase = "moving";
+        const u = roomTime / MOVE_DURATION;
+        const easeU = smoothstep(u);
+
+        currentPos.lerpVectors(prevCentroid, currentRoom.centroid, easeU);
+
+        // Look toward room center during entry
+        const fwd = currentRoom.centroid.clone().sub(prevCentroid);
+        if (fwd.lengthSq() < 0.001) fwd.set(0, 0, -1);
+        fwd.y = 0;
+        fwd.normalize();
+        lookTarget.copy(currentPos).add(fwd);
+
+        statusText = `Entering Room ${roomIdx + 1}/${tour.length}: ${currentRoom.name}`;
+      } else {
+        // ── Phase 2: 360-Degree Panoramic View inside Room ──
+        currentPhase = "360_view";
+        const panTime = roomTime - MOVE_DURATION;
+        const u = panTime / PAN_360_DURATION;
+        const easeU = smoothstep(u);
+
+        // Position fixed at room centroid at eye level
+        currentPos.copy(currentRoom.centroid);
+
+        // Initial entry angle
+        const initialFwd = currentRoom.centroid.clone().sub(prevCentroid);
+        if (initialFwd.lengthSq() < 0.001) initialFwd.set(0, 0, -1);
+        initialFwd.y = 0;
+        initialFwd.normalize();
+        const baseYaw = Math.atan2(initialFwd.x, initialFwd.z);
+
+        // Rotate yaw through full 360 degrees (2 * PI)
+        const yaw = baseYaw + easeU * Math.PI * 2;
+        const lookDir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        lookTarget.copy(currentPos).add(lookDir);
+
+        statusText = `Room ${roomIdx + 1}/${tour.length}: ${currentRoom.name} (360° View)`;
+      }
+    }
+
+    // Apply computed position & rotation to camera
+    camera.position.copy(currentPos);
     camera.lookAt(lookTarget);
 
-    onProgress?.(t);
+    // Report progress & details to HUD / Recorder
+    onProgress?.(progress, {
+      progress,
+      roomName: activeRoomName,
+      roomIndex: activeRoomIdx + 1,
+      totalRooms: tour.length,
+      phase: currentPhase,
+      statusText,
+    });
   });
 
-  // This component only drives the camera — no mesh output
   return null;
 }
+
