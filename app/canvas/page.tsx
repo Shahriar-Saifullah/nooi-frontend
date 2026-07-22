@@ -16,10 +16,10 @@ import CanvasPromptBox from "@/components/CanvasPromptBox";
 import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
-import { catalogById, type CatalogItem } from "@/lib/furniture/catalog";
+import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
-import { getProject, saveFurniture, toggleShare } from "@/lib/api/projects";
+import { getProject, saveFurniture, toggleShare, aiFurnish } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
@@ -396,6 +396,95 @@ export default function CanvasPage() {
     sceneRef.current?.setCameraView(view);
   };
 
+  // ── AI furnish: "decorate my master bedroom" → placed furniture ────────────
+  const [isFurnishing, setIsFurnishing] = useState(false);
+  const [assistantMsg, setAssistantMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const FURNISH_VERB = /(furnish|decorat|add|place|put|fill|arrange|set\s*up|style)/i;
+  const FURNISH_NOUN = /(furnitur|sofa|couch|bed\b|beds\b|table|chair|desk|wardrobe|dresser|rug|lamp|shelf|room|bedroom|living|dining|kitchen|bath|balcon)/i;
+
+  // world-space rectangles for each room — same mapping ThreeSceneV2 uses:
+  // box coords are 0–100 plan units; world is meters centered on the origin
+  const roomWorldRects = () => {
+    const totalW = roomDimensionsCm.width / 100;
+    const totalD = roomDimensionsCm.depth / 100;
+    return rooms.map(r => {
+      let b = r.box;
+      if (!b && r.polygon && r.polygon.length >= 3) {
+        const xs = r.polygon.map(p => p[0]), ys = r.polygon.map(p => p[1]);
+        const minLeft = Math.min(...xs), minTop = Math.min(...ys);
+        b = { left: minLeft, top: minTop, width: Math.max(...xs) - minLeft, height: Math.max(...ys) - minTop };
+      }
+      if (!b) return null;
+      return {
+        id: r.id,
+        name: r.name,
+        rect: {
+          x: (b.left / 100) * totalW - totalW / 2,
+          z: (b.top / 100) * totalD - totalD / 2,
+          w: (b.width / 100) * totalW,
+          d: (b.height / 100) * totalD,
+        },
+      };
+    }).filter((r): r is NonNullable<typeof r> => r !== null);
+  };
+
+  const handleAssistantCommand = async (command: string): Promise<boolean> => {
+    if (!(FURNISH_VERB.test(command) && FURNISH_NOUN.test(command))) return false;
+    if (!currentProject?.id) return false;
+    const roomPayload = roomWorldRects();
+    if (roomPayload.length === 0) {
+      setAssistantMsg({ kind: "err", text: "I can't see any rooms yet — wait for the floor plan to load." });
+      return true;
+    }
+    setIsFurnishing(true);
+    setAssistantMsg(null);
+    try {
+      const data = await aiFurnish(currentProject.id, {
+        command,
+        rooms: roomPayload,
+        catalog: FURNITURE_CATALOG.map(c => ({
+          id: c.id, name: c.name, category: c.category, w: c.size.w, d: c.size.d,
+        })),
+        existing: placedFurniture.map(f => ({
+          name: f.name, x: f.position[0], z: f.position[2],
+        })),
+      });
+      const stamp = Date.now();
+      const newItems: PlacedFurniture[] = [];
+      data.placements.forEach((p, i) => {
+        const cat = catalogById(p.modelId);
+        if (!cat) return;
+        newItems.push({
+          id: `${cat.id}-${stamp}-${i}`,
+          modelId: cat.id,
+          name: cat.name,
+          position: [p.x, 0, p.z],
+          rotation: (p.rotation * Math.PI) / 180,
+          sizeScale: 1,
+          color: null,
+          materialPreset: null,
+          scale: [1, 1, 1],
+          width: cat.size.w,
+          depth: cat.size.d,
+          height: cat.size.h,
+        });
+      });
+      if (newItems.length === 0) throw new Error("No furniture could be placed — try rephrasing.");
+      setPlacedFurniture(prev => [...prev, ...newItems]);
+      if (viewMode !== "3d") setViewMode("3d");
+      setAssistantMsg({
+        kind: "ok",
+        text: `${data.message} (${newItems.length} item${newItems.length !== 1 ? "s" : ""} in ${data.targetRoomName} — drag any of them to adjust.)`,
+      });
+    } catch (err: any) {
+      setAssistantMsg({ kind: "err", text: err?.message || "Couldn't place furniture — please try again." });
+    } finally {
+      setIsFurnishing(false);
+    }
+    return true;
+  };
+
   // ── Share (public read-only link) ──────────────────────────────────────────
   const [shareOpen, setShareOpen] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
@@ -652,6 +741,23 @@ export default function CanvasPage() {
                 <p className="text-[12px] text-[#404040]">Generating your design…</p>
               </div>
             )}
+            {isFurnishing && (
+              <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-4 flex items-center gap-2.5">
+                <Loader2 size={14} className="animate-spin text-[#004643]" />
+                <p className="text-[12px] text-[#404040]">Choosing and placing furniture…</p>
+              </div>
+            )}
+            {assistantMsg && !isFurnishing && (
+              <div className={`rounded-[10px] px-3.5 py-3 border ${
+                assistantMsg.kind === "ok"
+                  ? "bg-[#f0f7f6] border-[#c7de7d]"
+                  : "bg-[#fef2f2] border-[#fecaca]"
+              }`}>
+                <p className={`text-[12px] leading-[1.55] ${
+                  assistantMsg.kind === "ok" ? "text-[#004643]" : "text-[#b91c1c]"
+                }`}>{assistantMsg.text}</p>
+              </div>
+            )}
             {renderError && (
               <div className="bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3.5 py-3">
                 <p className="text-[12px] text-[#b91c1c]">{renderError}</p>
@@ -706,6 +812,7 @@ export default function CanvasPage() {
 
           <CanvasPromptBox
             projectId={currentProject?.id}
+            onCommand={handleAssistantCommand}
             onGenerateStart={() => { setIsGeneratingRender(true); setRenderError(null); }}
             onGenerateSuccess={url => { setGeneratedImageUrl(url); setIsGeneratingRender(false); }}
             onGenerateError={msg => { setRenderError(msg); setIsGeneratingRender(false); }}
@@ -870,6 +977,7 @@ export default function CanvasPage() {
                   furniture={placedFurniture}
                   onFurnitureSelect={setSelectedFurnitureId}
                   onFurnitureMove={handleFurnitureMove}
+                  selectedFurnitureId={selectedFurnitureId}
                   walkthroughActive={walkthroughActive}
                   walkthroughPaused={walkthroughPaused}
                   onWalkthroughProgress={(prog, info) => {

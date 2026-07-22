@@ -9,6 +9,9 @@ interface CanvasPromptBoxProps {
   onGenerateStart?: () => void;
   onGenerateSuccess?: (imageUrl: string) => void;
   onGenerateError?: (message: string) => void;
+  /** Intercepts the prompt before render generation. Return true if the
+      command was handled (e.g. AI furniture placement) to skip the render. */
+  onCommand?: (prompt: string) => Promise<boolean>;
 }
 
 export default function CanvasPromptBox({
@@ -16,6 +19,7 @@ export default function CanvasPromptBox({
   onGenerateStart,
   onGenerateSuccess,
   onGenerateError,
+  onCommand,
 }: CanvasPromptBoxProps) {
   const [designPrompt, setDesignPrompt] = useState("");
   const [attachedFile, setAttachedFile] = useState<string | null>(null);
@@ -53,8 +57,13 @@ export default function CanvasPromptBox({
     setDesignPrompt("");
     setAttachedFile(null);
     setIsGenerating(true);
-    onGenerateStart?.();
     try {
+      // commands like "furnish the bedroom" are handled without a render
+      if (onCommand && (await onCommand(promptToSend))) {
+        setIsGenerating(false);
+        return;
+      }
+      onGenerateStart?.();
       const result = await generateRender(projectId, promptToSend, selectedModel);
       onGenerateSuccess?.(result.image_url);
     } catch (err: any) {
