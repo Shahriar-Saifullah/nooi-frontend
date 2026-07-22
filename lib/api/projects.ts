@@ -229,3 +229,32 @@ export async function getSharedProject(token: string) {
   if (!json.success) throw new Error(json.error || "Not found");
   return json.data.project as Pick<Project, 'name' | 'project_type' | 'room_data' | 'updated_at'>;
 }
+
+// ─── AI furnish: natural-language furniture placement ────────────────────────
+
+export interface AiFurnishPayload {
+  command: string;
+  rooms: { id: string; name: string; rect: { x: number; z: number; w: number; d: number } }[];
+  catalog: { id: string; name: string; category: string; w: number; d: number }[];
+  existing?: { name: string; x: number; z: number }[];
+}
+
+export interface AiFurnishResult {
+  targetRoomId: string;
+  targetRoomName: string;
+  message: string;
+  placements: { modelId: string; x: number; z: number; rotation: number }[];
+}
+
+export async function aiFurnish(projectId: string, payload: AiFurnishPayload) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/ai-furnish`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "Couldn't place furniture");
+  return json.data as AiFurnishResult;
+}
