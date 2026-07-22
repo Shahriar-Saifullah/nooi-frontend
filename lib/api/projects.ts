@@ -234,7 +234,11 @@ export async function getSharedProject(token: string) {
 
 export interface AiFurnishPayload {
   command: string;
-  rooms: { id: string; name: string; rect: { x: number; z: number; w: number; d: number } }[];
+  rooms: {
+    id: string; name: string;
+    rect: { x: number; z: number; w: number; d: number };
+    polygon?: [number, number][];   // world coords, when the room is polygonal
+  }[];
   catalog: { id: string; name: string; category: string; w: number; d: number }[];
   existing?: { name: string; x: number; z: number }[];
 }

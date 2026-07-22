@@ -403,28 +403,38 @@ export default function CanvasPage() {
   const FURNISH_VERB = /(furnish|decorat|add|place|put|fill|arrange|set\s*up|style)/i;
   const FURNISH_NOUN = /(furnitur|sofa|couch|bed\b|beds\b|table|chair|desk|wardrobe|dresser|rug|lamp|shelf|room|bedroom|living|dining|kitchen|bath|balcon)/i;
 
-  // world-space rectangles for each room — same mapping ThreeSceneV2 uses:
-  // box coords are 0–100 plan units; world is meters centered on the origin
+  // world-space geometry for each room. IMPORTANT: polygon first — that's what
+  // ThreeSceneV2 actually renders as the room floor; `box` is a legacy grid
+  // rectangle that can sit elsewhere entirely. Coords: plan units are 0–100,
+  // world is meters centered on the origin (same mapping as ThreeSceneV2.px/pz).
   const roomWorldRects = () => {
     const totalW = roomDimensionsCm.width / 100;
     const totalD = roomDimensionsCm.depth / 100;
+    const toWorld = ([px, py]: [number, number]): [number, number] => [
+      (px / 100) * totalW - totalW / 2,
+      (py / 100) * totalD - totalD / 2,
+    ];
     return rooms.map(r => {
-      let b = r.box;
-      if (!b && r.polygon && r.polygon.length >= 3) {
-        const xs = r.polygon.map(p => p[0]), ys = r.polygon.map(p => p[1]);
-        const minLeft = Math.min(...xs), minTop = Math.min(...ys);
-        b = { left: minLeft, top: minTop, width: Math.max(...xs) - minLeft, height: Math.max(...ys) - minTop };
+      let polygon: [number, number][] | undefined;
+      let corners: [number, number][] | null = null;
+      if (r.polygon && r.polygon.length >= 3) {
+        polygon = r.polygon.map(toWorld);
+        corners = polygon;
+      } else if (r.box) {
+        const b = r.box;
+        corners = [
+          toWorld([b.left, b.top]),
+          toWorld([b.left + b.width, b.top + b.height]),
+        ];
       }
-      if (!b) return null;
+      if (!corners) return null;
+      const xs = corners.map(c => c[0]), zs = corners.map(c => c[1]);
+      const minX = Math.min(...xs), minZ = Math.min(...zs);
       return {
         id: r.id,
         name: r.name,
-        rect: {
-          x: (b.left / 100) * totalW - totalW / 2,
-          z: (b.top / 100) * totalD - totalD / 2,
-          w: (b.width / 100) * totalW,
-          d: (b.height / 100) * totalD,
-        },
+        rect: { x: minX, z: minZ, w: Math.max(...xs) - minX, d: Math.max(...zs) - minZ },
+        polygon,   // world coords — backend rejects placements outside it
       };
     }).filter((r): r is NonNullable<typeof r> => r !== null);
   };
