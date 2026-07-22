@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   Search, Minus, Plus, RotateCcw, Sofa,
-  ChevronDown, ChevronLeft, Share2, Download,
+  ChevronLeft, Share2, Download,
   SlidersHorizontal, Loader2, RotateCw, Trash2,
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
@@ -38,8 +38,6 @@ const ThreeSceneV2 = dynamic(() => import("@/components/ThreeSceneV2"), {
 
 // ─── Furniture catalogue ──────────────────────────────────────────────────────
 
-const PALETTE_COLORS = ["#f5f0e8", "#3d5a4c", "#8a8a8a", "#1a6b63", "#2e8b7a", "#e8c840"];
-const SUGGESTION_CHIPS = ["Cozy Scandinavian living room", "Maximise natural light", "Modern minimalist bedroom"];
 const FALLBACK_COLORS = ["#c3f4f0", "#b9eac5", "#87ddd7", "#f7dfad", "#d5dbda", "#ffc9c0"];
 
 function toGridRoom(room: any, index: number): GridRoom {
@@ -792,32 +790,6 @@ export default function CanvasPage() {
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="px-4 pb-3">
-            <p className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase mb-3">Design Settings</p>
-            <div className="flex gap-2 mb-3">
-              {["Style", "Budget"].map(label => (
-                <div key={label} className="flex-1 h-[30px] border border-[#e5e5e5] rounded-[8px] flex items-center justify-between px-2.5 cursor-pointer hover:border-[#d4d4d4]">
-                  <span className="text-[11px] text-[#a3a3a3]">{label}</span>
-                  <ChevronDown size={11} className="text-[#a3a3a3]" />
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center gap-1 mb-4">
-              <span className="text-[10px] text-[#a3a3a3] mr-1">Palette:</span>
-              {PALETTE_COLORS.map((c, i) => (
-                <button key={i} className="w-[16px] h-[16px] rounded-full border border-black/8 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
-              ))}
-            </div>
-            <div className="flex flex-col gap-[6px] mb-4">
-              {SUGGESTION_CHIPS.map(chip => (
-                <button key={chip} className="flex items-center gap-1.5 text-left text-[11px] text-[#525252] hover:text-[#0a0a0a] transition-colors group">
-                  <span className="text-[#a3a3a3] group-hover:text-[#525252] text-[11px]">+</span>
-                  <span>{chip}</span>
-                </button>
-              ))}
-            </div>
           </div>
 
           <CanvasPromptBox
