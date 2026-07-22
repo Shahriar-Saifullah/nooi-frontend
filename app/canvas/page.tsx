@@ -454,7 +454,7 @@ export default function CanvasPage() {
         command,
         rooms: roomPayload,
         catalog: FURNITURE_CATALOG.map(c => ({
-          id: c.id, name: c.name, category: c.category, w: c.size.w, d: c.size.d,
+          id: c.id, name: c.name, category: c.category, w: c.size.w, d: c.size.d, h: c.size.h,
         })),
         existing: placedFurniture.map(f => ({
           name: f.name, x: f.position[0], z: f.position[2],

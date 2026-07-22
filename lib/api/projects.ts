@@ -239,7 +239,7 @@ export interface AiFurnishPayload {
     rect: { x: number; z: number; w: number; d: number };
     polygon?: [number, number][];   // world coords, when the room is polygonal
   }[];
-  catalog: { id: string; name: string; category: string; w: number; d: number }[];
+  catalog: { id: string; name: string; category: string; w: number; d: number; h?: number }[];
   existing?: { name: string; x: number; z: number }[];
 }
 
