@@ -42,6 +42,16 @@ interface CreateProjectModalProps {
   onClose: () => void;
 }
 
+// ── Sample floor plans for users who don't have their own ─────────────────────
+// Drop 3–4 pipeline-validated plan images into /public/sample-plans/.
+// Use plans you've already tested end-to-end (clear walls, readable labels,
+// dimension text) — the whole sample experience is only as good as these files.
+const SAMPLE_PLANS = [
+  { id: "sample-plan-1", name: "2-Bedroom Apartment", src: "/sample-plans/Sample plan 1.jpeg" },
+  { id: "sample-plan-2", name: "3-Bedroom Family Home", src: "/sample-plans/Sample plan 2.jpeg" },
+  { id: "sample-plan-3", name: "Studio Apartment", src: "/sample-plans/Sample plan 3.jpeg" },
+];
+
 // ── Convert local Room state (string inputs, UI-only fields) to the shape the
 // backend API expects (numbers, only the fields the schema knows about). Local
 // fields like initialGridRow/initialColWeight are UI-only "reset" snapshots and
@@ -119,6 +129,8 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sampleUsedId, setSampleUsedId] = useState<string | null>(null);
+  const [loadingSampleId, setLoadingSampleId] = useState<string | null>(null);
 
   // ── Rooms — empty by default, filled from Gemini API response ──
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -288,13 +300,36 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files?.[0]) {
+      setSampleUsedId(null);
       setFile(e.dataTransfer.files[0]);
       setApiError(null);
     }
   };
 
+  const handleUseSample = async (sample: typeof SAMPLE_PLANS[number]) => {
+    if (loadingSampleId) return;
+    setLoadingSampleId(sample.id);
+    setApiError(null);
+    try {
+      const res = await fetch(sample.src);
+      if (!res.ok) throw new Error("Sample image not found");
+      const blob = await res.blob();
+      // from here on it's indistinguishable from a user upload
+      const sampleFile = new File([blob], `${sample.id}.png`, {
+        type: blob.type || "image/png",
+      });
+      setFile(sampleFile);
+      setSampleUsedId(sample.id);
+    } catch {
+      setApiError("Couldn't load that sample plan — please try another or upload your own.");
+    } finally {
+      setLoadingSampleId(null);
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
+      setSampleUsedId(null);
       setFile(e.target.files[0]);
       setApiError(null);
     }
@@ -590,6 +625,57 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                       </>
                     )}
                     <p className="text-[12px] text-gray-400">JPG, PNG, WebP or PDF • max 20 MB</p>
+                  </div>
+
+                  {/* No floor plan? Pick a sample */}
+                  <div className="mt-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="h-px flex-1 bg-gray-100" />
+                      <p className="text-[12px] text-gray-400">No floor plan? Start with a sample</p>
+                      <div className="h-px flex-1 bg-gray-100" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {SAMPLE_PLANS.map(sp => {
+                        const active = sampleUsedId === sp.id;
+                        const loading = loadingSampleId === sp.id;
+                        return (
+                          <button
+                            key={sp.id}
+                            type="button"
+                            onClick={() => handleUseSample(sp)}
+                            disabled={!!loadingSampleId}
+                            className={`relative rounded-[12px] border overflow-hidden text-left transition-all hover:shadow-md hover:-translate-y-0.5 ${
+                              active
+                                ? "border-[#004643] ring-2 ring-[#c7de7d]"
+                                : "border-gray-200 hover:border-[#004643]/40"
+                            } ${loadingSampleId && !loading ? "opacity-50" : ""}`}
+                          >
+                            <div className="aspect-[4/3] bg-[#fafafa]">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={sp.src}
+                                alt={sp.name}
+                                className="w-full h-full object-contain"
+                                loading="lazy"
+                              />
+                            </div>
+                            <p className="px-2 py-1.5 text-[11px] font-medium text-[#525252] truncate bg-white border-t border-gray-100">
+                              {sp.name}
+                            </p>
+                            {loading && (
+                              <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
+                                <Loader2 size={16} className="animate-spin text-[#004643]" />
+                              </div>
+                            )}
+                            {active && !loading && (
+                              <div className="absolute top-1.5 right-1.5 w-5 h-5 bg-[#004643] rounded-full flex items-center justify-center">
+                                <span className="text-white text-[10px]">✓</span>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}
