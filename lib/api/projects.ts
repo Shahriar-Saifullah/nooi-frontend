@@ -194,13 +194,20 @@ export interface FurniturePlacement {
   height?: number;
 }
 
-export async function saveFurniture(projectId: string, furniture: FurniturePlacement[]) {
+export async function saveFurniture(
+  projectId: string,
+  furniture: FurniturePlacement[],
+  wallColors?: Record<string, string>,
+) {
   const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch(`${BASE_URL}/projects/${projectId}/furniture`, {
     method: 'PUT',
     credentials: 'include',
     headers,
-    body: JSON.stringify({ furniture }),
+    body: JSON.stringify({
+      furniture,
+      ...(wallColors !== undefined ? { wall_colors: wallColors } : {}),
+    }),
   });
   const json = await res.json();
   if (!json.success) throw new Error(json.error || "Failed to save furniture");

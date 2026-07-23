@@ -75,6 +75,10 @@ export interface VWall {
   id?: string;
 }
 
+/** One paintable face of a wall. side "A" = the −z face for horizontal walls
+    / −x face for vertical walls; "B" = the opposite face. */
+export type WallSideSelection = { key: string; side: "A" | "B" };
+
 export interface PolyRoom extends GridRoom {
   polygon?: [number, number][]; // % coords
 }
@@ -86,6 +90,10 @@ interface ThreeSceneV2Props {
   rfWalls?: VWall[];
   openings?: Opening[];
   furniture?: PlacedFurniture[];
+  /** per-side wall paint: "wallKey:A" | "wallKey:B" → hex color */
+  wallColors?: Record<string, string>;
+  selectedWallSide?: string | null;
+  onWallSelect?: (sel: WallSideSelection | null) => void;
   onFurnitureSelect?: (id: string | null) => void;
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   selectedFurnitureId?: string | null;
@@ -145,8 +153,14 @@ function wallPieces(a0: number, a1: number, cuts: Cut[]) {
 // ─── Wall rendering ──────────────────────────────────────────────────────────
 
 function WallWithOpenings({
-  wall, cuts, world,
-}: { wall: VWall; cuts: Cut[]; world: World }) {
+  wall, cuts, world, wallKey, colors, selectedSide, onSelect,
+}: {
+  wall: VWall; cuts: Cut[]; world: World;
+  wallKey: string;
+  colors?: { A?: string; B?: string };
+  selectedSide?: "A" | "B" | null;
+  onSelect?: (sel: WallSideSelection) => void;
+}) {
   const horiz = Math.abs(wall.x2 - wall.x1) >= Math.abs(wall.y2 - wall.y1);
   const t = Math.min(MAX_WALL_T,
     Math.max(MIN_WALL_T, (wall.thickness / 100) * world.maxDim));
@@ -162,9 +176,29 @@ function WallWithOpenings({
 
   const { solids, cuts: clipped } = wallPieces(a0, a1, cuts);
 
+  // ── per-side painting ──
+  // boxGeometry material slots: 0 +x, 1 −x, 2 +y, 3 −y, 4 +z, 5 −z.
+  // A horizontal wall's paintable sides face ±z; a vertical wall's face ±x.
+  const BASE_WALL = "#f2f0ec";
+  const sideForFace = (fi: number): "A" | "B" | null => {
+    if (horiz) return fi === 5 ? "A" : fi === 4 ? "B" : null;
+    return fi === 1 ? "A" : fi === 0 ? "B" : null;
+  };
+  // which side was clicked: face normal when it's a side face, otherwise
+  // (top / end faces) whichever side of the wall's centerline the hit is on
+  const pickSide = (e: any): "A" | "B" => {
+    const n = e.face?.normal;
+    if (horiz) {
+      if (n && Math.abs(n.z) > 0.5) return n.z < 0 ? "A" : "B";
+      return e.point.z < c ? "A" : "B";
+    }
+    if (n && Math.abs(n.x) > 0.5) return n.x < 0 ? "A" : "B";
+    return e.point.x < c ? "A" : "B";
+  };
+
   const box = (
     from: number, to: number, y0: number, y1: number, key: string,
-    material: React.ReactNode,
+    material: React.ReactNode, paintable = false,
   ) => {
     const len = to - from;
     const mid = (from + to) / 2;
@@ -175,9 +209,32 @@ function WallWithOpenings({
       ? [len, y1 - y0, t]
       : [t, y1 - y0, len];
     return (
-      <mesh key={key} position={pos} castShadow receiveShadow>
+      <mesh
+        key={key} position={pos} castShadow receiveShadow
+        onPointerDown={paintable && onSelect ? (e) => {
+          e.stopPropagation();
+          onSelect({ key: wallKey, side: pickSide(e) });
+        } : undefined}
+        onClick={paintable && onSelect ? (e) => e.stopPropagation() : undefined}
+      >
         <boxGeometry args={size} />
-        {material}
+        {paintable
+          ? [0, 1, 2, 3, 4, 5].map((fi) => {
+              const side = sideForFace(fi);
+              const painted = side ? colors?.[side] : undefined;
+              const isSel = side !== null && side === selectedSide;
+              return (
+                <meshStandardMaterial
+                  key={fi}
+                  attach={`material-${fi}`}
+                  color={painted ?? BASE_WALL}
+                  roughness={0.9}
+                  emissive={isSel ? "#c7de7d" : "#000000"}
+                  emissiveIntensity={isSel ? 0.4 : 0}
+                />
+              );
+            })
+          : material}
       </mesh>
     );
   };
@@ -191,7 +248,7 @@ function WallWithOpenings({
 
   return (
     <group>
-      {solids.map(([f, tt], i) => box(f, tt, 0, WALL_H, `s${i}`, wallMat))}
+      {solids.map(([f, tt], i) => box(f, tt, 0, WALL_H, `s${i}`, null, true))}
       {clipped.map((cut, i) => {
         const cw = cut.end - cut.start;
         if (cut.type === "door") {
@@ -201,7 +258,7 @@ function WallWithOpenings({
           return (
             <group key={`d${i}`}>
               {/* header above the opening */}
-              {box(cut.start, cut.end, DOOR_H, WALL_H, `dh${i}`, wallMat)}
+              {box(cut.start, cut.end, DOOR_H, WALL_H, `dh${i}`, null, true)}
               {/* slim jamb posts */}
               {box(cut.start, cut.start + 0.05, 0, DOOR_H, `dfa${i}`, frameMat)}
               {box(cut.end - 0.05, cut.end, 0, DOOR_H, `dfb${i}`, frameMat)}
@@ -272,8 +329,8 @@ function WallWithOpenings({
         // window: sill below, glass pane, header above
         return (
           <group key={`w${i}`}>
-            {box(cut.start, cut.end, 0, SILL_H, `ws${i}`, wallMat)}
-            {box(cut.start, cut.end, DOOR_H, WALL_H, `wh${i}`, wallMat)}
+            {box(cut.start, cut.end, 0, SILL_H, `ws${i}`, null, true)}
+            {box(cut.start, cut.end, DOOR_H, WALL_H, `wh${i}`, null, true)}
             {box(cut.start + 0.02, cut.end - 0.02,
                  SILL_H + 0.03, DOOR_H - 0.03, `wg${i}`, glassMat)}
             {/* thin frame */}
@@ -841,12 +898,16 @@ function ExportBridge({
 function SceneContent({
   rooms, rfWalls, openings, furniture, world,
   onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
+  wallColors, selectedWallSide, onWallSelect,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
   onFurnitureSelect?: (id: string | null) => void;
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   selectedFurnitureId?: string | null;
+  wallColors?: Record<string, string>;
+  selectedWallSide?: string | null;
+  onWallSelect?: (sel: WallSideSelection | null) => void;
 }) {
   const cuts = useMemo(
     () => cutsPerWall(rfWalls, openings, world),
@@ -898,7 +959,7 @@ function SceneContent({
     <group>
       {/* ground */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow
-        onClick={() => onFurnitureSelect?.(null)}>
+        onClick={() => { onFurnitureSelect?.(null); onWallSelect?.(null); }}>
         <planeGeometry args={[world.totalW * 1.25, world.totalD * 1.25]} />
         <meshStandardMaterial color="#eae7e0" roughness={1} />
       </mesh>
@@ -940,10 +1001,25 @@ function SceneContent({
 
       {rooms.map((r) => <RoomFloor key={r.id} room={r} world={world} />)}
 
-      {rfWalls.map((wl, i) => (
-        <WallWithOpenings key={wl.id ?? i} wall={wl}
-          cuts={cuts.get(i) ?? []} world={world} />
-      ))}
+      {rfWalls.map((wl, i) => {
+        const wallKey = wl.id ?? `wi${i}`;
+        return (
+          <WallWithOpenings key={wallKey} wall={wl}
+            cuts={cuts.get(i) ?? []} world={world}
+            wallKey={wallKey}
+            colors={{
+              A: wallColors?.[`${wallKey}:A`],
+              B: wallColors?.[`${wallKey}:B`],
+            }}
+            selectedSide={
+              selectedWallSide && selectedWallSide.startsWith(`${wallKey}:`)
+                ? (selectedWallSide.endsWith(":A") ? "A" : "B")
+                : null
+            }
+            onSelect={onWallSelect}
+          />
+        );
+      })}
 
       {furniture.map((f) => (
         <FurnitureItem key={f.id} item={f} world={world}
@@ -967,6 +1043,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   rfWalls = [],
   openings = [],
   furniture = [],
+  wallColors,
+  selectedWallSide = null,
+  onWallSelect,
   onFurnitureSelect,
   onFurnitureMove,
   selectedFurnitureId = null,
@@ -1007,7 +1086,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         position: [world.totalW * 0.55, world.maxDim * 0.85, world.totalD * 0.95],
         fov: 40,
       }}
-      onPointerMissed={() => onFurnitureSelect?.(null)}
+      onPointerMissed={() => { onFurnitureSelect?.(null); onWallSelect?.(null); }}
       style={{ width: "100%", height: "100%" }}
     >
       <color attach="background" args={["#12161a"]} />
@@ -1053,6 +1132,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           onFurnitureSelect={onFurnitureSelect}
           onFurnitureMove={onFurnitureMove}
           selectedFurnitureId={selectedFurnitureId}
+          wallColors={wallColors}
+          selectedWallSide={selectedWallSide}
+          onWallSelect={onWallSelect}
         />
       </Suspense>
       <OrbitControls ref={controlsRef} makeDefault

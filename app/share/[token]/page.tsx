@@ -155,6 +155,7 @@ export default function SharedDesignPage() {
           rfWalls={rd.walls ?? []}
           openings={rd.openings ?? []}
           furniture={furniture}
+          wallColors={rd.wall_colors ?? undefined}
         />
         <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4 bg-black/50 backdrop-blur-sm text-white/80 text-[11px] px-4 py-2 rounded-full pointer-events-none">
           <span>🖱 Drag to orbit</span>

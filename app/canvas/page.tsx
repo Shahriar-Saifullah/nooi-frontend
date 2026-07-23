@@ -50,6 +50,11 @@ function toGridRoom(room: any, index: number): GridRoom {
   };
 }
 
+const WALL_PAINTS = [
+  "#f2f0ec", "#ffffff", "#e8e4d8", "#d9c8b4", "#c9a227", "#b96a4b",
+  "#8a9a5b", "#4f6d5a", "#004643", "#6c7a89", "#3b4a6b", "#2f2f2f",
+];
+
 export default function CanvasPage() {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
@@ -100,6 +105,8 @@ export default function CanvasPage() {
     setPlacedFurniture([]);
     setRfWalls([]);
     setOpenings([]);
+    setWallColors({});
+    setSelectedWall(null);
     // critical: without this, the empty furniture array above would pass the
     // auto-save guard and wipe the incoming project's saved furniture
     furnitureLoaded.current = false;
@@ -129,6 +136,10 @@ export default function CanvasPage() {
           if (Array.isArray(savedFurniture) && savedFurniture.length > 0) {
             setPlacedFurniture(savedFurniture);
             furnitureLoaded.current = true;
+          }
+          const savedWallColors = (p.room_data as any)?.wall_colors;
+          if (savedWallColors && typeof savedWallColors === "object") {
+            setWallColors(savedWallColors);
           }
           if (!haveStoreRooms && apiRooms.length > 0) {
             // server rooms only when the store has none — the user's freshly
@@ -210,21 +221,28 @@ export default function CanvasPage() {
     addFurniture(cat, pos);
   };
 
+  // ── Wall painting: per-side colors, keyed "wallKey:A" | "wallKey:B" ────────
+  const [wallColors, setWallColors] = useState<Record<string, string>>({});
+  const [selectedWall, setSelectedWall] = useState<{ key: string; side: "A" | "B" } | null>(null);
+  const wallKeyOf = (w: { key: string; side: "A" | "B" }) => `${w.key}:${w.side}`;
+
   // ── persist furniture: debounced auto-save 1.5s after the last change ──
   const furnitureLoaded = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!currentProject?.id) return;
-    // skip the very first render (empty state) and the load itself
-    if (!furnitureLoaded.current && placedFurniture.length === 0) return;
+    // skip the very first render (empty state) and the load itself;
+    // wall paint alone (before any furniture) must still save
+    if (!furnitureLoaded.current && placedFurniture.length === 0
+        && Object.keys(wallColors).length === 0) return;
     furnitureLoaded.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveFurniture(currentProject.id, placedFurniture as any)
-        .catch(err => console.error("Furniture save failed:", err));
+      saveFurniture(currentProject.id, placedFurniture as any, wallColors)
+        .catch(err => console.error("Scene save failed:", err));
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [placedFurniture, currentProject?.id]);
+  }, [placedFurniture, wallColors, currentProject?.id]);
 
   const handleFurnitureMove = (id: string, position: [number, number, number]) => {
     setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, position } : f));
@@ -957,9 +975,18 @@ export default function CanvasPage() {
                   rfWalls={rfWalls}
                   openings={openings}
                   furniture={placedFurniture}
-                  onFurnitureSelect={setSelectedFurnitureId}
+                  onFurnitureSelect={(id) => {
+                    setSelectedFurnitureId(id);
+                    if (id) setSelectedWall(null);
+                  }}
                   onFurnitureMove={handleFurnitureMove}
                   selectedFurnitureId={selectedFurnitureId}
+                  wallColors={wallColors}
+                  selectedWallSide={selectedWall ? wallKeyOf(selectedWall) : null}
+                  onWallSelect={(sel) => {
+                    setSelectedWall(sel);
+                    if (sel) { setSelectedFurnitureId(null); setRightTab("edit"); }
+                  }}
                   walkthroughActive={walkthroughActive}
                   walkthroughPaused={walkthroughPaused}
                   onWalkthroughProgress={(prog, info) => {
@@ -1011,11 +1038,74 @@ export default function CanvasPage() {
                   onChange={patchSelected}
                   onDelete={handleDelete}
                 />
+              ) : selectedWall ? (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <p className="text-[13px] font-semibold text-[#0a0a0a]">Wall paint</p>
+                    <p className="text-[11px] text-[#a3a3a3] mt-0.5">
+                      Wall {selectedWall.key} · {selectedWall.side === "A" ? "side 1" : "side 2"} — only this side gets painted.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-6 gap-2">
+                    {WALL_PAINTS.map(c => {
+                      const active = wallColors[wallKeyOf(selectedWall)] === c;
+                      return (
+                        <button
+                          key={c}
+                          onClick={() => setWallColors(prev => ({ ...prev, [wallKeyOf(selectedWall)]: c }))}
+                          className={`w-full aspect-square rounded-[8px] border transition-transform hover:scale-105 ${
+                            active ? "border-[#004643] ring-2 ring-[#c7de7d]" : "border-black/10"
+                          }`}
+                          style={{ backgroundColor: c }}
+                          title={c}
+                        />
+                      );
+                    })}
+                  </div>
+                  <label className="flex items-center justify-between gap-2 text-[11px] text-[#525252]">
+                    Custom colour
+                    <input
+                      type="color"
+                      value={wallColors[wallKeyOf(selectedWall)] ?? "#f2f0ec"}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setWallColors(prev => ({ ...prev, [wallKeyOf(selectedWall)]: v }));
+                      }}
+                      className="w-[42px] h-[26px] rounded cursor-pointer border border-[#e5e5e5] bg-white"
+                    />
+                  </label>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => {
+                        const v = wallColors[wallKeyOf(selectedWall)];
+                        if (!v) return;
+                        setWallColors(prev => ({
+                          ...prev,
+                          [`${selectedWall.key}:A`]: v,
+                          [`${selectedWall.key}:B`]: v,
+                        }));
+                      }}
+                      className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#525252] hover:bg-[#fafafa]"
+                    >
+                      Apply to both sides
+                    </button>
+                    <button
+                      onClick={() => setWallColors(prev => {
+                        const next = { ...prev };
+                        delete next[wallKeyOf(selectedWall)];
+                        return next;
+                      })}
+                      className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#b91c1c] hover:bg-[#fef2f2]"
+                    >
+                      Reset this side
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-10">
                   <Sofa size={28} className="text-[#d4d4d4]" />
-                  <p className="text-[12px] font-semibold text-[#525252]">No item selected</p>
-                  <p className="text-[11px] text-[#a3a3a3]">Click a furniture item in the 3D scene to edit it</p>
+                  <p className="text-[12px] font-semibold text-[#525252]">Nothing selected</p>
+                  <p className="text-[11px] text-[#a3a3a3]">Click a furniture item or a wall in the 3D scene to edit it</p>
                 </div>
               )}
             </div>
