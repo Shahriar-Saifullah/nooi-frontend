@@ -481,10 +481,10 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="bg-white rounded-[24px] w-full shadow-2xl flex flex-col overflow-hidden max-h-[90vh] max-w-[860px]"
+            className="bg-white rounded-[24px] w-full shadow-2xl flex flex-col overflow-hidden max-h-[calc(100vh-2rem)] sm:max-h-[85vh] h-auto sm:h-[580px] max-w-[620px] my-auto"
           >
             {/* Header */}
-            <div className="flex justify-between items-start px-8 pt-8 pb-4">
+            <div className="flex justify-between items-start px-6 sm:px-8 pt-6 sm:pt-8 pb-3 sm:pb-4 shrink-0">
               <div>
                 <h2 className="text-[20px] font-semibold text-[#0a0a0a] tracking-tight">
                   {step === 1 && "Project details"}
@@ -507,14 +507,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
             </div>
 
             {/* Body */}
-            <div
-              style={{
-                height: step === 5 ? 'auto' : '60vh',
-                minHeight: step === 5 ? 'auto' : '500px',
-                transition: 'height 0.4s cubic-bezier(0.4,0,0.2,1)',
-              }}
-              className="px-8 py-4 overflow-y-auto custom-scrollbar"
-            >
+            <div className="px-6 sm:px-8 py-3 sm:py-4 overflow-y-auto custom-scrollbar flex-1 min-h-0">
 
               {/* ── Step 1 ── */}
               {step === 1 && (
@@ -603,11 +596,11 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
 
               {/* ── Step 3 — Rooms from Gemini ── */}
               {step === 3 && (
-                <div className="flex gap-[24px] h-full">
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 min-h-[280px] h-full">
                   {/* Room layout — colored boxes only, positioned to mirror the real floor plan's layout */}
                   <div
                     onClick={() => setSelectedRoomId(null)}
-                    className="bg-[#f7f8f8] border border-[#eaedec] h-full min-h-[350px] relative rounded-[12px] flex-1 overflow-hidden"
+                    className="bg-[#f7f8f8] border border-[#eaedec] h-[240px] sm:h-full min-h-[220px] relative rounded-[12px] flex-1 overflow-hidden"
                   >
                     {rooms.length === 0 ? (
                       <div className="absolute inset-0 flex items-center justify-center">
@@ -662,7 +655,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                   </div>
 
                   {/* Room list — primary review/edit interaction */}
-                  <div className="bg-white border border-[#f1f4f4] h-full min-h-[350px] overflow-hidden relative rounded-[12px] w-[280px] shrink-0 flex flex-col">
+                  <div className="bg-white border border-[#f1f4f4] h-[200px] sm:h-full min-h-[180px] overflow-hidden relative rounded-[12px] w-full sm:w-[220px] shrink-0 flex flex-col">
                     <div className="bg-white border-b border-[#f1f4f4] flex items-center justify-between h-[44px] shrink-0 px-[16px]">
                       <p className="font-semibold text-[#101212] text-[13px]">{rooms.length} room{rooms.length !== 1 ? 's' : ''} detected</p>
                       <button onClick={handleAddRoom} className="font-semibold text-[#004643] text-[13px] hover:underline">+ Add</button>
@@ -863,7 +856,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 6 }}
                   transition={{ duration: 0.2 }}
-                  className="mx-8 mt-2 flex items-center justify-between gap-2 text-red-600 bg-red-50 px-4 py-2.5 rounded-xl border border-red-100"
+                  className="mx-6 sm:mx-8 mb-2 flex items-center justify-between gap-2 text-red-600 bg-red-50 px-4 py-2.5 rounded-xl border border-red-100 shrink-0"
                 >
                   <div className="flex items-center gap-2">
                     <AlertCircle size={15} className="shrink-0" />
@@ -880,7 +873,7 @@ export default function CreateProjectModal({ isOpen, onClose }: CreateProjectMod
             </AnimatePresence>
 
             {/* Footer */}
-            <div className="border-t border-[#f1f4f4] px-8 py-5 flex items-center justify-between bg-white rounded-b-[24px]">
+            <div className="border-t border-[#f1f4f4] px-6 sm:px-8 py-3.5 sm:py-4 flex items-center justify-between bg-white rounded-b-[24px] shrink-0 mt-auto">
               {step > 1 ? (
                 <button
                   onClick={handleBack}
