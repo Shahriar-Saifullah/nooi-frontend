@@ -31,13 +31,21 @@ export default function DashboardPage() {
     getCurrentUser().then((res) => {
       if (res.success) {
         setUser(res.data.user);
-        // fetch projects once we know user is authed
-        listProjects(4).then(setProjects).catch(() => {}).finally(() => setProjectsLoading(false));
+        // fetch user's projects for recent creations and history
+        listProjects().then(setProjects).catch(() => {}).finally(() => setProjectsLoading(false));
       } else {
         router.replace("/authpage/signin");
       }
       setLoading(false);
     });
+
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const view = params.get("view");
+      if (view === "history" || view === "collection" || view === "home") {
+        setActiveView(view as 'home' | 'history' | 'collection');
+      }
+    }
   }, [router]);
 
   // Close dropdown when clicking outside
@@ -113,13 +121,6 @@ export default function DashboardPage() {
             >
               <FolderOpen className="w-4 h-4" />
               <span className="text-xs font-medium">Collection</span>
-            </div>
-            <div
-              onClick={() => router.push('/dashboard/profile')}
-              className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors hover:bg-gray-200"
-            >
-              <Settings className="w-4 h-4" />
-              <span className="text-xs font-medium">Settings</span>
             </div>
           </div>
         </div>
@@ -226,30 +227,103 @@ export default function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 16 }}
             transition={{ duration: 0.2 }}
-            className="flex-1 bg-white rounded-3xl shadow-[0_0_32px_rgba(149,157,165,0.04)] p-6 flex flex-col gap-6"
+            className="flex-1 bg-white rounded-3xl shadow-[0_0_32px_rgba(149,157,165,0.04)] p-4 sm:p-6 flex flex-col gap-6"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-[#f5f5f5] flex items-center justify-center">
-                <Clock className="w-5 h-5 text-[#004643]" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[#f5f5f5] flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-[#004643]" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-[600]">History</h1>
+                  <p className="text-sm text-[#525252]">Your previous creations and project history.</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-xl font-[600]">History</h1>
-                <p className="text-sm text-[#525252]">Your recent activity and past generations.</p>
-              </div>
-            </div>
-            <div className="border border-dashed border-[#e5e5e5] rounded-[20px] p-16 flex flex-col items-center justify-center gap-3 text-center">
-              <div className="w-12 h-12 rounded-full bg-[#f5f5f5] flex items-center justify-center">
-                <Clock className="w-5 h-5 text-[#a3a3a3]" />
-              </div>
-              <p className="text-[13px] font-medium text-[#737373]">No history yet</p>
-              <p className="text-[12px] text-[#a3a3a3]">Your generation history will appear here once you start creating.</p>
               <button
-                onClick={() => setActiveView('home')}
-                className="mt-2 text-[12px] font-semibold text-[#004643] bg-[#f5f5f5] px-4 py-2 rounded-full hover:bg-gray-200 transition-colors"
+                onClick={() => setCreateModalOpen(true)}
+                className="bg-[#004643] text-white text-xs font-semibold px-4 py-2 rounded-full hover:bg-[#003633] transition-colors shadow-sm"
               >
-                Start Creating →
+                + New Project
               </button>
             </div>
+
+            {projectsLoading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <div key={i} className="border border-[#f0f0f0] rounded-[20px] p-2 animate-pulse">
+                    <div className="rounded-xl h-[120px] sm:h-[140px] mb-3 bg-gray-100" />
+                    <div className="px-2 pb-1">
+                      <div className="h-3 bg-gray-200 rounded w-3/4 mb-2" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : projects.length === 0 ? (
+              <div className="border border-dashed border-[#e5e5e5] rounded-[20px] p-16 flex flex-col items-center justify-center gap-3 text-center">
+                <div className="w-12 h-12 rounded-full bg-[#f5f5f5] flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-[#a3a3a3]" />
+                </div>
+                <p className="text-[13px] font-medium text-[#737373]">No history yet</p>
+                <p className="text-[12px] text-[#a3a3a3]">Your generation history will appear here once you start creating.</p>
+                <button
+                  onClick={() => setCreateModalOpen(true)}
+                  className="mt-2 text-[12px] font-semibold text-[#004643] bg-[#f5f5f5] px-4 py-2 rounded-full hover:bg-gray-200 transition-colors"
+                >
+                  Start Creating →
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+                {projects.map((project) => {
+                  const imgSrc = project.thumbnail_url || project.floor_plan_url;
+                  const createdAt = new Date(project.created_at);
+                  const now = new Date();
+                  const diffMs = now.getTime() - createdAt.getTime();
+                  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                  const timeAgo = diffDays === 0
+                    ? 'Today'
+                    : diffDays === 1
+                    ? 'Yesterday'
+                    : diffDays < 7
+                    ? `${diffDays} days ago`
+                    : diffDays < 30
+                    ? `${Math.floor(diffDays / 7)} week${Math.floor(diffDays / 7) > 1 ? 's' : ''} ago`
+                    : `${Math.floor(diffDays / 30)} month${Math.floor(diffDays / 30) > 1 ? 's' : ''} ago`;
+
+                  return (
+                    <div
+                      key={project.id}
+                      onClick={() => router.push(`/canvas?projectId=${project.id}`)}
+                      className="border border-[#f0f0f0] rounded-[20px] p-2.5 flex flex-col group cursor-pointer hover:shadow-md transition-all bg-white"
+                    >
+                      <div className="rounded-xl h-[120px] sm:h-[140px] mb-2 sm:mb-3 relative overflow-hidden bg-gray-100">
+                        {imgSrc ? (
+                          <Image
+                            fill
+                            src={imgSrc}
+                            alt={project.name}
+                            className="object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <ImageIcon className="w-8 h-8 text-[#d4d4d4]" />
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-transparent group-hover:bg-black/5 transition-colors duration-300" />
+                        {project.status === 'draft' && (
+                          <span className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-0.5 rounded-full">Draft</span>
+                        )}
+                      </div>
+                      <div className="px-1 sm:px-2 pb-1 flex flex-col self-stretch">
+                        <h4 className="text-[13px] font-[700] leading-[1.5] tracking-[-0.36px] text-[#0a0a0a] mb-0.5 truncate">{project.name}</h4>
+                        <p className="text-[12px] font-normal leading-[1.5] tracking-[-0.36px] text-[#737373]">{timeAgo}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -373,24 +447,12 @@ export default function DashboardPage() {
 
           {/* Recent Creations */}
           <motion.div variants={itemVariants} className="flex flex-col gap-3 sm:gap-4">
-            <h2 className="text-base sm:text-lg font-medium">Recent Creations</h2>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
-              <div className="bg-[#f5f5f5] h-10 inline-flex items-center p-1 rounded-full overflow-x-auto hide-scrollbar w-full sm:w-auto">
-                {['All', 'Create', 'Edit', 'Enhance'].map((tab) => (
-                  <div
-                    key={tab}
-                    onClick={() => setActiveRecentTab(tab)}
-                    className={`${
-                      activeRecentTab === tab
-                        ? 'bg-white shadow-sm'
-                        : 'hover:bg-gray-200 transition-colors cursor-pointer'
-                    } px-4 py-1.5 rounded-full whitespace-nowrap cursor-pointer`}
-                  >
-                    <span className="text-xs font-medium">{tab}</span>
-                  </div>
-                ))}
-              </div>
-              <button className="text-[#004643] text-[12px] font-medium leading-[150%] tracking-[-0.36px] flex items-center gap-1 bg-[#f5f5f5] h-8 px-3 rounded-full hover:bg-gray-200 shrink-0 transition-colors self-start sm:self-auto">
+            <div className="flex items-center justify-between gap-3 sm:gap-4">
+              <h2 className="text-base sm:text-lg font-medium">Recent Creations</h2>
+              <button
+                onClick={() => setActiveView('history')}
+                className="text-[#004643] text-[12px] font-medium leading-[150%] tracking-[-0.36px] flex items-center gap-1 bg-[#f5f5f5] h-8 px-3 rounded-full hover:bg-gray-200 shrink-0 transition-colors cursor-pointer"
+              >
                 My Creations <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -422,7 +484,7 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                {projects.map((project) => {
+                {projects.slice(0, 4).map((project) => {
                   const imgSrc = project.thumbnail_url || project.floor_plan_url;
                   const createdAt = new Date(project.created_at);
                   const now = new Date();

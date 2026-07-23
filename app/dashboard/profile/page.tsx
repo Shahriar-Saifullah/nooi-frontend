@@ -368,36 +368,25 @@ export default function ProfilePage() {
 
           <div className="hidden md:flex bg-[#f5f5f5] h-10 items-center p-1 rounded-full">
             <div
-              onClick={() => router.push("/dashboard")}
+              onClick={() => router.push("/dashboard?view=home")}
               className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors hover:bg-gray-200"
             >
               <Home className="w-4 h-4" />
               <span className="text-xs font-medium">Home</span>
             </div>
             <div
-              onClick={() => router.push("/dashboard")}
+              onClick={() => router.push("/dashboard?view=history")}
               className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors hover:bg-gray-200"
             >
               <Clock className="w-4 h-4" />
               <span className="text-xs font-medium">History</span>
             </div>
             <div
-              onClick={() => router.push("/dashboard")}
+              onClick={() => router.push("/dashboard?view=collection")}
               className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors hover:bg-gray-200"
             >
               <FolderOpen className="w-4 h-4" />
               <span className="text-xs font-medium">Collection</span>
-            </div>
-            <div
-              onClick={() => setActiveSection("profile")}
-              className={`flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors ${
-                ["profile", "security", "privacy"].includes(activeSection)
-                  ? "bg-white shadow-sm"
-                  : "hover:bg-gray-200"
-              }`}
-            >
-              <Settings className="w-4 h-4" />
-              <span className="text-xs font-medium">Settings</span>
             </div>
           </div>
         </div>
@@ -516,17 +505,6 @@ export default function ProfilePage() {
             </div>
 
             <div className="pt-4 border-t border-[#f5f5f5] space-y-1">
-              <button
-                onClick={() => setActiveSection("delete-account")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                  activeSection === "delete-account"
-                    ? "bg-red-500 text-white shadow-sm"
-                    : "text-red-600 hover:bg-red-50"
-                }`}
-              >
-                <Trash2 className="w-4 h-4" />
-                Delete Account
-              </button>
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-full text-xs font-semibold text-[#525252] hover:bg-[#f5f5f5] hover:text-[#0a0a0a] transition-colors cursor-pointer"
