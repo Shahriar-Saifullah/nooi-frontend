@@ -9,7 +9,7 @@ import {
   SlidersHorizontal, Loader2, RotateCw, Trash2,
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
-  Link2, Check, X, Camera,
+  Link2, Check, X, Camera, Maximize2, ArrowLeftRight,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -73,6 +73,11 @@ export default function CanvasPage() {
   const [loadingRooms, setLoadingRooms] = useState(false);
 
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  // session render history: newest first. `source` is the 3D capture that
+  // produced a scene render, enabling the before/after compare.
+  const [renders, setRenders] = useState<{ url: string; source?: string; at: number }[]>([]);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
   const [isGeneratingRender, setIsGeneratingRender] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
 
@@ -544,6 +549,9 @@ export default function CanvasPage() {
       const sceneJpeg = await downscaleDataUrl(shot, 1280);
       const data = await renderScene(currentProject.id, command, sceneJpeg);
       setGeneratedImageUrl(data.image_url);
+      setRenders(prev => [{ url: data.image_url, source: sceneJpeg, at: Date.now() }, ...prev]);
+      setCompareMode(false);
+      setViewerUrl(data.image_url);   // big reveal
     } catch (err: any) {
       setRenderError(err?.message || "Render failed — please try again.");
     } finally {
@@ -838,8 +846,41 @@ export default function CanvasPage() {
               </div>
             )}
             {generatedImageUrl && !isGeneratingRender && (
-              <div className="rounded-[10px] overflow-hidden border border-[#e5e5e5]">
+              <button
+                onClick={() => { setCompareMode(false); setViewerUrl(generatedImageUrl); }}
+                className="group relative rounded-[10px] overflow-hidden border border-[#e5e5e5] block w-full"
+                title="View full size"
+              >
                 <img src={generatedImageUrl} alt="AI render" className="w-full h-auto block" />
+                <span className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
+                  <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-2.5 py-1.5 bg-white/95 rounded-full text-[11px] font-medium text-[#0a0a0a]">
+                    <Maximize2 size={12} />View full size
+                  </span>
+                </span>
+              </button>
+            )}
+            {renders.length > 1 && (
+              <div>
+                <p className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase mb-2">
+                  Renders ({renders.length})
+                </p>
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+                  {renders.map(r => (
+                    <button
+                      key={r.at}
+                      onClick={() => {
+                        setGeneratedImageUrl(r.url);
+                        setCompareMode(false);
+                        setViewerUrl(r.url);
+                      }}
+                      className={`shrink-0 w-[64px] h-[48px] rounded-[8px] overflow-hidden border transition-all hover:scale-105 ${
+                        generatedImageUrl === r.url ? "border-[#004643] ring-2 ring-[#c7de7d]" : "border-[#e5e5e5]"
+                      }`}
+                    >
+                      <img src={r.url} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {viewMode === "3d" && selectedFurniture && (
@@ -862,7 +903,13 @@ export default function CanvasPage() {
             projectId={currentProject?.id}
             onCommand={handleAssistantCommand}
             onGenerateStart={() => { setIsGeneratingRender(true); setRenderError(null); }}
-            onGenerateSuccess={url => { setGeneratedImageUrl(url); setIsGeneratingRender(false); }}
+            onGenerateSuccess={url => {
+              setGeneratedImageUrl(url);
+              setRenders(prev => [{ url, at: Date.now() }, ...prev]);
+              setCompareMode(false);
+              setViewerUrl(url);
+              setIsGeneratingRender(false);
+            }}
             onGenerateError={msg => { setRenderError(msg); setIsGeneratingRender(false); }}
           />
         </aside>
@@ -1174,6 +1221,61 @@ export default function CanvasPage() {
           )}
         </aside>
       </div>
+
+      {/* ── Render viewer ── */}
+      {viewerUrl && (() => {
+        const entry = renders.find(r => r.url === viewerUrl);
+        const canCompare = !!entry?.source;
+        return (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-6">
+            <div className="absolute inset-0 bg-black/80" onClick={() => setViewerUrl(null)} />
+            <div className="relative z-10 flex flex-col items-center gap-3 max-h-full">
+              <div className="relative rounded-[14px] overflow-hidden shadow-2xl bg-black">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={compareMode && entry?.source ? entry.source : viewerUrl}
+                  alt="Render"
+                  className="max-h-[76vh] max-w-[86vw] object-contain block"
+                />
+                {compareMode && (
+                  <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-black/70 text-white text-[11px] font-medium">
+                    3D scene
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {canCompare && (
+                  <button
+                    onMouseDown={() => setCompareMode(true)}
+                    onMouseUp={() => setCompareMode(false)}
+                    onMouseLeave={() => setCompareMode(false)}
+                    onTouchStart={() => setCompareMode(true)}
+                    onTouchEnd={() => setCompareMode(false)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/12 hover:bg-white/20 text-white text-[12px] font-medium backdrop-blur-sm"
+                  >
+                    <ArrowLeftRight size={13} />Hold to compare
+                  </button>
+                )}
+                <a
+                  href={viewerUrl}
+                  download={`${(currentProject?.name || "nooi-render").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.png`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white text-[#0a0a0a] text-[12px] font-medium hover:bg-white/90"
+                >
+                  <Download size={13} />Download
+                </a>
+                <button
+                  onClick={() => setViewerUrl(null)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-white/12 hover:bg-white/20 text-white text-[12px] font-medium backdrop-blur-sm"
+                >
+                  <X size={13} />Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Share modal ── */}
       {shareOpen && (
