@@ -9,7 +9,7 @@ import {
   SlidersHorizontal, Loader2, RotateCw, Trash2,
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
-  Link2, Check, X,
+  Link2, Check, X, Camera,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -19,7 +19,7 @@ import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
-import { getProject, saveFurniture, toggleShare, aiFurnish } from "@/lib/api/projects";
+import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
@@ -455,8 +455,7 @@ export default function CanvasPage() {
     }).filter((r): r is NonNullable<typeof r> => r !== null);
   };
 
-  const handleAssistantCommand = async (command: string): Promise<boolean> => {
-    if (!(FURNISH_VERB.test(command) && FURNISH_NOUN.test(command))) return false;
+  const handleFurnish = async (command: string): Promise<boolean> => {
     if (!currentProject?.id) return false;
     const roomPayload = roomWorldRects();
     if (roomPayload.length === 0) {
@@ -509,6 +508,55 @@ export default function CanvasPage() {
       setIsFurnishing(false);
     }
     return true;
+  };
+
+  // ── Render Engine: live 3D scene → Replicate → photorealistic image ────────
+  // Downscale + JPEG-compress the WebGL capture before shipping — a raw PNG of
+  // a large canvas can exceed the request size limit as base64.
+  const downscaleDataUrl = (dataUrl: string, maxW: number): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        const ctx = c.getContext("2d");
+        if (!ctx) { reject(new Error("no 2d context")); return; }
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () => reject(new Error("capture decode failed"));
+      img.src = dataUrl;
+    });
+
+  const handleSceneRender = async (command: string): Promise<boolean> => {
+    if (!currentProject?.id) return false;
+    if (isGeneratingRender) return true;
+    // WYSIWYG: render exactly what the user has framed in the 3D view.
+    // No live scene (2D mode) → return false → legacy text-only render runs.
+    const shot = viewMode === "3d" ? sceneRef.current?.captureImage() : null;
+    if (!shot) return false;
+    setIsGeneratingRender(true);
+    setRenderError(null);
+    setAssistantMsg(null);
+    try {
+      const sceneJpeg = await downscaleDataUrl(shot, 1280);
+      const data = await renderScene(currentProject.id, command, sceneJpeg);
+      setGeneratedImageUrl(data.image_url);
+    } catch (err: any) {
+      setRenderError(err?.message || "Render failed — please try again.");
+    } finally {
+      setIsGeneratingRender(false);
+    }
+    return true;
+  };
+
+  const handleAssistantCommand = async (command: string): Promise<boolean> => {
+    if (FURNISH_VERB.test(command) && FURNISH_NOUN.test(command)) {
+      return handleFurnish(command);
+    }
+    return handleSceneRender(command);
   };
 
   // ── Share (public read-only link) ──────────────────────────────────────────
@@ -887,6 +935,20 @@ export default function CanvasPage() {
                 </button>
               ))}
             </div>
+          )}
+
+          {/* Render this view — photorealistic image of exactly what's framed */}
+          {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
+            <button
+              onClick={() => handleSceneRender("")}
+              disabled={isGeneratingRender}
+              title="Turn the current view into a photorealistic image"
+              className="absolute bottom-[68px] right-5 z-10 flex items-center gap-2 pl-3.5 pr-4 py-2 rounded-full bg-[#004643] hover:bg-[#003633] disabled:opacity-70 text-white text-[12px] font-medium shadow-[0_4px_12px_rgba(0,0,0,0.25)] transition-colors"
+            >
+              {isGeneratingRender
+                ? <><Loader2 size={14} className="animate-spin" />Rendering…</>
+                : <><Camera size={14} />Render view</>}
+            </button>
           )}
 
           {/* 2D View */}
