@@ -269,3 +269,18 @@ export async function aiFurnish(projectId: string, payload: AiFurnishPayload) {
   if (!json.success) throw new Error(json.error || "Couldn't place furniture");
   return json.data as AiFurnishResult;
 }
+
+// ─── Render engine: live 3D scene → photorealistic image ─────────────────────
+
+export async function renderScene(projectId: string, prompt: string, sceneImage: string) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/render-scene`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ prompt, scene_image: sceneImage }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || 'Render failed');
+  return json.data as { image_url: string };
+}
