@@ -6,7 +6,8 @@ import { listProjects, type Project } from "@/lib/api/projects";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Home, Clock, FolderOpen, Crown, ChevronRight,
-  ArrowUpRight, Loader2, LogOut, User, Settings, Languages, ImageIcon
+  ArrowUpRight, Loader2, LogOut, User, Settings, Languages, ImageIcon,
+  Sparkles, X
 } from "lucide-react";
 import Image from "next/image";
 import CreateProjectModal from "@/components/CreateProjectModal";
@@ -23,6 +24,22 @@ export default function DashboardPage() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [showFreePlanBanner, setShowFreePlanBanner] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = (message: string) => {
+    setToast(message);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
+  };
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+
+  // Early access: there is no paywall yet, so every feature is already
+  // available. When billing ships, point these CTAs at /pricing instead.
+  const handleUpgradeClick = () => {
+    showToast("You're all set — every feature is unlocked during early access. Enjoy! 🎉");
+    setShowFreePlanBanner(false);
+  };
   const [activeRecentTab, setActiveRecentTab] = useState('All');
   const [activeExploreTab, setActiveExploreTab] = useState('All');
   const [activeView, setActiveView] = useState<'home' | 'history' | 'collection'>('home');
@@ -126,7 +143,10 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-4">
-          <button className="hidden sm:flex items-center gap-2 px-6 h-10 rounded-full hover:bg-gray-50 transition-colors">
+          <button
+            onClick={handleUpgradeClick}
+            className="hidden sm:flex items-center gap-2 px-6 h-10 rounded-full hover:bg-gray-50 transition-colors"
+          >
             <Crown className="w-4 h-4 text-[#004643]" />
             <span className="text-xs font-medium text-[#004643]">Upgrade Plan</span>
           </button>
@@ -419,7 +439,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => router.push('/pricing')}
+                    onClick={handleUpgradeClick}
                     className="bg-[#004643] text-white text-[12px] font-medium px-4 py-2 rounded-full hover:bg-[#003633] transition-colors whitespace-nowrap"
                   >
                     Get Started
@@ -738,6 +758,33 @@ export default function DashboardPage() {
       </main>
 
       <CreateProjectModal isOpen={isCreateModalOpen} onClose={() => setCreateModalOpen(false)} />
+
+      {/* Toast */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            role="status"
+            aria-live="polite"
+            initial={{ opacity: 0, y: 24, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.97 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="fixed bottom-5 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-[120] w-[calc(100vw-32px)] sm:w-auto sm:max-w-[380px]"
+          >
+            <div className="flex items-start gap-3 bg-[#004643] text-white rounded-[14px] px-4 py-3 shadow-[0_12px_32px_-8px_rgba(0,0,0,0.35)]">
+              <Sparkles className="w-4 h-4 shrink-0 mt-[2px] text-[#c7de7d]" />
+              <p className="text-[13px] leading-[1.5] flex-1">{toast}</p>
+              <button
+                onClick={() => setToast(null)}
+                aria-label="Dismiss notification"
+                className="shrink-0 -mr-1 -mt-0.5 p-1 rounded-full hover:bg-white/15 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style dangerouslySetInnerHTML={{
         __html: `
