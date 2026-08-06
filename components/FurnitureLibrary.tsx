@@ -3,37 +3,80 @@
 /**
  * FurnitureLibrary — right-panel browser for the GLTF model catalog
  * ------------------------------------------------------------------
- * Real model thumbnails (runtime-generated), category chips, text search.
- * Items are HTML5 drag sources: drop them on the 3D canvas to place.
+ * Three-level browse: Category → Type → Variant (design).
+ *
+ *   [All] [Living Room] [Bedroom] …     ← horizontal scroll chips
+ *        ↓ pick a category
+ *   Sofa (3)   Armchair (1)   Rug (1)   ← types in that category
+ *        ↓ pick a type
+ *   3-Seat Sofa   Loveseat   Boca Tommy ← designs, draggable
+ *
+ * Searching bypasses the hierarchy and matches variants directly.
+ * Variants are HTML5 drag sources: drop them on the 3D canvas to place.
  * Click also works as a fallback (places at the scene centre).
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import {
-  FURNITURE_CATALOG, CATEGORY_LABELS, type CatalogItem,
-  type FurnitureCategory,
+  FURNITURE_CATALOG, FURNITURE_TYPES, CATEGORY_LABELS,
+  typesByCategory, typeById,
+  type CatalogItem, type FurnitureType, type FurnitureCategory,
 } from "@/lib/furniture/catalog";
 import { getThumbnail } from "@/lib/furniture/thumbnails";
 
 export const DND_MIME = "application/x-nooi-furniture";
 
-function Thumb({ item }: { item: CatalogItem }) {
-  const [src, setSrc] = useState<string | null>(null);
+/** Static thumbnail when the manifest provides one (fast), otherwise fall
+ *  back to rendering the .glb at runtime. Real-world assets are multi-MB,
+ *  so a static preview matters for panel responsiveness. */
+function Thumb({ item, className = "" }: { item: CatalogItem; className?: string }) {
+  const [src, setSrc] = useState<string | null>(item.thumbnail ?? null);
   useEffect(() => {
+    if (item.thumbnail) { setSrc(item.thumbnail); return; }
     let alive = true;
+    setSrc(null);
     getThumbnail(item).then(u => { if (alive) setSrc(u); });
     return () => { alive = false; };
   }, [item]);
   return (
-    <div className="w-full aspect-square rounded-lg bg-gray-50 border border-gray-100
-                    flex items-center justify-center overflow-hidden">
+    <div className={`w-full aspect-square rounded-lg bg-gray-50 border border-gray-100
+                     flex items-center justify-center overflow-hidden ${className}`}>
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt={item.name} className="w-full h-full object-contain" />
+        <img src={src} alt={item.name} className="w-full h-full object-contain"
+             onError={() => setSrc(null)} loading="lazy" />
       ) : (
-        <div className="w-8 h-8 rounded animate-pulse"
-             style={{ backgroundColor: item.color }} />
+        <div className="w-8 h-8 rounded animate-pulse" style={{ backgroundColor: item.color }} />
       )}
+    </div>
+  );
+}
+
+function VariantCard({
+  item, onQuickAdd,
+}: { item: CatalogItem; onQuickAdd?: (item: CatalogItem) => void }) {
+  return (
+    <div
+      draggable
+      onDragStart={e => {
+        e.dataTransfer.setData(DND_MIME, item.id);
+        e.dataTransfer.setData("text/plain", item.id);
+        e.dataTransfer.effectAllowed = "copy";
+      }}
+      onClick={() => onQuickAdd?.(item)}
+      className="rounded-xl border border-gray-100 bg-white p-2
+                 cursor-grab active:cursor-grabbing
+                 hover:border-teal-300 hover:shadow-sm transition"
+      title={`Drag into the scene — ${item.size.w}×${item.size.d} cm`}
+    >
+      <Thumb item={item} />
+      <div className="mt-1.5 text-[12px] font-medium text-gray-800 leading-tight">
+        {item.name}
+      </div>
+      <div className="text-[10px] text-gray-400">
+        {item.size.w}×{item.size.d} cm
+      </div>
     </div>
   );
 }
@@ -45,98 +88,166 @@ interface Props {
 export default function FurnitureLibrary({ onQuickAdd }: Props) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<FurnitureCategory | "all">("all");
+  const [openTypeId, setOpenTypeId] = useState<string | null>(null);
 
-  const items = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return FURNITURE_CATALOG.filter(i => {
-      if (category !== "all" && i.category !== category) return false;
-      if (!q) return true;
-      return i.name.toLowerCase().includes(q) ||
-             i.tags.some(t => t.includes(q)) ||
-             i.category.includes(q);
-    });
-  }, [query, category]);
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
 
-  const grouped = useMemo(() => {
-    const g = new Map<FurnitureCategory, CatalogItem[]>();
-    items.forEach(i => {
-      if (!g.has(i.category)) g.set(i.category, []);
-      g.get(i.category)!.push(i);
-    });
-    return g;
-  }, [items]);
+  // Search matches variants directly, across every category and type.
+  const searchResults = useMemo(() => {
+    if (!searching) return [];
+    return FURNITURE_CATALOG.filter(i =>
+      i.name.toLowerCase().includes(q) ||
+      i.tags.some(t => t.includes(q)) ||
+      i.category.includes(q) ||
+      (typeById(i.typeId)?.name.toLowerCase().includes(q) ?? false),
+    );
+  }, [q, searching]);
+
+  const types = useMemo(() => typesByCategory(category), [category]);
+  const openType: FurnitureType | undefined =
+    openTypeId ? FURNITURE_TYPES.find(t => t.id === openTypeId) : undefined;
 
   const cats: Array<FurnitureCategory | "all"> =
     ["all", ...Object.keys(CATEGORY_LABELS) as FurnitureCategory[]];
 
   return (
-    <div className="flex flex-col gap-3 h-full">
+    <div className="flex flex-col gap-3 h-full min-h-0">
       <div className="text-xs text-teal-800 bg-teal-50 border border-teal-100
                       rounded-lg px-3 py-2">
         Drag items into the 3D scene →
       </div>
 
-      <input
-        value={query}
-        onChange={e => setQuery(e.target.value)}
-        placeholder="Search furniture..."
-        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm
-                   focus:outline-none focus:ring-2 focus:ring-teal-500/40"
-      />
-
-      <div className="flex gap-1.5 flex-wrap">
-        {cats.map(c => (
-          <button
-            key={c}
-            onClick={() => setCategory(c)}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-medium border
-              ${category === c
-                ? "bg-teal-700 text-white border-teal-700"
-                : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"}`}
-          >
-            {c === "all" ? "All" : CATEGORY_LABELS[c]}
-          </button>
-        ))}
+      <div className="relative">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search furniture..."
+          className="w-full rounded-lg border border-gray-200 pl-8 pr-3 py-2 text-sm
+                     focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+        />
       </div>
 
-      <div className="flex-1 overflow-y-auto pr-1 -mr-1">
-        {[...grouped.entries()].map(([cat, list]) => (
-          <div key={cat} className="mb-4">
-            <div className="text-[11px] font-semibold tracking-wide text-gray-400
-                            uppercase mb-2">
-              {CATEGORY_LABELS[cat]}
-            </div>
+      {/* ── Level 1: categories (horizontal scroll) ── */}
+      {!searching && (
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide -mx-0.5 px-0.5 pb-0.5">
+          {cats.map(c => (
+            <button
+              key={c}
+              onClick={() => { setCategory(c); setOpenTypeId(null); }}
+              className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-full text-[11px] font-medium border transition
+                ${category === c
+                  ? "bg-teal-700 text-white border-teal-700"
+                  : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"}`}
+            >
+              {c === "all" ? "All" : CATEGORY_LABELS[c]}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto pr-1 -mr-1 min-h-0">
+        {/* ── Search results (flat) ── */}
+        {searching && (
+          <>
+            <p className="text-[11px] text-gray-400 mb-2">
+              {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for "{query}"
+            </p>
             <div className="grid grid-cols-2 gap-2">
-              {list.map(item => (
-                <div
-                  key={item.id}
-                  draggable
-                  onDragStart={e => {
-                    e.dataTransfer.setData(DND_MIME, item.id);
-                    e.dataTransfer.setData("text/plain", item.id);
-                    e.dataTransfer.effectAllowed = "copy";
-                  }}
-                  onClick={() => onQuickAdd?.(item)}
-                  className="rounded-xl border border-gray-100 bg-white p-2
-                             cursor-grab active:cursor-grabbing
-                             hover:border-teal-300 hover:shadow-sm transition"
-                  title={`Drag into the scene — ${item.size.w}×${item.size.d} cm`}
-                >
-                  <Thumb item={item} />
-                  <div className="mt-1.5 text-[12px] font-medium text-gray-800
-                                  leading-tight">{item.name}</div>
-                  <div className="text-[10px] text-gray-400">
-                    {item.size.w}×{item.size.d} cm
-                  </div>
-                </div>
+              {searchResults.map(item => (
+                <VariantCard key={item.id} item={item} onQuickAdd={onQuickAdd} />
               ))}
             </div>
-          </div>
-        ))}
-        {items.length === 0 && (
-          <div className="text-sm text-gray-400 text-center py-8">
-            No furniture matches "{query}"
-          </div>
+            {searchResults.length === 0 && (
+              <div className="text-sm text-gray-400 text-center py-8">
+                No furniture matches "{query}"
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Level 3: variants of the open type ── */}
+        {!searching && openType && (
+          <>
+            <button
+              onClick={() => setOpenTypeId(null)}
+              className="flex items-center gap-1 text-[11px] font-medium text-gray-500
+                         hover:text-gray-800 mb-2 transition-colors"
+            >
+              <ChevronLeft size={13} />
+              {CATEGORY_LABELS[openType.category]}
+            </button>
+            <div className="flex items-baseline justify-between mb-2">
+              <h4 className="text-[13px] font-semibold text-gray-800">{openType.name}</h4>
+              <span className="text-[10px] text-gray-400">
+                {openType.variants.length} design{openType.variants.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {openType.variants.map(item => (
+                <VariantCard key={item.id} item={item} onQuickAdd={onQuickAdd} />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── Level 2: types in the selected category ── */}
+        {!searching && !openType && (
+          <>
+            {(category === "all"
+              ? cats.filter((c): c is FurnitureCategory => c !== "all")
+              : [category]
+            ).map(cat => {
+              const list = typesByCategory(cat);
+              if (list.length === 0) return null;
+              return (
+                <div key={cat} className="mb-4">
+                  {category === "all" && (
+                    <div className="text-[11px] font-semibold tracking-wide text-gray-400
+                                    uppercase mb-2">
+                      {CATEGORY_LABELS[cat]}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    {list.map(t => {
+                      const cover = t.variants[0];
+                      const single = t.variants.length === 1;
+                      // A type with one design is dragged directly — no point
+                      // making the user drill into a list of one.
+                      return single ? (
+                        <VariantCard key={t.id} item={cover} onQuickAdd={onQuickAdd} />
+                      ) : (
+                        <button
+                          key={t.id}
+                          onClick={() => setOpenTypeId(t.id)}
+                          className="text-left rounded-xl border border-gray-100 bg-white p-2
+                                     hover:border-teal-300 hover:shadow-sm transition"
+                        >
+                          <div className="relative">
+                            <Thumb item={cover} />
+                            <span className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full
+                                             bg-black/70 text-white text-[9px] font-medium">
+                              {t.variants.length}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between gap-1">
+                            <span className="text-[12px] font-medium text-gray-800 leading-tight truncate">
+                              {t.name}
+                            </span>
+                            <ChevronRight size={12} className="shrink-0 text-gray-400" />
+                          </div>
+                          <div className="text-[10px] text-gray-400">
+                            {t.variants.length} designs
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
     </div>
