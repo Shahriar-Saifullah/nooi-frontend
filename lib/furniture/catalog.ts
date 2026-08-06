@@ -83,12 +83,14 @@ export const FURNITURE_TYPES: FurnitureType[] = [
       v("living", "sofa", { id: "sofa-2seat", name: "Loveseat", path: "/models/sofa_2seat.glb", size: { w: 160, d: 90, h: 80 }, color: "#b09a7a", tags: ["couch", "sofa", "2 seat"], customizable: true }),
       // ── Example third-party asset. Convert the FBX to .glb first (see
       // scripts/convert-asset.sh) and drop the result in /public/models/sofa/.
+      // Real dimensions from the asset's info.txt: 4435 x 1730 x 740 mm.
+      // This is a large corner/sectional sofa — name it so users aren't
+      // surprised when a 4.4 m piece lands in a small room.
       v("living", "sofa", {
-        id: "sofa-boca-tommy", name: "Boca Tommy",
+        id: "sofa-boca-tommy", name: "Boca Tommy (Corner)",
         path: "/models/sofa/boca_tommy.glb",
-        thumbnail: "/models/thumbs/boca_tommy.webp",
-        size: { w: 240, d: 100, h: 75 }, color: "#8d6e63",
-        tags: ["couch", "sofa", "modern", "velour"], customizable: true,
+        size: { w: 444, d: 173, h: 74 }, color: "#8d6e63",
+        tags: ["couch", "sofa", "corner", "sectional", "modern", "velour"], customizable: true,
         credit: { source: "CGTrader", license: "VERIFY BEFORE SHIPPING", url: "https://www.cgtrader.com/free-3d-models/furniture/sofa/boca-tommy-sofa" },
       }),
     ],
