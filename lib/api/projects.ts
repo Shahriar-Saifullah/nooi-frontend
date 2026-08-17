@@ -198,6 +198,7 @@ export async function saveFurniture(
   projectId: string,
   furniture: FurniturePlacement[],
   wallColors?: Record<string, string>,
+  wallSurfaces?: Record<string, string>,
 ) {
   const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch(`${BASE_URL}/projects/${projectId}/furniture`, {
@@ -207,6 +208,7 @@ export async function saveFurniture(
     body: JSON.stringify({
       furniture,
       ...(wallColors !== undefined ? { wall_colors: wallColors } : {}),
+      ...(wallSurfaces !== undefined ? { wall_surfaces: wallSurfaces } : {}),
     }),
   });
   const json = await res.json();
