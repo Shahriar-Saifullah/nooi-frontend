@@ -272,13 +272,22 @@ export async function aiFurnish(projectId: string, payload: AiFurnishPayload) {
 
 // ─── Render engine: live 3D scene → photorealistic image ─────────────────────
 
-export async function renderScene(projectId: string, prompt: string, sceneImage: string) {
+export async function renderScene(
+  projectId: string,
+  prompt: string,
+  sceneImage: string,
+  depthImage?: string,
+) {
   const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch(`${BASE_URL}/projects/${projectId}/render-scene`, {
     method: 'POST',
     credentials: 'include',
     headers,
-    body: JSON.stringify({ prompt, scene_image: sceneImage }),
+    body: JSON.stringify({
+      prompt,
+      scene_image: sceneImage,
+      ...(depthImage ? { depth_image: depthImage } : {}),
+    }),
   });
   const json = await res.json();
   if (!json.success) throw new Error(json.error || 'Render failed');
