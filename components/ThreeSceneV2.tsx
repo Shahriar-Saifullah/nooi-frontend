@@ -873,28 +873,68 @@ function ExportBridge({
         const cam = camera as THREE.PerspectiveCamera;
         const prevOverride = scene.overrideMaterial;
         const prevBg = scene.background;
-        const prevNear = cam.near, prevFar = cam.far;
 
-        // tighten the depth range around the model so the map uses the full
-        // 0–255 range instead of a narrow band of greys
-        const dist = cam.position.length();
-        cam.near = Math.max(0.05, dist - world.maxDim);
-        cam.far  = dist + world.maxDim;
-        cam.updateProjectionMatrix();
+        // Fit the depth range to the geometry actually in front of the camera.
+        // Using the scene's bounding box (rather than a guess) guarantees the
+        // map spans the full 0–255 range instead of collapsing to flat white.
+        const box = new THREE.Box3();
+        scene.traverse((o: any) => {
+          if (o.isMesh && o.visible && o.name !== "nooi-noexport") {
+            box.expandByObject(o);
+          }
+        });
+        let near = 0.3, far = 30;
+        if (!box.isEmpty()) {
+          const corners = [
+            new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+            new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+            new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+            new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+            new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+            new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+            new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+            new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+          ];
+          const dists = corners.map(c => c.distanceTo(cam.position));
+          near = Math.max(0.25, Math.min(...dists) * 0.85);
+          far  = Math.max(near + 1, Math.max(...dists) * 1.05);
+        }
 
-        scene.overrideMaterial = new THREE.MeshDepthMaterial();
-        scene.background = new THREE.Color(0xffffff); // → black (far) once inverted
+        // Linear view-space depth. MeshDepthMaterial writes NON-linear
+        // perspective depth, which saturates to white a metre from the camera
+        // and gives ControlNet no usable signal. This outputs near = white,
+        // far = black, which is what depth ControlNets expect (no post-invert).
+        const depthMat = new THREE.ShaderMaterial({
+          uniforms: { uNear: { value: near }, uFar: { value: far } },
+          vertexShader: `
+            varying float vDepth;
+            void main() {
+              vec4 mv = modelViewMatrix * vec4(position, 1.0);
+              vDepth = -mv.z;
+              gl_Position = projectionMatrix * mv;
+            }`,
+          fragmentShader: `
+            uniform float uNear;
+            uniform float uFar;
+            varying float vDepth;
+            void main() {
+              float d = clamp((vDepth - uNear) / (uFar - uNear), 0.0, 1.0);
+              float v = 1.0 - d;              // near = white
+              gl_FragColor = vec4(v, v, v, 1.0);
+            }`,
+          side: THREE.DoubleSide,
+        });
+
+        scene.overrideMaterial = depthMat;
+        scene.background = new THREE.Color(0x000000); // empty space = far
         gl.render(scene, cam);
         const raw = gl.domElement.toDataURL("image/png");
 
         scene.overrideMaterial = prevOverride;
         scene.background = prevBg;
-        cam.near = prevNear; cam.far = prevFar;
-        cam.updateProjectionMatrix();
+        depthMat.dispose();
         gl.render(scene, cam); // restore the visible frame immediately
 
-        // NOTE: returned un-inverted (near = black). The caller inverts while
-        // decoding for downscale — see prepareDepth() in the canvas page.
         return raw;
       },
       capture: () => {
