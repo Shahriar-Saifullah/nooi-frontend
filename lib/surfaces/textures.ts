@@ -2,18 +2,30 @@
  * Wall texture loading + real-world tiling
  * -----------------------------------------
  * Loaded imperatively rather than with useTexture/useLoader on purpose: wall
- * faces are a dynamic, per-frame-variable set, and calling hooks inside that
+ * faces are a dynamic, per-render-variable set, and calling hooks inside that
  * loop would break the rules of hooks. A module-level cache keeps each image
  * decoded once no matter how many walls use it.
  *
  * Each wall face needs its OWN texture instance (repeat differs per wall size)
  * but they share the underlying image, so clones are cheap.
+ *
+ * IMPORTANT: THREE.Texture.clone() copies `image` BY REFERENCE at clone time.
+ * Cloning a texture that is still downloading captures `undefined`, and the
+ * loader's completion only flags the ORIGINAL — the clone renders white
+ * forever. So every clone is registered here and patched when the image lands.
  */
 
 import * as THREE from "three";
 import type { WallSurface } from "./catalog";
 
-const baseCache = new Map<string, THREE.Texture>();
+interface BaseEntry {
+  tex: THREE.Texture;
+  loaded: boolean;
+  failed: boolean;
+  clones: THREE.Texture[];
+}
+
+const baseCache = new Map<string, BaseEntry>();
 const faceCache = new Map<string, { map: THREE.Texture; normalMap?: THREE.Texture }>();
 
 /** Callbacks fired when a texture finishes decoding, so the scene can redraw. */
@@ -25,22 +37,63 @@ export function onSurfaceTextureLoaded(fn: () => void): () => void {
   return () => { listeners.delete(fn); };
 }
 
-function loadBase(url: string): THREE.Texture {
+function baseEntry(url: string): BaseEntry {
   const hit = baseCache.get(url);
   if (hit) return hit;
-  const tex = new THREE.TextureLoader().load(url, () => {
-    listeners.forEach(fn => fn());
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  baseCache.set(url, tex);
-  return tex;
+
+  const entry: BaseEntry = {
+    tex: null as unknown as THREE.Texture,
+    loaded: false,
+    failed: false,
+    clones: [],
+  };
+
+  entry.tex = new THREE.TextureLoader().load(
+    url,
+    () => {
+      entry.loaded = true;
+      // hand the decoded image to every clone made while it was downloading
+      for (const c of entry.clones) {
+        c.image = entry.tex.image;
+        c.needsUpdate = true;
+      }
+      listeners.forEach(fn => fn());
+    },
+    undefined,
+    () => {
+      entry.failed = true;
+      console.error(
+        `[surfaces] texture failed to load: ${url}\n` +
+        `Check the file exists at public${url} and the name matches the catalog entry.`,
+      );
+    },
+  );
+  entry.tex.wrapS = entry.tex.wrapT = THREE.RepeatWrapping;
+  entry.tex.colorSpace = THREE.SRGBColorSpace;
+
+  baseCache.set(url, entry);
+  return entry;
+}
+
+function cloneFor(url: string, repeatX: number, repeatY: number, srgb: boolean): THREE.Texture {
+  const entry = baseEntry(url);
+  const c = entry.tex.clone();
+  c.wrapS = c.wrapT = THREE.RepeatWrapping;
+  c.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  c.repeat.set(repeatX, repeatY);
+  c.needsUpdate = true;
+  if (!entry.loaded) {
+    entry.clones.push(c);          // patched when the image arrives
+  } else {
+    c.image = entry.tex.image;     // already decoded — take it now
+  }
+  return c;
 }
 
 /**
  * Textures for one wall face, tiled at real-world scale.
- * @param wallLenM  wall length in metres (the horizontal span of this face)
- * @param wallHeightM wall height in metres
+ * @param wallLenM     wall length in metres (horizontal span of this face)
+ * @param wallHeightM  wall height in metres
  */
 export function getFaceTextures(
   surface: WallSurface,
@@ -54,21 +107,10 @@ export function getFaceTextures(
   const repeatX = Math.max(0.05, wallLenM / surface.tileSize.w);
   const repeatY = Math.max(0.05, wallHeightM / surface.tileSize.h);
 
-  const map = loadBase(surface.map).clone();
-  map.needsUpdate = true;
-  map.wrapS = map.wrapT = THREE.RepeatWrapping;
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.repeat.set(repeatX, repeatY);
-
-  let normalMap: THREE.Texture | undefined;
-  if (surface.normalMap) {
-    normalMap = loadBase(surface.normalMap).clone();
-    normalMap.needsUpdate = true;
-    normalMap.wrapS = normalMap.wrapT = THREE.RepeatWrapping;
-    // normal maps are linear data, not colour
-    normalMap.colorSpace = THREE.NoColorSpace;
-    normalMap.repeat.set(repeatX, repeatY);
-  }
+  const map = cloneFor(surface.map, repeatX, repeatY, true);
+  const normalMap = surface.normalMap
+    ? cloneFor(surface.normalMap, repeatX, repeatY, false)  // normals are data, not colour
+    : undefined;
 
   const entry = { map, normalMap };
   faceCache.set(key, entry);
