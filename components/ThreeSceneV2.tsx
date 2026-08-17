@@ -8,12 +8,22 @@ import React, {
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import { surfaceById } from "@/lib/surfaces/catalog";
+import { getFaceTextures, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
 
 // ─── Canvas Bridge Helper ──────────────────────────────────────────────────────
+// Textures decode asynchronously; nudge a redraw when one lands so a newly
+// applied surface appears without the user having to move the camera.
+function SurfaceTextureRefresh() {
+  const invalidate = useThree(s => s.invalidate);
+  useEffect(() => onSurfaceTextureLoaded(() => invalidate()), [invalidate]);
+  return null;
+}
+
 function CanvasBridge({ onCanvasReady }: { onCanvasReady: (canvas: HTMLCanvasElement) => void }) {
   const { gl } = useThree();
   useEffect(() => {
@@ -95,6 +105,8 @@ interface ThreeSceneV2Props {
   furniture?: PlacedFurniture[];
   /** per-side wall paint: "wallKey:A" | "wallKey:B" → hex color */
   wallColors?: Record<string, string>;
+  /** per-side wall surface: "wallKey:A" | "wallKey:B" → surface id */
+  wallSurfaces?: Record<string, string>;
   selectedWallSide?: string | null;
   onWallSelect?: (sel: WallSideSelection | null) => void;
   onFurnitureSelect?: (id: string | null) => void;
@@ -156,11 +168,12 @@ function wallPieces(a0: number, a1: number, cuts: Cut[]) {
 // ─── Wall rendering ──────────────────────────────────────────────────────────
 
 function WallWithOpenings({
-  wall, cuts, world, wallKey, colors, selectedSide, onSelect,
+  wall, cuts, world, wallKey, colors, surfaces, selectedSide, onSelect,
 }: {
   wall: VWall; cuts: Cut[]; world: World;
   wallKey: string;
   colors?: { A?: string; B?: string };
+  surfaces?: { A?: string; B?: string };
   selectedSide?: "A" | "B" | null;
   onSelect?: (sel: WallSideSelection) => void;
 }) {
@@ -226,12 +239,23 @@ function WallWithOpenings({
               const side = sideForFace(fi);
               const painted = side ? colors?.[side] : undefined;
               const isSel = side !== null && side === selectedSide;
+
+              // A surface (texture) wins over flat paint on the same face.
+              // Tiling uses this segment's own length so the pattern keeps
+              // real-world scale across walls cut by doors and windows.
+              const surf = side ? surfaceById(surfaces?.[side] ?? "") : undefined;
+              const tex = surf
+                ? getFaceTextures(surf, Math.abs(len), Math.abs(y1 - y0))
+                : undefined;
+
               return (
                 <meshStandardMaterial
                   key={fi}
                   attach={`material-${fi}`}
-                  color={painted ?? BASE_WALL}
-                  roughness={0.9}
+                  map={tex?.map}
+                  normalMap={tex?.normalMap}
+                  color={tex ? (surf?.color ?? "#ffffff") : (painted ?? BASE_WALL)}
+                  roughness={surf?.roughness ?? 0.9}
                   emissive={isSel ? "#c7de7d" : "#000000"}
                   emissiveIntensity={isSel ? 0.4 : 0}
                 />
@@ -973,7 +997,7 @@ function ExportBridge({
 function SceneContent({
   rooms, rfWalls, openings, furniture, world,
   onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
-  wallColors, selectedWallSide, onWallSelect,
+  wallColors, wallSurfaces, selectedWallSide, onWallSelect,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -981,6 +1005,7 @@ function SceneContent({
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   selectedFurnitureId?: string | null;
   wallColors?: Record<string, string>;
+  wallSurfaces?: Record<string, string>;
   selectedWallSide?: string | null;
   onWallSelect?: (sel: WallSideSelection | null) => void;
 }) {
@@ -1086,6 +1111,10 @@ function SceneContent({
               A: wallColors?.[`${wallKey}:A`],
               B: wallColors?.[`${wallKey}:B`],
             }}
+            surfaces={{
+              A: wallSurfaces?.[`${wallKey}:A`],
+              B: wallSurfaces?.[`${wallKey}:B`],
+            }}
             selectedSide={
               selectedWallSide && selectedWallSide.startsWith(`${wallKey}:`)
                 ? (selectedWallSide.endsWith(":A") ? "A" : "B")
@@ -1119,6 +1148,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   openings = [],
   furniture = [],
   wallColors,
+  wallSurfaces,
   selectedWallSide = null,
   onWallSelect,
   onFurnitureSelect,
@@ -1182,6 +1212,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }} />
       <ExportBridge register={(api) => { exportApi.current = api; }} world={world} />
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
+      <SurfaceTextureRefresh />
       <CameraRig
         world={world}
         suspended={(!!walkthroughActive && !walkthroughPaused) || insideMode}
@@ -1210,6 +1241,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           onFurnitureMove={onFurnitureMove}
           selectedFurnitureId={selectedFurnitureId}
           wallColors={wallColors}
+          wallSurfaces={wallSurfaces}
           selectedWallSide={selectedWallSide}
           onWallSelect={onWallSelect}
         />

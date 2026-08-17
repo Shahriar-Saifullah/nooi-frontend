@@ -17,6 +17,10 @@ import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
+import {
+  WALL_SURFACES, SURFACE_CATEGORY_LABELS, activeSurfaceCategories,
+  type SurfaceCategory,
+} from "@/lib/surfaces/catalog";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene } from "@/lib/api/projects";
@@ -111,6 +115,7 @@ export default function CanvasPage() {
     setRfWalls([]);
     setOpenings([]);
     setWallColors({});
+    setWallSurfaces({});
     setSelectedWall(null);
     // critical: without this, the empty furniture array above would pass the
     // auto-save guard and wipe the incoming project's saved furniture
@@ -145,6 +150,10 @@ export default function CanvasPage() {
           const savedWallColors = (p.room_data as any)?.wall_colors;
           if (savedWallColors && typeof savedWallColors === "object") {
             setWallColors(savedWallColors);
+          }
+          const savedWallSurfaces = (p.room_data as any)?.wall_surfaces;
+          if (savedWallSurfaces && typeof savedWallSurfaces === "object") {
+            setWallSurfaces(savedWallSurfaces);
           }
           if (!haveStoreRooms && apiRooms.length > 0) {
             // server rooms only when the store has none — the user's freshly
@@ -229,6 +238,9 @@ export default function CanvasPage() {
   // ── Wall painting: per-side colors, keyed "wallKey:A" | "wallKey:B" ────────
   const [wallColors, setWallColors] = useState<Record<string, string>>({});
   const [selectedWall, setSelectedWall] = useState<{ key: string; side: "A" | "B" } | null>(null);
+  const [wallSurfaces, setWallSurfaces] = useState<Record<string, string>>({});
+  const [wallTab, setWallTab] = useState<"paint" | "surface">("paint");
+  const [surfaceCat, setSurfaceCat] = useState<SurfaceCategory | "all">("all");
   const wallKeyOf = (w: { key: string; side: "A" | "B" }) => `${w.key}:${w.side}`;
 
   // ── persist furniture: debounced auto-save 1.5s after the last change ──
@@ -239,15 +251,16 @@ export default function CanvasPage() {
     // skip the very first render (empty state) and the load itself;
     // wall paint alone (before any furniture) must still save
     if (!furnitureLoaded.current && placedFurniture.length === 0
-        && Object.keys(wallColors).length === 0) return;
+        && Object.keys(wallColors).length === 0
+        && Object.keys(wallSurfaces).length === 0) return;
     furnitureLoaded.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveFurniture(currentProject.id, placedFurniture as any, wallColors)
+      saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces)
         .catch(err => console.error("Scene save failed:", err));
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [placedFurniture, wallColors, currentProject?.id]);
+  }, [placedFurniture, wallColors, wallSurfaces, currentProject?.id]);
 
   const handleFurnitureMove = (id: string, position: [number, number, number]) => {
     setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, position } : f));
@@ -1134,6 +1147,7 @@ export default function CanvasPage() {
                   onFurnitureMove={handleFurnitureMove}
                   selectedFurnitureId={selectedFurnitureId}
                   wallColors={wallColors}
+                  wallSurfaces={wallSurfaces}
                   selectedWallSide={selectedWall ? wallKeyOf(selectedWall) : null}
                   onWallSelect={(sel) => {
                     setSelectedWall(sel);
@@ -1193,11 +1207,113 @@ export default function CanvasPage() {
               ) : selectedWall ? (
                 <div className="flex flex-col gap-4">
                   <div>
-                    <p className="text-[13px] font-semibold text-[#0a0a0a]">Wall paint</p>
+                    <p className="text-[13px] font-semibold text-[#0a0a0a]">Wall finish</p>
                     <p className="text-[11px] text-[#a3a3a3] mt-0.5">
-                      Wall {selectedWall.key} · {selectedWall.side === "A" ? "side 1" : "side 2"} — only this side gets painted.
+                      Wall {selectedWall.key} · {selectedWall.side === "A" ? "side 1" : "side 2"} — only this side changes.
                     </p>
                   </div>
+
+                  {/* Paint | Surface */}
+                  <div className="flex gap-1 p-1 bg-[#f5f5f5] rounded-[10px]">
+                    {(["paint", "surface"] as const).map(t => (
+                      <button
+                        key={t}
+                        onClick={() => setWallTab(t)}
+                        className={`flex-1 py-1.5 rounded-[7px] text-[11px] font-medium transition-colors ${
+                          wallTab === t ? "bg-white text-[#0a0a0a] shadow-sm" : "text-[#737373] hover:text-[#0a0a0a]"
+                        }`}
+                      >
+                        {t === "paint" ? "Paint" : "Surface"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {wallTab === "surface" ? (
+                    <div className="flex flex-col gap-3">
+                      {WALL_SURFACES.length === 0 ? (
+                        <p className="text-[11px] text-[#a3a3a3] py-4 text-center">
+                          No surfaces installed yet.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-0.5">
+                            {(["all", ...activeSurfaceCategories()] as const).map(c => (
+                              <button
+                                key={c}
+                                onClick={() => setSurfaceCat(c as SurfaceCategory | "all")}
+                                className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium border transition ${
+                                  surfaceCat === c
+                                    ? "bg-[#004643] text-white border-[#004643]"
+                                    : "bg-white text-[#525252] border-[#e5e5e5] hover:border-[#d4d4d4]"
+                                }`}
+                              >
+                                {c === "all" ? "All" : SURFACE_CATEGORY_LABELS[c as SurfaceCategory]}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {WALL_SURFACES
+                              .filter(s => surfaceCat === "all" || s.category === surfaceCat)
+                              .map(s => {
+                                const active = wallSurfaces[wallKeyOf(selectedWall)] === s.id;
+                                return (
+                                  <button
+                                    key={s.id}
+                                    onClick={() => setWallSurfaces(prev => ({ ...prev, [wallKeyOf(selectedWall)]: s.id }))}
+                                    className={`rounded-[8px] overflow-hidden border text-left transition hover:shadow-sm ${
+                                      active ? "border-[#004643] ring-2 ring-[#c7de7d]" : "border-[#e5e5e5]"
+                                    }`}
+                                    title={s.name}
+                                  >
+                                    <div className="aspect-square bg-[#fafafa]">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={s.thumbnail ?? s.map} alt={s.name}
+                                           className="w-full h-full object-cover" loading="lazy" />
+                                    </div>
+                                    <p className="px-1.5 py-1 text-[9.5px] font-medium text-[#525252] truncate">
+                                      {s.name}
+                                    </p>
+                                  </button>
+                                );
+                              })}
+                          </div>
+                        </>
+                      )}
+                      {wallSurfaces[wallKeyOf(selectedWall)] && (
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={() => {
+                              const v = wallSurfaces[wallKeyOf(selectedWall)];
+                              setWallSurfaces(prev => ({
+                                ...prev,
+                                [`${selectedWall.key}:A`]: v,
+                                [`${selectedWall.key}:B`]: v,
+                              }));
+                            }}
+                            className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#525252] hover:bg-[#fafafa]"
+                          >
+                            Apply to both sides
+                          </button>
+                          <button
+                            onClick={() => setWallSurfaces(prev => {
+                              const next = { ...prev };
+                              delete next[wallKeyOf(selectedWall)];
+                              return next;
+                            })}
+                            className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#b91c1c] hover:bg-[#fef2f2]"
+                          >
+                            Remove surface
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                  <>
+                  {wallSurfaces[wallKeyOf(selectedWall)] && (
+                    <p className="text-[11px] text-[#a3a3a3] -mb-1">
+                      This side has a surface applied — remove it to see paint.
+                    </p>
+                  )}
                   <div className="grid grid-cols-6 gap-2">
                     {WALL_PAINTS.map(c => {
                       const active = wallColors[wallKeyOf(selectedWall)] === c;
@@ -1252,6 +1368,8 @@ export default function CanvasPage() {
                       Reset this side
                     </button>
                   </div>
+                  </>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-10">
