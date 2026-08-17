@@ -535,6 +535,31 @@ export default function CanvasPage() {
       img.src = dataUrl;
     });
 
+  // Depth map arrives near=black from three.js; depth ControlNets expect
+  // near=white. Invert while we're already decoding it for the downscale.
+  const prepareDepth = (dataUrl: string, maxW: number): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.width * scale);
+        c.height = Math.round(img.height * scale);
+        const ctx = c.getContext("2d");
+        if (!ctx) { reject(new Error("no 2d context")); return; }
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        const px = ctx.getImageData(0, 0, c.width, c.height);
+        const d = px.data;
+        for (let i = 0; i < d.length; i += 4) {
+          d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2];
+        }
+        ctx.putImageData(px, 0, 0);
+        resolve(c.toDataURL("image/jpeg", 0.9));
+      };
+      img.onerror = () => reject(new Error("depth decode failed"));
+      img.src = dataUrl;
+    });
+
   const handleSceneRender = async (command: string): Promise<boolean> => {
     if (!currentProject?.id) return false;
     if (isGeneratingRender) return true;
@@ -542,12 +567,20 @@ export default function CanvasPage() {
     // No live scene (2D mode) → return false → legacy text-only render runs.
     const shot = viewMode === "3d" ? sceneRef.current?.captureImage() : null;
     if (!shot) return false;
+    // Depth is captured too; the backend chooses which pipeline to use
+    // (RENDER_MODE env var), so switching back is a config change, not a deploy.
+    const depthShot = viewMode === "3d" ? sceneRef.current?.captureDepthMap() : null;
     setIsGeneratingRender(true);
     setRenderError(null);
     setAssistantMsg(null);
     try {
       const sceneJpeg = await downscaleDataUrl(shot, 1280);
-      const data = await renderScene(currentProject.id, command, sceneJpeg);
+      let depthJpeg: string | undefined;
+      if (depthShot) {
+        try { depthJpeg = await prepareDepth(depthShot, 1280); }
+        catch { /* depth is optional — colour pipeline still works */ }
+      }
+      const data = await renderScene(currentProject.id, command, sceneJpeg, depthJpeg);
       setGeneratedImageUrl(data.image_url);
       setRenders(prev => [{ url: data.image_url, source: sceneJpeg, at: Date.now() }, ...prev]);
       setCompareMode(false);

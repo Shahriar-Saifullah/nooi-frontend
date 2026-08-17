@@ -50,6 +50,9 @@ export interface ThreeSceneHandle {
   floorPointFromNdc: (nx: number, ny: number) => [number, number] | null;
   /** render the current view and return it as a PNG data-URL */
   captureImage: () => string | null;
+  /** grayscale depth map of the current view (near = white), for
+      depth-conditioned photorealistic rendering */
+  captureDepthMap: () => string | null;
   /** export the whole scene (rooms, walls, furniture) as a binary glTF blob */
   exportGlb: () => Promise<Blob | null>;
   /** get the HTML canvas element for recording */
@@ -853,15 +856,47 @@ function CameraRig({
 // Lives inside the Canvas so it can reach gl/scene/camera through useThree.
 export interface SceneExportApi {
   capture: () => string;
+  captureDepth: () => string;
   exportGlb: () => Promise<Blob>;
 }
 
 function ExportBridge({
-  register,
-}: { register: (api: SceneExportApi) => void }) {
+  register, world,
+}: { register: (api: SceneExportApi) => void; world: World }) {
   const { gl, scene, camera } = useThree();
   useEffect(() => {
     register({
+      // Depth map for ControlNet-style conditioning. Renders the scene with a
+      // depth material, then inverts it: three.js writes near=black/far=white,
+      // while depth ControlNets expect near=white/far=black.
+      captureDepth: () => {
+        const cam = camera as THREE.PerspectiveCamera;
+        const prevOverride = scene.overrideMaterial;
+        const prevBg = scene.background;
+        const prevNear = cam.near, prevFar = cam.far;
+
+        // tighten the depth range around the model so the map uses the full
+        // 0–255 range instead of a narrow band of greys
+        const dist = cam.position.length();
+        cam.near = Math.max(0.05, dist - world.maxDim);
+        cam.far  = dist + world.maxDim;
+        cam.updateProjectionMatrix();
+
+        scene.overrideMaterial = new THREE.MeshDepthMaterial();
+        scene.background = new THREE.Color(0xffffff); // → black (far) once inverted
+        gl.render(scene, cam);
+        const raw = gl.domElement.toDataURL("image/png");
+
+        scene.overrideMaterial = prevOverride;
+        scene.background = prevBg;
+        cam.near = prevNear; cam.far = prevFar;
+        cam.updateProjectionMatrix();
+        gl.render(scene, cam); // restore the visible frame immediately
+
+        // NOTE: returned un-inverted (near = black). The caller inverts while
+        // decoding for downscale — see prepareDepth() in the canvas page.
+        return raw;
+      },
       capture: () => {
         // force a fresh frame so the buffer is valid without needing
         // preserveDrawingBuffer (which costs perf if always on)
@@ -1069,6 +1104,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       raycastFn.current ? raycastFn.current(nx, ny) : null,
     captureImage: () =>
       exportApi.current ? exportApi.current.capture() : null,
+    captureDepthMap: () =>
+      exportApi.current ? exportApi.current.captureDepth() : null,
     exportGlb: async () =>
       exportApi.current ? exportApi.current.exportGlb() : null,
     getCanvasElement: () => canvasElementRef.current,
@@ -1103,7 +1140,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         intensity={0.3}
       />
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }} />
-      <ExportBridge register={(api) => { exportApi.current = api; }} />
+      <ExportBridge register={(api) => { exportApi.current = api; }} world={world} />
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
       <CameraRig
         world={world}
