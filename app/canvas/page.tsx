@@ -535,9 +535,11 @@ export default function CanvasPage() {
       img.src = dataUrl;
     });
 
-  // Depth map arrives near=black from three.js; depth ControlNets expect
-  // near=white. Invert while we're already decoding it for the downscale.
-  const prepareDepth = (dataUrl: string, maxW: number): Promise<string> =>
+  // The scene emits depth already oriented for ControlNet (near = white), so
+  // this only downscales. It also sanity-checks contrast: a flat map means the
+  // capture failed, and sending it would silently degrade the render to plain
+  // text-to-image. Better to fall back to the colour pipeline than pretend.
+  const prepareDepth = (dataUrl: string, maxW: number): Promise<string | null> =>
     new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
@@ -548,13 +550,21 @@ export default function CanvasPage() {
         const ctx = c.getContext("2d");
         if (!ctx) { reject(new Error("no 2d context")); return; }
         ctx.drawImage(img, 0, 0, c.width, c.height);
-        const px = ctx.getImageData(0, 0, c.width, c.height);
-        const d = px.data;
-        for (let i = 0; i < d.length; i += 4) {
-          d[i] = 255 - d[i]; d[i + 1] = 255 - d[i + 1]; d[i + 2] = 255 - d[i + 2];
+
+        // contrast check on a sparse sample
+        const px = ctx.getImageData(0, 0, c.width, c.height).data;
+        let min = 255, max = 0;
+        for (let i = 0; i < px.length; i += 4 * 97) {
+          const v = px[i];
+          if (v < min) min = v;
+          if (v > max) max = v;
         }
-        ctx.putImageData(px, 0, 0);
-        resolve(c.toDataURL("image/jpeg", 0.9));
+        if (max - min < 25) {
+          console.warn("[render] depth map has no contrast — using colour pipeline");
+          resolve(null);
+          return;
+        }
+        resolve(c.toDataURL("image/jpeg", 0.92));
       };
       img.onerror = () => reject(new Error("depth decode failed"));
       img.src = dataUrl;
@@ -577,7 +587,7 @@ export default function CanvasPage() {
       const sceneJpeg = await downscaleDataUrl(shot, 1280);
       let depthJpeg: string | undefined;
       if (depthShot) {
-        try { depthJpeg = await prepareDepth(depthShot, 1280); }
+        try { depthJpeg = (await prepareDepth(depthShot, 1280)) ?? undefined; }
         catch { /* depth is optional — colour pipeline still works */ }
       }
       const data = await renderScene(currentProject.id, command, sceneJpeg, depthJpeg);
