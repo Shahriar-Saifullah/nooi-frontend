@@ -233,6 +233,20 @@ export const FURNITURE_TYPES: FurnitureType[] = [
       v("outdoor", "outdoor-table", { id: "outdoor-table", name: "Round Table", path: "/models/outdoor_table.glb", size: { w: 120, d: 120, h: 74 }, color: "#8a9a8c", tags: ["table", "patio"], customizable: true }),
     ],
   },
+    {
+    id: "patio-set", name: "Patio Set", category: "outdoor",
+    variants: [
+      v("outdoor", "patio-set", {
+        id: "patio-set-etsy", name: "Custom Patio Set",
+        path: "/models/outdoor/patio_set.glb",
+        size: { w: 760, d: 200, h: 89 },
+        color: "#8a9a8c",
+        tags: ["patio", "outdoor", "lounge", "set", "sectional"],
+        customizable: true,
+        credit: { source: "Etsy (via client)", license: "VERIFY BEFORE SHIPPING" },
+      }),
+    ],
+  },
 
   // ══ Decor ═════════════════════════════════════════════════════════════════
   {
