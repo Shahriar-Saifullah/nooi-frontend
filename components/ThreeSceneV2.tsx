@@ -112,6 +112,9 @@ interface ThreeSceneV2Props {
   doorFinishes?: Record<string, string>;
   selectedDoorKey?: string | null;
   onDoorSelect?: (key: string | null) => void;
+  /** reports every door key the scene rendered — the single source of truth
+      for "apply to all doors" (never rebuild these keys elsewhere) */
+  onDoorKeys?: (keys: string[]) => void;
   selectedWallSide?: string | null;
   onWallSelect?: (sel: WallSideSelection | null) => void;
   onFurnitureSelect?: (id: string | null) => void;
@@ -1031,7 +1034,7 @@ function SceneContent({
   rooms, rfWalls, openings, furniture, world,
   onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
   wallColors, wallSurfaces, selectedWallSide, onWallSelect,
-  doorFinishes, selectedDoorKey, onDoorSelect,
+  doorFinishes, selectedDoorKey, onDoorSelect, onDoorKeys,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -1045,11 +1048,25 @@ function SceneContent({
   doorFinishes?: Record<string, string>;
   selectedDoorKey?: string | null;
   onDoorSelect?: (key: string | null) => void;
+  onDoorKeys?: (keys: string[]) => void;
 }) {
   const cuts = useMemo(
     () => cutsPerWall(rfWalls, openings, world),
     [rfWalls, openings, world],
   );
+
+  // Publish the door keys actually rendered, so the parent never has to
+  // reconstruct them (the previous cause of "apply to all" silently missing).
+  const doorKeys = useMemo(() => {
+    const out: string[] = [];
+    cuts.forEach(list => list.forEach(c => { if (c.type === "door") out.push(c.key); }));
+    return out;
+  }, [cuts]);
+  const doorKeysSig = doorKeys.join("|");
+  useEffect(() => {
+    onDoorKeys?.(doorKeys);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doorKeysSig]);
 
   // ── drag-to-move: press on the selected item, drag along the floor ──
   const { controls } = useThree() as any;
@@ -1192,6 +1209,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   doorFinishes,
   selectedDoorKey = null,
   onDoorSelect,
+  onDoorKeys,
   selectedWallSide = null,
   onWallSelect,
   onFurnitureSelect,
@@ -1288,6 +1306,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           doorFinishes={doorFinishes}
           selectedDoorKey={selectedDoorKey}
           onDoorSelect={onDoorSelect}
+          onDoorKeys={onDoorKeys}
           selectedWallSide={selectedWallSide}
           onWallSelect={onWallSelect}
         />
