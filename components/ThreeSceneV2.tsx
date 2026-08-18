@@ -10,7 +10,7 @@ import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
 import { doorFinishById } from "@/lib/surfaces/doors";
-import { getFaceTextures, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
+import { getFaceTextures, getDoorTexture, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
@@ -321,14 +321,9 @@ function WallWithOpenings({
                       : [0.045, DOOR_H - 0.06, cw - 0.08]} />
                     {(() => {
                       const fin = doorFinishById(doorFinishes?.[cut.key] ?? "");
-                      // one leaf = one texture tile; grain runs the full leaf
-                      const tex = fin
-                        ? getFaceTextures(
-                            { id: fin.id, name: fin.name, category: "wood",
-                              map: fin.map, tileSize: { w: cw, h: DOOR_H } } as any,
-                            cw, DOOR_H,
-                          )
-                        : undefined;
+                      // one leaf = one texture, stretched (no tiling), so the
+                      // grain runs the full height like real veneer
+                      const tex = fin ? { map: getDoorTexture(fin.map) } : undefined;
                       const isSel = selectedDoorKey === cut.key;
                       return (
                         <meshStandardMaterial

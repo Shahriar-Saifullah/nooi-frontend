@@ -116,3 +116,12 @@ export function getFaceTextures(
   faceCache.set(key, entry);
   return entry;
 }
+
+/**
+ * Texture for a door leaf. Unlike walls, a door uses ONE texture stretched
+ * across the leaf (repeat 1x1), so the base texture is returned directly —
+ * no clone. Fewer moving parts, and nothing to go wrong while it downloads.
+ */
+export function getDoorTexture(url: string): THREE.Texture {
+  return baseEntry(url).tex;
+}
