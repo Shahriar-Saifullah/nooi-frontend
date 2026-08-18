@@ -21,6 +21,7 @@ import {
   WALL_SURFACES, SURFACE_CATEGORY_LABELS, activeSurfaceCategories,
   type SurfaceCategory,
 } from "@/lib/surfaces/catalog";
+import { DOOR_FINISHES } from "@/lib/surfaces/doors";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene } from "@/lib/api/projects";
@@ -116,7 +117,9 @@ export default function CanvasPage() {
     setOpenings([]);
     setWallColors({});
     setWallSurfaces({});
+    setDoorFinishes({});
     setSelectedWall(null);
+    setSelectedDoor(null);
     // critical: without this, the empty furniture array above would pass the
     // auto-save guard and wipe the incoming project's saved furniture
     furnitureLoaded.current = false;
@@ -154,6 +157,10 @@ export default function CanvasPage() {
           const savedWallSurfaces = (p.room_data as any)?.wall_surfaces;
           if (savedWallSurfaces && typeof savedWallSurfaces === "object") {
             setWallSurfaces(savedWallSurfaces);
+          }
+          const savedDoorFinishes = (p.room_data as any)?.door_finishes;
+          if (savedDoorFinishes && typeof savedDoorFinishes === "object") {
+            setDoorFinishes(savedDoorFinishes);
           }
           if (!haveStoreRooms && apiRooms.length > 0) {
             // server rooms only when the store has none — the user's freshly
@@ -239,6 +246,8 @@ export default function CanvasPage() {
   const [wallColors, setWallColors] = useState<Record<string, string>>({});
   const [selectedWall, setSelectedWall] = useState<{ key: string; side: "A" | "B" } | null>(null);
   const [wallSurfaces, setWallSurfaces] = useState<Record<string, string>>({});
+  const [doorFinishes, setDoorFinishes] = useState<Record<string, string>>({});
+  const [selectedDoor, setSelectedDoor] = useState<string | null>(null);
   const [wallTab, setWallTab] = useState<"paint" | "surface">("paint");
   const [surfaceCat, setSurfaceCat] = useState<SurfaceCategory | "all">("all");
   const wallKeyOf = (w: { key: string; side: "A" | "B" }) => `${w.key}:${w.side}`;
@@ -252,15 +261,16 @@ export default function CanvasPage() {
     // wall paint alone (before any furniture) must still save
     if (!furnitureLoaded.current && placedFurniture.length === 0
         && Object.keys(wallColors).length === 0
-        && Object.keys(wallSurfaces).length === 0) return;
+        && Object.keys(wallSurfaces).length === 0
+        && Object.keys(doorFinishes).length === 0) return;
     furnitureLoaded.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces)
+      saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces, doorFinishes)
         .catch(err => console.error("Scene save failed:", err));
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [placedFurniture, wallColors, wallSurfaces, currentProject?.id]);
+  }, [placedFurniture, wallColors, wallSurfaces, doorFinishes, currentProject?.id]);
 
   const handleFurnitureMove = (id: string, position: [number, number, number]) => {
     setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, position } : f));
@@ -1142,16 +1152,26 @@ export default function CanvasPage() {
                   furniture={placedFurniture}
                   onFurnitureSelect={(id) => {
                     setSelectedFurnitureId(id);
-                    if (id) setSelectedWall(null);
+                    if (id) { setSelectedWall(null); setSelectedDoor(null); }
                   }}
                   onFurnitureMove={handleFurnitureMove}
                   selectedFurnitureId={selectedFurnitureId}
                   wallColors={wallColors}
                   wallSurfaces={wallSurfaces}
+                  doorFinishes={doorFinishes}
+                  selectedDoorKey={selectedDoor}
+                  onDoorSelect={(key) => {
+                    setSelectedDoor(key);
+                    if (key) {
+                      setSelectedFurnitureId(null);
+                      setSelectedWall(null);
+                      setRightTab("edit");
+                    }
+                  }}
                   selectedWallSide={selectedWall ? wallKeyOf(selectedWall) : null}
                   onWallSelect={(sel) => {
                     setSelectedWall(sel);
-                    if (sel) { setSelectedFurnitureId(null); setRightTab("edit"); }
+                    if (sel) { setSelectedFurnitureId(null); setSelectedDoor(null); setRightTab("edit"); }
                   }}
                   walkthroughActive={walkthroughActive}
                   walkthroughPaused={walkthroughPaused}
@@ -1204,6 +1224,69 @@ export default function CanvasPage() {
                   onChange={patchSelected}
                   onDelete={handleDelete}
                 />
+              ) : selectedDoor ? (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <p className="text-[13px] font-semibold text-[#0a0a0a]">Door finish</p>
+                    <p className="text-[11px] text-[#a3a3a3] mt-0.5">
+                      Choose the wood for this door.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {DOOR_FINISHES.map(f => {
+                      const active = doorFinishes[selectedDoor] === f.id;
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() => setDoorFinishes(prev => ({ ...prev, [selectedDoor]: f.id }))}
+                          className={`rounded-[8px] overflow-hidden border text-left transition hover:shadow-sm ${
+                            active ? "border-[#004643] ring-2 ring-[#c7de7d]" : "border-[#e5e5e5]"
+                          }`}
+                          title={f.name}
+                        >
+                          <div className="aspect-[2/3] bg-[#fafafa]">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={f.thumbnail ?? f.map} alt={f.name}
+                                 className="w-full h-full object-cover" loading="lazy" />
+                          </div>
+                          <p className="px-1.5 py-1 text-[9.5px] font-medium text-[#525252] truncate">
+                            {f.name}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      onClick={() => {
+                        const v = doorFinishes[selectedDoor];
+                        if (!v) return;
+                        // apply to every door currently in the plan
+                        const all: Record<string, string> = { ...doorFinishes };
+                        for (const o of openings) {
+                          if (o.type !== "door") continue;
+                          all[`d${Math.round(o.x)}_${Math.round(o.y)}`] = v;
+                        }
+                        setDoorFinishes(all);
+                      }}
+                      disabled={!doorFinishes[selectedDoor]}
+                      className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#525252] hover:bg-[#fafafa] disabled:opacity-40"
+                    >
+                      Apply to all doors
+                    </button>
+                    <button
+                      onClick={() => setDoorFinishes(prev => {
+                        const next = { ...prev };
+                        delete next[selectedDoor];
+                        return next;
+                      })}
+                      disabled={!doorFinishes[selectedDoor]}
+                      className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#b91c1c] hover:bg-[#fef2f2] disabled:opacity-40"
+                    >
+                      Reset this door
+                    </button>
+                  </div>
+                </div>
               ) : selectedWall ? (
                 <div className="flex flex-col gap-4">
                   <div>
@@ -1375,7 +1458,7 @@ export default function CanvasPage() {
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-10">
                   <Sofa size={28} className="text-[#d4d4d4]" />
                   <p className="text-[12px] font-semibold text-[#525252]">Nothing selected</p>
-                  <p className="text-[11px] text-[#a3a3a3]">Click a furniture item or a wall in the 3D scene to edit it</p>
+                  <p className="text-[11px] text-[#a3a3a3]">Click a furniture item, wall or door in the 3D scene to edit it</p>
                 </div>
               )}
             </div>
