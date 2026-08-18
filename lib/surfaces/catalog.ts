@@ -67,6 +67,51 @@ export const WALL_SURFACES: WallSurface[] = [
     credit: { source: "3DSKY", license: "VERIFY BEFORE SHIPPING" },
   },
 
+  // ── Amygres Venice Gloss porcelain tile (real product line) ─────────────
+  // The manufacturer's own size is in the filename: 600 x 1200 mm. Using that
+  // as tileSize means the tiles render at true scale on any wall — a 3 m wall
+  // shows exactly 5 tiles across, like the real product would.
+  {
+    id: "tile-venice-beige",
+    name: "Venice Beige",
+    category: "tile",
+    map: "/textures/wall/tile_venice_beige.jpg",
+    tileSize: { w: 0.6, h: 1.2 },
+    roughness: 0.15,          // gloss finish
+    credit: { source: "Amygres (via client)", license: "VERIFY BEFORE SHIPPING" },
+  },
+  {
+    id: "tile-venice-grey",
+    name: "Venice Grey",
+    category: "tile",
+    map: "/textures/wall/tile_venice_grey.jpg",
+    tileSize: { w: 0.6, h: 1.2 },
+    roughness: 0.15,
+    credit: { source: "Amygres (via client)", license: "VERIFY BEFORE SHIPPING" },
+  },
+  {
+    id: "tile-venice-black",
+    name: "Venice Black",
+    category: "tile",
+    map: "/textures/wall/tile_venice_black.jpg",
+    tileSize: { w: 0.6, h: 1.2 },
+    roughness: 0.15,
+    credit: { source: "Amygres (via client)", license: "VERIFY BEFORE SHIPPING" },
+  },
+
+  // ── Polished concrete (from the client's textures pack) ──────────────────
+  // Uncomment once concrete_polished.jpg + _normal.jpg are in place.
+  // {
+  //   id: "concrete-polished",
+  //   name: "Polished Concrete",
+  //   category: "stone",
+  //   map: "/textures/wall/concrete_polished.jpg",
+  //   normalMap: "/textures/wall/concrete_polished_normal.jpg",
+  //   tileSize: { w: 2.0, h: 2.0 },
+  //   roughness: 0.85,
+  //   credit: { source: "client pack", license: "VERIFY BEFORE SHIPPING" },
+  // },
+
   // ── Add more here. CC0 sources that need no licence tracking:
   //    ambientCG.com, polyhaven.com/textures, texturecan.com
   // {
