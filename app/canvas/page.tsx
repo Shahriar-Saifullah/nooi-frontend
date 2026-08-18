@@ -248,6 +248,8 @@ export default function CanvasPage() {
   const [wallSurfaces, setWallSurfaces] = useState<Record<string, string>>({});
   const [doorFinishes, setDoorFinishes] = useState<Record<string, string>>({});
   const [selectedDoor, setSelectedDoor] = useState<string | null>(null);
+  // door keys as reported by the 3D scene — authoritative
+  const [doorKeys, setDoorKeys] = useState<string[]>([]);
   const [wallTab, setWallTab] = useState<"paint" | "surface">("paint");
   const [surfaceCat, setSurfaceCat] = useState<SurfaceCategory | "all">("all");
   const wallKeyOf = (w: { key: string; side: "A" | "B" }) => `${w.key}:${w.side}`;
@@ -1159,6 +1161,7 @@ export default function CanvasPage() {
                   wallColors={wallColors}
                   wallSurfaces={wallSurfaces}
                   doorFinishes={doorFinishes}
+                  onDoorKeys={setDoorKeys}
                   selectedDoorKey={selectedDoor}
                   onDoorSelect={(key) => {
                     setSelectedDoor(key);
@@ -1261,18 +1264,16 @@ export default function CanvasPage() {
                       onClick={() => {
                         const v = doorFinishes[selectedDoor];
                         if (!v) return;
-                        // apply to every door currently in the plan
+                        // use the keys the scene reported — rebuilding them
+                        // here is what previously made this silently no-op
                         const all: Record<string, string> = { ...doorFinishes };
-                        for (const o of openings) {
-                          if (o.type !== "door") continue;
-                          all[`d${Math.round(o.x)}_${Math.round(o.y)}`] = v;
-                        }
+                        for (const k of doorKeys) all[k] = v;
                         setDoorFinishes(all);
                       }}
                       disabled={!doorFinishes[selectedDoor]}
                       className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#525252] hover:bg-[#fafafa] disabled:opacity-40"
                     >
-                      Apply to all doors
+                      Apply to all doors{doorKeys.length > 1 ? ` (${doorKeys.length})` : ""}
                     </button>
                     <button
                       onClick={() => setDoorFinishes(prev => {
