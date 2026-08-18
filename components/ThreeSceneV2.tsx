@@ -262,7 +262,12 @@ function WallWithOpenings({
 
               return (
                 <meshStandardMaterial
-                  key={fi}
+                  // Rebuild the material when the finish changes. Swapping
+                  // `map` on an existing material needs a shader recompile
+                  // (USE_MAP is compiled in); R3F won't flag needsUpdate, so
+                  // the old shader keeps rendering flat colour. A changing key
+                  // forces a fresh material instead.
+                  key={`${fi}-${surf?.id ?? painted ?? "base"}`}
                   attach={`material-${fi}`}
                   map={tex?.map}
                   normalMap={tex?.normalMap}
@@ -330,6 +335,7 @@ function WallWithOpenings({
                       const isSel = selectedDoorKey === cut.key;
                       return (
                         <meshStandardMaterial
+                          key={fin?.id ?? "base"}
                           map={tex?.map}
                           color={tex ? "#ffffff" : "#b59a72"}
                           roughness={fin?.roughness ?? 0.55}
