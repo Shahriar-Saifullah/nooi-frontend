@@ -9,6 +9,7 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
+import { doorFinishById } from "@/lib/surfaces/doors";
 import { getFaceTextures, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
@@ -107,6 +108,10 @@ interface ThreeSceneV2Props {
   wallColors?: Record<string, string>;
   /** per-side wall surface: "wallKey:A" | "wallKey:B" → surface id */
   wallSurfaces?: Record<string, string>;
+  /** per-door finish: door key → finish id */
+  doorFinishes?: Record<string, string>;
+  selectedDoorKey?: string | null;
+  onDoorSelect?: (key: string | null) => void;
   selectedWallSide?: string | null;
   onWallSelect?: (sel: WallSideSelection | null) => void;
   onFurnitureSelect?: (id: string | null) => void;
@@ -147,7 +152,7 @@ function makeWorld(totalW: number, totalD: number): World {
   };
 }
 
-type Cut = { start: number; end: number; type: "door" | "window" };
+type Cut = { start: number; end: number; type: "door" | "window"; key: string };
 
 /** Split one wall's along-axis extent into solid pieces + opening cuts. */
 function wallPieces(a0: number, a1: number, cuts: Cut[]) {
@@ -169,8 +174,12 @@ function wallPieces(a0: number, a1: number, cuts: Cut[]) {
 
 function WallWithOpenings({
   wall, cuts, world, wallKey, colors, surfaces, selectedSide, onSelect,
+  doorFinishes, selectedDoorKey, onDoorSelect,
 }: {
   wall: VWall; cuts: Cut[]; world: World;
+  doorFinishes?: Record<string, string>;
+  selectedDoorKey?: string | null;
+  onDoorSelect?: (key: string | null) => void;
   wallKey: string;
   colors?: { A?: string; B?: string };
   surfaces?: { A?: string; B?: string };
@@ -301,11 +310,36 @@ function WallWithOpenings({
                       ? [(cw - 0.08) / 2, DOOR_H / 2 - 0.02, 0]
                       : [0, DOOR_H / 2 - 0.02, (cw - 0.08) / 2]}
                     castShadow
+                    onPointerDown={onDoorSelect ? (e) => {
+                      e.stopPropagation();
+                      onDoorSelect(cut.key);
+                    } : undefined}
+                    onClick={onDoorSelect ? (e) => e.stopPropagation() : undefined}
                   >
                     <boxGeometry args={horiz
                       ? [cw - 0.08, DOOR_H - 0.06, 0.045]
                       : [0.045, DOOR_H - 0.06, cw - 0.08]} />
-                    <meshStandardMaterial color="#b59a72" roughness={0.55} />
+                    {(() => {
+                      const fin = doorFinishById(doorFinishes?.[cut.key] ?? "");
+                      // one leaf = one texture tile; grain runs the full leaf
+                      const tex = fin
+                        ? getFaceTextures(
+                            { id: fin.id, name: fin.name, category: "wood",
+                              map: fin.map, tileSize: { w: cw, h: DOOR_H } } as any,
+                            cw, DOOR_H,
+                          )
+                        : undefined;
+                      const isSel = selectedDoorKey === cut.key;
+                      return (
+                        <meshStandardMaterial
+                          map={tex?.map}
+                          color={tex ? "#ffffff" : "#b59a72"}
+                          roughness={fin?.roughness ?? 0.55}
+                          emissive={isSel ? "#c7de7d" : "#000000"}
+                          emissiveIntensity={isSel ? 0.35 : 0}
+                        />
+                      );
+                    })()}
                   </mesh>
                 </group>
               )}
@@ -603,7 +637,11 @@ function cutsPerWall(
 
     const center = horiz ? ox : oz;
     const arr = map.get(idx) ?? [];
-    arr.push({ start: center - halfW, end: center + halfW, type: op.type });
+    // Stable per-opening key from its plan position (‰ coords, rounded).
+    // Index would be unstable: re-analysing a plan can reorder openings and
+    // move a finish to the wrong door.
+    const key = `${op.type[0]}${Math.round(op.x)}_${Math.round(op.y)}`;
+    arr.push({ start: center - halfW, end: center + halfW, type: op.type, key });
     map.set(idx, arr);
   });
   return map;
@@ -998,6 +1036,7 @@ function SceneContent({
   rooms, rfWalls, openings, furniture, world,
   onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
   wallColors, wallSurfaces, selectedWallSide, onWallSelect,
+  doorFinishes, selectedDoorKey, onDoorSelect,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -1008,6 +1047,9 @@ function SceneContent({
   wallSurfaces?: Record<string, string>;
   selectedWallSide?: string | null;
   onWallSelect?: (sel: WallSideSelection | null) => void;
+  doorFinishes?: Record<string, string>;
+  selectedDoorKey?: string | null;
+  onDoorSelect?: (key: string | null) => void;
 }) {
   const cuts = useMemo(
     () => cutsPerWall(rfWalls, openings, world),
@@ -1059,7 +1101,7 @@ function SceneContent({
     <group>
       {/* ground */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow
-        onClick={() => { onFurnitureSelect?.(null); onWallSelect?.(null); }}>
+        onClick={() => { onFurnitureSelect?.(null); onWallSelect?.(null); onDoorSelect?.(null); }}>
         <planeGeometry args={[world.totalW * 1.25, world.totalD * 1.25]} />
         <meshStandardMaterial color="#eae7e0" roughness={1} />
       </mesh>
@@ -1121,6 +1163,9 @@ function SceneContent({
                 : null
             }
             onSelect={onWallSelect}
+            doorFinishes={doorFinishes}
+            selectedDoorKey={selectedDoorKey}
+            onDoorSelect={onDoorSelect}
           />
         );
       })}
@@ -1149,6 +1194,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   furniture = [],
   wallColors,
   wallSurfaces,
+  doorFinishes,
+  selectedDoorKey = null,
+  onDoorSelect,
   selectedWallSide = null,
   onWallSelect,
   onFurnitureSelect,
@@ -1193,7 +1241,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         position: [world.totalW * 0.55, world.maxDim * 0.85, world.totalD * 0.95],
         fov: 40,
       }}
-      onPointerMissed={() => { onFurnitureSelect?.(null); onWallSelect?.(null); }}
+      onPointerMissed={() => { onFurnitureSelect?.(null); onWallSelect?.(null); onDoorSelect?.(null); }}
       style={{ width: "100%", height: "100%" }}
     >
       <color attach="background" args={["#12161a"]} />
@@ -1242,6 +1290,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           selectedFurnitureId={selectedFurnitureId}
           wallColors={wallColors}
           wallSurfaces={wallSurfaces}
+          doorFinishes={doorFinishes}
+          selectedDoorKey={selectedDoorKey}
+          onDoorSelect={onDoorSelect}
           selectedWallSide={selectedWallSide}
           onWallSelect={onWallSelect}
         />
