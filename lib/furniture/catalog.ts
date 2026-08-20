@@ -233,22 +233,14 @@ export const FURNITURE_TYPES: FurnitureType[] = [
       v("outdoor", "outdoor-table", { id: "outdoor-table", name: "Round Table", path: "/models/outdoor_table.glb", size: { w: 120, d: 120, h: 74 }, color: "#8a9a8c", tags: ["table", "patio"], customizable: true }),
     ],
   },
-    {
+  {
     id: "patio-set", name: "Patio Set", category: "outdoor",
     variants: [
-      v("outdoor", "patio-set", {
-        id: "patio-set-etsy", name: "Custom Patio Set",
-        path: "/models/outdoor/patio_set.glb",
-        size: { w: 760, d: 200, h: 89 },
-        color: "#8a9a8c",
-        tags: ["patio", "outdoor", "lounge", "set", "sectional"],
-        customizable: true,
-        credit: { source: "Etsy (via client)", license: "VERIFY BEFORE SHIPPING" },
-      }),
+      v("outdoor", "patio-set", { id: "patio-set-etsy", name: "Custom Patio Set", path: "/models/outdoor/patio_set.glb", size: { w: 760, d: 200, h: 89 }, color: "#8a9a8c", tags: ["patio", "outdoor", "lounge", "set", "sectional"], customizable: true, credit: { source: "Etsy (via client)", license: "VERIFY BEFORE SHIPPING" } }),
     ],
   },
 
-    // ══ Decor ═════════════════════════════════════════════════════════════════
+  // ══ Decor ═════════════════════════════════════════════════════════════════
   {
     id: "plant", name: "Plant", category: "decor",
     variants: [
@@ -261,41 +253,45 @@ export const FURNITURE_TYPES: FurnitureType[] = [
       v("decor", "side-table", { id: "side-table", name: "Accent Table", path: "/models/side_table.glb", size: { w: 50, d: 50, h: 55 }, color: "#7a5c3f", tags: ["table"], customizable: true }),
     ],
   },
-  // ── decorative set Vol005 (3DSKY). Source file was in mm; sizes below are
-  // the true centimetre dimensions, so the loader scales the models correctly.
+
+  // ── decorative set Vol005 (3DSKY) ────────────────────────────────────────
+  // The source file's props are tabletop-vignette scale (a 20 cm bud vase),
+  // which is invisible in a room view. Sizes below are real-world decor
+  // proportions instead — models are auto-scaled to whatever is declared here.
   {
     id: "vase", name: "Vase", category: "decor",
     variants: [
-      v("decor", "vase", { id: "vase-ceramic", name: "Ceramic Vase", path: "/models/decor/vase_ceramic.glb", size: { w: 8, d: 8, h: 20 }, color: "#d9d4cc", tags: ["vase", "ceramic", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "vase", { id: "vase-ceramic", name: "Ceramic Vase", path: "/models/decor/vase_ceramic.glb", size: { w: 18, d: 18, h: 45 }, color: "#d9d4cc", tags: ["vase", "ceramic", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
     ],
   },
   {
     id: "book", name: "Book", category: "decor",
     variants: [
-      v("decor", "book", { id: "book-hardback", name: "Hardback Book", path: "/models/decor/book.glb", size: { w: 18, d: 21, h: 8 }, color: "#8a9a8c", tags: ["book", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "book", { id: "book-hardback", name: "Hardback Book", path: "/models/decor/book.glb", size: { w: 18, d: 24, h: 4 }, color: "#8a9a8c", tags: ["book", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
     ],
   },
   {
     id: "tray", name: "Tray", category: "decor",
     variants: [
-      v("decor", "tray", { id: "tray-round", name: "Decorative Tray", path: "/models/decor/tray.glb", size: { w: 30, d: 29, h: 8 }, color: "#b09a7a", tags: ["tray", "bowl", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "tray", { id: "tray-round", name: "Decorative Tray", path: "/models/decor/tray.glb", size: { w: 40, d: 38, h: 6 }, color: "#b09a7a", tags: ["tray", "bowl", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
     ],
   },
   {
     id: "wall-clock", name: "Wall Clock", category: "decor",
     variants: [
-      v("decor", "wall-clock", { id: "clock-hands", name: "Clock Hands", path: "/models/decor/clock_hands.glb", size: { w: 14, d: 11, h: 14 }, color: "#2f2f2f", tags: ["clock", "wall", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "wall-clock", { id: "clock-hands", name: "Clock Hands", path: "/models/decor/clock_hands.glb", size: { w: 30, d: 4, h: 30 }, color: "#2f2f2f", tags: ["clock", "wall", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
     ],
   },
   {
     id: "picture-frame", name: "Picture Frame", category: "decor",
     variants: [
-      v("decor", "picture-frame", { id: "frame-small", name: "Small Frame", path: "/models/decor/frame_small.glb", size: { w: 8, d: 1.5, h: 8.6 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
-      v("decor", "picture-frame", { id: "frame-medium", name: "Medium Frame", path: "/models/decor/frame_medium.glb", size: { w: 7.3, d: 1.1, h: 9.2 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
-      v("decor", "picture-frame", { id: "frame-large", name: "Large Frame", path: "/models/decor/frame_large.glb", size: { w: 7.4, d: 2.6, h: 8.4 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
-      v("decor", "picture-frame", { id: "frame-curved", name: "Curved Frame", path: "/models/decor/frame_curved.glb", size: { w: 15, d: 3.8, h: 10.6 }, color: "#3f3a36", tags: ["frame", "curved", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "picture-frame", { id: "frame-small", name: "Small Frame", path: "/models/decor/frame_small.glb", size: { w: 13, d: 3, h: 18 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "picture-frame", { id: "frame-medium", name: "Medium Frame", path: "/models/decor/frame_medium.glb", size: { w: 18, d: 3, h: 24 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "picture-frame", { id: "frame-large", name: "Large Frame", path: "/models/decor/frame_large.glb", size: { w: 25, d: 4, h: 33 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "picture-frame", { id: "frame-curved", name: "Curved Frame", path: "/models/decor/frame_curved.glb", size: { w: 30, d: 8, h: 22 }, color: "#3f3a36", tags: ["frame", "curved", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
     ],
   },
+
 ];
 
 // ── Derived flat views ────────────────────────────────────────────────────────

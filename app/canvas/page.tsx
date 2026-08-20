@@ -203,6 +203,46 @@ export default function CanvasPage() {
   const floorPlanUrl = currentProject?.floor_plan_url || currentProject?.floorPlanUrl || null;
 
 
+  // ── Snap to surface ────────────────────────────────────────────────────────
+  // Small items (a vase, a book) should rest ON tables and consoles, not sink
+  // to the floor beside them. Returns the height in METRES that an item at
+  // (x, z) should sit at: 0 for the floor, otherwise the top of whatever it
+  // is standing on.
+  const supportHeightAt = (
+    x: number, z: number,
+    item: { width?: number; depth?: number },
+    excludeId?: string,
+  ): number => {
+    const iw = item.width ?? 0, id = item.depth ?? 0;
+    if (!iw || !id) return 0;
+    const itemArea = iw * id;
+
+    // rotation-aware half extents in metres
+    const half = (w: number, d: number, rot: number): [number, number] => {
+      const swapped = Math.abs(Math.sin(rot)) > 0.7;
+      return [(swapped ? d : w) / 200, (swapped ? w : d) / 200];
+    };
+
+    let top = 0;
+    for (const o of placedFurniture) {
+      if (o.id === excludeId) continue;
+      const ow = o.width ?? 0, od = o.depth ?? 0, oh = o.height ?? 0;
+      if (!ow || !od || !oh) continue;
+      // only rest on something meaningfully larger — stops a sofa perching
+      // on a nightstand, and stops two vases stacking on each other
+      if (itemArea > ow * od * 0.6) continue;
+      const [ohw, ohd] = half(ow, od, o.rotation ?? 0);
+      // the item's centre must be over the supporting footprint
+      if (Math.abs(x - o.position[0]) > ohw) continue;
+      if (Math.abs(z - o.position[2]) > ohd) continue;
+      const oTop = (o.position[1] ?? 0) + oh / 100;
+      // ignore anything above worktop-ish height — nothing should land on a
+      // wardrobe roof by accident
+      if (oTop > top && oTop <= 1.6) top = oTop;
+    }
+    return top;
+  };
+
   const addFurniture = (cat: CatalogItem, position: [number, number, number]) => {
     const newItem: PlacedFurniture = {
       id: `${cat.id}-${Date.now()}`,
@@ -238,7 +278,9 @@ export default function CanvasPage() {
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
     const hit = sceneRef.current?.floorPointFromNdc(nx, ny);
-    const pos: [number, number, number] = hit ? [hit[0], 0, hit[1]] : [0, 0, 0];
+    const x = hit ? hit[0] : 0, z = hit ? hit[1] : 0;
+    const y = supportHeightAt(x, z, { width: cat.size.w, depth: cat.size.d });
+    const pos: [number, number, number] = [x, y, z];
     addFurniture(cat, pos);
   };
 
@@ -275,7 +317,13 @@ export default function CanvasPage() {
   }, [placedFurniture, wallColors, wallSurfaces, doorFinishes, currentProject?.id]);
 
   const handleFurnitureMove = (id: string, position: [number, number, number]) => {
-    setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, position } : f));
+    setPlacedFurniture(prev => prev.map(f => {
+      if (f.id !== id) return f;
+      // re-evaluate support as it moves: drag a vase onto a table and it
+      // climbs; drag it off and it drops back to the floor
+      const y = supportHeightAt(position[0], position[2], f, id);
+      return { ...f, position: [position[0], y, position[2]] as [number, number, number] };
+    }));
   };
 
   const patchSelected = (patch: Partial<PlacedFurniture>) => {
@@ -514,7 +562,9 @@ export default function CanvasPage() {
           id: `${cat.id}-${stamp}-${i}`,
           modelId: cat.id,
           name: cat.name,
-          position: [p.x, 0, p.z],
+          // AI returns floor coordinates; lift small items onto any surface
+          // they land on, same as a manual drop
+          position: [p.x, supportHeightAt(p.x, p.z, { width: cat.size.w, depth: cat.size.d }), p.z],
           rotation: (p.rotation * Math.PI) / 180,
           sizeScale: 1,
           color: null,

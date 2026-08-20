@@ -542,7 +542,9 @@ function GltfModel({
   return (
     <group
       ref={group}
-      position={[item.position[0], fit.yOffset, item.position[2]]}
+      // position[1] is the support height (0 = floor, >0 = resting on
+      // another item's top surface); fit.yOffset seats the model on it
+      position={[item.position[0], (item.position[1] ?? 0) + fit.yOffset, item.position[2]]}
       rotation={[0, item.rotation, 0]}
       scale={fit.scale}
       onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
@@ -563,7 +565,7 @@ function BoxFurniture({
   const h = ((cat?.size.h ?? item.height ?? 80) / 100) * s;
   return (
     <mesh
-      position={[item.position[0], h / 2, item.position[2]]}
+      position={[item.position[0], (item.position[1] ?? 0) + h / 2, item.position[2]]}
       rotation={[0, item.rotation, 0]}
       castShadow receiveShadow
       onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
