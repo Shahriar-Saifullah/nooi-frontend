@@ -188,6 +188,7 @@ export interface FurniturePlacement {
   sizeScale?: number;
   color?: string | null;
   materialPreset?: string | null;
+  mountType?: "floor" | "ceiling" | "wall";
   scale?: [number, number, number];
   width?: number;
   depth?: number;

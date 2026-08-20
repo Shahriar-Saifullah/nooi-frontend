@@ -49,6 +49,7 @@ export interface PlacedFurniture {
   sizeScale?: number;                 // uniform size multiplier (default 1)
   color?: string | null;              // material color override
   materialPreset?: string | null;     // id from MATERIAL_PRESETS
+  mountType?: "floor" | "ceiling" | "wall";
   // legacy box fields (still used as GLTF fallback)
   scale?: [number, number, number];
   width?: number;
@@ -484,6 +485,60 @@ function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
   );
 }
 
+// ─── Roof / Ceiling ─────────────────────────────────────────────────────────
+
+function RoomRoof({ room, world }: { room: PolyRoom; world: World }) {
+  const shape = useMemo(() => {
+    const s = new THREE.Shape();
+    if (room.polygon && room.polygon.length >= 3) {
+      room.polygon.forEach(([x, y], i) => {
+        const wx = world.px(x);
+        const wz = world.pz(y);
+        if (i === 0) s.moveTo(wx, wz);
+        else s.lineTo(wx, wz);
+      });
+      s.closePath();
+    } else if (room.box) {
+      const x0 = world.px(room.box.left);
+      const z0 = world.pz(room.box.top);
+      const x1 = world.px(room.box.left + room.box.width);
+      const z1 = world.pz(room.box.top + room.box.height);
+      s.moveTo(x0, z0); s.lineTo(x1, z0); s.lineTo(x1, z1); s.lineTo(x0, z1);
+      s.closePath();
+    } else {
+      return null;
+    }
+    return s;
+  }, [room, world]);
+
+  if (!shape) return null;
+  const outdoor = OUTDOOR.test(room.name || "");
+  if (outdoor) return null; // outdoor spaces (balconies/patios) do not render roofs
+
+  return (
+    <group position={[0, WALL_H, 0]}>
+      {/* Indoor ceiling underside visible from inside room */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -0.005, 0]} receiveShadow>
+        <shapeGeometry args={[shape]} />
+        <meshStandardMaterial
+          color="#fcfbf9"
+          roughness={0.9}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Outer top roof slab */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0]} castShadow receiveShadow>
+        <extrudeGeometry args={[shape, { depth: 0.08, bevelEnabled: false }]} />
+        <meshStandardMaterial
+          color="#d5d0c8"
+          roughness={0.8}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+    </group>
+  );
+}
+
 // ─── Furniture ──────────────────────────────────────────────────────────────
 
 // Apply color/material overrides + selection highlight to a cloned model
@@ -531,10 +586,13 @@ function GltfModel({
     const sx = size.x > 1e-4 ? tw / size.x : 1;
     const sy = size.y > 1e-4 ? th / size.y : 1;
     const sz = size.z > 1e-4 ? td / size.z : 1;
-    // sit the model on the floor: shift up by its (scaled) min-y
+    // sit the model on the floor or hang from ceiling
     const minY = box.min.y * sy;
-    return { scale: [sx, sy, sz] as [number, number, number], yOffset: -minY };
-  }, [clone, cat, item.sizeScale]);
+    const yOffset = item.mountType === "ceiling"
+      ? WALL_H - (cat!.size.h / 100) * (item.sizeScale ?? 1) - minY
+      : -minY;
+    return { scale: [sx, sy, sz] as [number, number, number], yOffset };
+  }, [clone, cat, item.sizeScale, item.mountType]);
 
   useEffect(() => { applyOverrides(clone, item, selected); },
     [clone, item.color, item.materialPreset, selected, item]);
@@ -563,9 +621,10 @@ function BoxFurniture({
   const w = ((cat?.size.w ?? item.width ?? 80) / 100) * s;
   const d = ((cat?.size.d ?? item.depth ?? 80) / 100) * s;
   const h = ((cat?.size.h ?? item.height ?? 80) / 100) * s;
+  const posY = item.mountType === "ceiling" ? WALL_H - h / 2 : (item.position[1] ?? 0) + h / 2;
   return (
     <mesh
-      position={[item.position[0], (item.position[1] ?? 0) + h / 2, item.position[2]]}
+      position={[item.position[0], posY, item.position[2]]}
       rotation={[0, item.rotation, 0]}
       castShadow receiveShadow
       onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
@@ -658,15 +717,17 @@ function cutsPerWall(
 // Registers a raycast helper for external drop placement (via the handle)
 function PlacementBridge({
   register,
-}: { register: (fn: (nx: number, ny: number) => [number, number] | null) => void }) {
+}: { register: (fn: (nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null) => void }) {
   const { camera } = useThree();
   useEffect(() => {
     const ray = new THREE.Raycaster();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const ceilingPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), WALL_H);
     const hit = new THREE.Vector3();
-    register((nx, ny) => {
+    register((nx, ny, mountType = "floor") => {
       ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
-      return ray.ray.intersectPlane(plane, hit) ? [hit.x, hit.z] : null;
+      const targetPlane = mountType === "ceiling" ? ceilingPlane : floorPlane;
+      return ray.ray.intersectPlane(targetPlane, hit) ? [hit.x, hit.z] : null;
     });
   }, [camera, register]);
   return null;
@@ -1043,6 +1104,7 @@ function SceneContent({
   onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
   wallColors, wallSurfaces, selectedWallSide, onWallSelect,
   doorFinishes, selectedDoorKey, onDoorSelect, onDoorKeys,
+  insideMode = false,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -1057,6 +1119,7 @@ function SceneContent({
   selectedDoorKey?: string | null;
   onDoorSelect?: (key: string | null) => void;
   onDoorKeys?: (keys: string[]) => void;
+  insideMode?: boolean;
 }) {
   const cuts = useMemo(
     () => cutsPerWall(rfWalls, openings, world),
@@ -1162,6 +1225,9 @@ function SceneContent({
       )}
 
       {rooms.map((r) => <RoomFloor key={r.id} room={r} world={world} />)}
+
+      {/* Roof / Ceiling — ONLY rendered when Inside Mode is active */}
+      {insideMode && rooms.map((r) => <RoomRoof key={`roof-${r.id}`} room={r} world={world} />)}
 
       {rfWalls.map((wl, i) => {
         const wallKey = wl.id ?? `wi${i}`;
@@ -1306,6 +1372,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           openings={openings}
           furniture={furniture}
           world={world}
+          insideMode={insideMode}
           onFurnitureSelect={onFurnitureSelect}
           onFurnitureMove={onFurnitureMove}
           selectedFurnitureId={selectedFurnitureId}

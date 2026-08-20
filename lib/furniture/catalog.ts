@@ -46,6 +46,7 @@ export interface CatalogItem {
   color: string;                  // fallback box colour + default tint base
   tags: string[];
   customizable: boolean;          // supports colour/material overrides
+  mountType?: "floor" | "ceiling" | "wall";
   credit?: AssetCredit;
 }
 
@@ -79,6 +80,7 @@ export const FURNITURE_TYPES: FurnitureType[] = [
   {
     id: "sofa", name: "Sofa", category: "living",
     variants: [
+      v("living", "sofa", { id: "sofa-44", name: "Luxury Sofa 44", path: "/models/sofa44.glb", size: { w: 230, d: 95, h: 85 }, color: "#7a5c3f", tags: ["couch", "sofa", "luxury", "modern"], customizable: true }),
       v("living", "sofa", { id: "sofa-3seat", name: "3-Seat Sofa", path: "/models/sofa_3seat.glb", size: { w: 220, d: 90, h: 80 }, color: "#b09a7a", tags: ["couch", "sofa"], customizable: true }),
       v("living", "sofa", { id: "sofa-2seat", name: "Loveseat", path: "/models/sofa_2seat.glb", size: { w: 160, d: 90, h: 80 }, color: "#b09a7a", tags: ["couch", "sofa", "2 seat"], customizable: true }),
       // ── Example third-party asset. Convert the FBX to .glb first (see
@@ -136,6 +138,7 @@ export const FURNITURE_TYPES: FurnitureType[] = [
   {
     id: "bed", name: "Bed", category: "bedroom",
     variants: [
+      v("bedroom", "bed", { id: "bed-custom-real", name: "Luxury Bed", path: "/models/bed.glb", size: { w: 200, d: 220, h: 100 }, color: "#9fb1b8", tags: ["bed", "real", "custom", "luxury"], customizable: true }),
       v("bedroom", "bed", { id: "bed-king", name: "King Bed", path: "/models/bed_king.glb", size: { w: 200, d: 220, h: 100 }, color: "#9fb1b8", tags: ["bed"], customizable: true }),
       v("bedroom", "bed", { id: "bed-queen", name: "Queen Bed", path: "/models/bed_queen.glb", size: { w: 160, d: 200, h: 100 }, color: "#9fb1b8", tags: ["bed"], customizable: true }),
       v("bedroom", "bed", { id: "bed-single", name: "Single Bed", path: "/models/bed_single.glb", size: { w: 100, d: 200, h: 90 }, color: "#9fb1b8", tags: ["bed"], customizable: true }),
