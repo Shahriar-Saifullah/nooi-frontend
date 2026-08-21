@@ -210,9 +210,12 @@ export default function CanvasPage() {
   // is standing on.
   const supportHeightAt = (
     x: number, z: number,
-    item: { width?: number; depth?: number },
+    item: { width?: number; depth?: number; mountType?: "floor" | "ceiling" | "wall" },
     excludeId?: string,
   ): number => {
+    // ceiling / wall mounts get their height from mountType in the scene —
+    // never give them a support height or they end up above the roof
+    if (item.mountType && item.mountType !== "floor") return 0;
     const iw = item.width ?? 0, id = item.depth ?? 0;
     if (!iw || !id) return 0;
     const itemArea = iw * id;
@@ -226,6 +229,8 @@ export default function CanvasPage() {
     let top = 0;
     for (const o of placedFurniture) {
       if (o.id === excludeId) continue;
+      // a pendant light is not a shelf
+      if (o.mountType && o.mountType !== "floor") continue;
       const ow = o.width ?? 0, od = o.depth ?? 0, oh = o.height ?? 0;
       if (!ow || !od || !oh) continue;
       // only rest on something meaningfully larger — stops a sofa perching
@@ -258,6 +263,7 @@ export default function CanvasPage() {
       width: cat.size.w,
       depth: cat.size.d,
       height: cat.size.h,
+      mountType: (cat as any).mountType,
     };
     setPlacedFurniture(prev => [...prev, newItem]);
     setSelectedFurnitureId(newItem.id);
@@ -279,7 +285,9 @@ export default function CanvasPage() {
     const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
     const hit = sceneRef.current?.floorPointFromNdc(nx, ny);
     const x = hit ? hit[0] : 0, z = hit ? hit[1] : 0;
-    const y = supportHeightAt(x, z, { width: cat.size.w, depth: cat.size.d });
+    const y = supportHeightAt(x, z, {
+      width: cat.size.w, depth: cat.size.d, mountType: (cat as any).mountType,
+    });
     const pos: [number, number, number] = [x, y, z];
     addFurniture(cat, pos);
   };
@@ -564,7 +572,9 @@ export default function CanvasPage() {
           name: cat.name,
           // AI returns floor coordinates; lift small items onto any surface
           // they land on, same as a manual drop
-          position: [p.x, supportHeightAt(p.x, p.z, { width: cat.size.w, depth: cat.size.d }), p.z],
+          position: [p.x, supportHeightAt(p.x, p.z, {
+            width: cat.size.w, depth: cat.size.d, mountType: (cat as any).mountType,
+          }), p.z],
           rotation: (p.rotation * Math.PI) / 180,
           sizeScale: 1,
           color: null,
