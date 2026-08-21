@@ -581,7 +581,9 @@ function GltfModel({
     const size = box.getSize(new THREE.Vector3());
     const s = item.sizeScale ?? 1;
     const tw = (cat!.size.w / 100) * s;
-    const th = (cat!.size.h / 100) * s;
+    // architecture (stairs) spans floor to ceiling regardless of catalog height
+    const catH = cat!.fitToWallHeight ? WALL_H * 100 : cat!.size.h;
+    const th = (catH / 100) * s;
     const td = (cat!.size.d / 100) * s;
     const sx = size.x > 1e-4 ? tw / size.x : 1;
     const sy = size.y > 1e-4 ? th / size.y : 1;
@@ -589,7 +591,7 @@ function GltfModel({
     // sit the model on the floor or hang from ceiling
     const minY = box.min.y * sy;
     const yOffset = item.mountType === "ceiling"
-      ? WALL_H - (cat!.size.h / 100) * (item.sizeScale ?? 1) - minY
+      ? WALL_H - (catH / 100) * (item.sizeScale ?? 1) - minY
       : -minY;
     return { scale: [sx, sy, sz] as [number, number, number], yOffset };
   }, [clone, cat, item.sizeScale, item.mountType]);

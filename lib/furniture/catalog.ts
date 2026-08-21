@@ -25,7 +25,8 @@
  */
 
 export type FurnitureCategory =
-  | "living" | "bedroom" | "dining" | "kitchen" | "bath" | "outdoor" | "decor";
+  | "living" | "bedroom" | "dining" | "kitchen" | "bath" | "outdoor" | "decor"
+  | "structure";
 
 export interface AssetCredit {
   source: string;                 // "CGTrader", "Poly Haven", "in-house"
@@ -47,6 +48,14 @@ export interface CatalogItem {
   tags: string[];
   customizable: boolean;          // supports colour/material overrides
   mountType?: "floor" | "ceiling" | "wall";
+  /**
+   * Architecture, not furniture: scale the model's HEIGHT to the room's wall
+   * height instead of the catalog `size.h`. A staircase whose top step stops
+   * short of the ceiling reads as broken, and every plan has a different
+   * ceiling, so a fixed height is always wrong somewhere.
+   * Width and depth still come from `size`.
+   */
+  fitToWallHeight?: boolean;
   credit?: AssetCredit;
 }
 
@@ -66,6 +75,7 @@ export const CATEGORY_LABELS: Record<FurnitureCategory, string> = {
   bath: "Bathroom",
   outdoor: "Outdoor",
   decor: "Decor",
+  structure: "Structure",
 };
 
 // ── Helper: keeps the variant rows short and stops category/typeId drifting ──
@@ -295,6 +305,43 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     ],
   },
 
+  // ══ Structure ═════════════════════════════════════════════════════════════
+  // Architectural elements. fitToWallHeight makes these span floor to ceiling
+  // whatever the plan's wall height is — a stair that stops short looks broken
+  // no matter how good the model is. Footprints below are estimates: check
+  // each model in the canvas and correct w/d if it sits wrong.
+  {
+    id: "staircase", name: "Staircase", category: "structure",
+    variants: [
+      v("structure", "staircase", {
+        id: "stair-straight", name: "Straight Flight",
+        path: "/models/structure/stair_straight.glb",
+        size: { w: 100, d: 380, h: 280 },
+        color: "#b09a7a", tags: ["stair", "staircase", "steps", "straight"],
+        customizable: true, fitToWallHeight: true,
+        credit: { source: "CGTrader — adelgz", license: "Free — VERIFY + CREDIT AUTHOR",
+                  url: "https://www.cgtrader.com/items/3746586" },
+      }),
+      v("structure", "staircase", {
+        id: "stair-open", name: "Open Riser",
+        path: "/models/structure/stair_open.glb",
+        size: { w: 100, d: 360, h: 280 },
+        color: "#b09a7a", tags: ["stair", "staircase", "steps", "open", "modern"],
+        customizable: true, fitToWallHeight: true,
+        credit: { source: "CGTrader", license: "Free — VERIFY + CREDIT AUTHOR",
+                  url: "https://www.cgtrader.com/items/2792442" },
+      }),
+      v("structure", "staircase", {
+        id: "stair-switchback", name: "Switchback",
+        path: "/models/structure/stair_switchback.glb",
+        size: { w: 260, d: 300, h: 280 },
+        color: "#b09a7a", tags: ["stair", "staircase", "steps", "u-shape", "half turn", "landing"],
+        customizable: true, fitToWallHeight: true,
+        credit: { source: "CGTrader — LiamCg", license: "Free — VERIFY + CREDIT AUTHOR",
+                  url: "https://www.cgtrader.com/items/6198884" },
+      }),
+    ],
+  },
 ];
 
 // ── Derived flat views ────────────────────────────────────────────────────────
