@@ -589,11 +589,13 @@ function GltfModel({
     const sy = size.y > 1e-4 ? th / size.y : 1;
     const sz = size.z > 1e-4 ? td / size.z : 1;
     // sit the model on the floor or hang from ceiling
+    const mountType = item.mountType ?? cat?.mountType ?? "floor";
     const minY = box.min.y * sy;
-    const yOffset = item.mountType === "ceiling"
-      ? WALL_H - (catH / 100) * (item.sizeScale ?? 1) - minY
+    const maxY = box.max.y * sy;
+    const yOffset = mountType === "ceiling"
+      ? WALL_H - maxY
       : -minY;
-    return { scale: [sx, sy, sz] as [number, number, number], yOffset };
+    return { scale: [sx, sy, sz] as [number, number, number], yOffset, mountType };
   }, [clone, cat, item.sizeScale, item.mountType]);
 
   useEffect(() => { applyOverrides(clone, item, selected); },
@@ -608,7 +610,7 @@ function GltfModel({
       // through the roof.
       position={[
         item.position[0],
-        (item.mountType && item.mountType !== "floor" ? 0 : (item.position[1] ?? 0)) + fit.yOffset,
+        (fit.mountType !== "floor" ? 0 : (item.position[1] ?? 0)) + fit.yOffset,
         item.position[2],
       ]}
       rotation={[0, item.rotation, 0]}
@@ -629,7 +631,8 @@ function BoxFurniture({
   const w = ((cat?.size.w ?? item.width ?? 80) / 100) * s;
   const d = ((cat?.size.d ?? item.depth ?? 80) / 100) * s;
   const h = ((cat?.size.h ?? item.height ?? 80) / 100) * s;
-  const posY = item.mountType === "ceiling" ? WALL_H - h / 2 : (item.position[1] ?? 0) + h / 2;
+  const mountType = item.mountType ?? cat?.mountType ?? "floor";
+  const posY = mountType === "ceiling" ? WALL_H - h / 2 : (item.position[1] ?? 0) + h / 2;
   return (
     <mesh
       position={[item.position[0], posY, item.position[2]]}
@@ -925,11 +928,17 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
 const ORBIT_TARGET_Y = 1.1;   // half wall height — centers the dollhouse
 
 function CameraRig({
-  world, suspended, register,
+  world,
+  suspended,
+  register,
+  selectedFurnitureId,
+  furniture,
 }: {
   world: World;
   suspended: boolean;   // true during walkthrough playback or inside/walk mode
   register: (setView: (v: CameraViewPreset) => void) => void;
+  selectedFurnitureId?: string | null;
+  furniture?: PlacedFurniture[];
 }) {
   const { camera, size, controls } = useThree() as any;
   const anim = useRef<null | {
@@ -966,6 +975,7 @@ function CameraRig({
       if (controls) { controls.target.copy(tgt); controls.update(); }
       return;
     }
+    userTouched.current = false;
     anim.current = {
       fromPos: camera.position.clone(), toPos: pos,
       fromTgt: curTgt, toTgt: tgt,
@@ -973,8 +983,49 @@ function CameraRig({
     };
   };
 
+  // Smooth focus on target point (e.g. selected furniture)
+  const focusOnPoint = (point: THREE.Vector3, offsetDist?: number) => {
+    if (!controls) return;
+    const curTgt = controls.target.clone();
+    const curPos = camera.position.clone();
+    const dir = curPos.clone().sub(curTgt);
+    if (dir.lengthSq() < 0.001) dir.set(0.55, 0.62, 0.95);
+    const d = offsetDist ?? Math.min(dir.length(), 4.5);
+    const targetPos = point.clone().add(dir.normalize().multiplyScalar(Math.max(2.0, d)));
+
+    userTouched.current = false;
+    anim.current = {
+      fromPos: curPos,
+      toPos: targetPos,
+      fromTgt: curTgt,
+      toTgt: point,
+      t: 0,
+      dur: 0.55,
+    };
+  };
+
   // expose to parent ("inside" is handled by WalkControls, not the rig)
   useEffect(() => { register((v) => { if (v !== "inside") goTo(v, false); }); });
+
+  // Smoothly focus camera when selected furniture changes
+  const prevSelId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedFurnitureId) {
+      prevSelId.current = null;
+      return;
+    }
+    if (selectedFurnitureId === prevSelId.current) return;
+    prevSelId.current = selectedFurnitureId;
+    const item = furniture?.find(f => f.id === selectedFurnitureId);
+    if (item && controls) {
+      const tgt = new THREE.Vector3(
+        item.position[0],
+        Math.max(0.5, item.position[1] + 0.4),
+        item.position[2],
+      );
+      focusOnPoint(tgt, 3.2);
+    }
+  }, [selectedFurnitureId, furniture, controls]);
 
   // any manual interaction cancels animations + stops auto-reframing
   useEffect(() => {
@@ -996,7 +1047,7 @@ function CameraRig({
 
   useFrame((_, delta) => {
     if (suspended) { anim.current = null; return; }
-    // preset animation
+    // preset / focus animation
     const a = anim.current;
     if (a && controls) {
       a.t = Math.min(1, a.t + delta / a.dur);
@@ -1006,13 +1057,24 @@ function CameraRig({
       controls.update();
       if (a.t >= 1) anim.current = null;
     }
-    // pan guard rails — keep the orbit target inside the plan
+    // Soft pan guard rails — smooth spring pull back if target strays outside bounds
     if (controls && !anim.current) {
       const t = controls.target;
-      const bx = world.totalW * 0.75, bz = world.totalD * 0.75;
-      t.x = Math.max(-bx, Math.min(bx, t.x));
-      t.z = Math.max(-bz, Math.min(bz, t.z));
-      t.y = Math.max(0, Math.min(4, t.y));
+      const bx = world.totalW * 1.15;
+      const bz = world.totalD * 1.15;
+      const maxY = WALL_H * 1.5;
+      const minY = 0.0;
+
+      const pullFactor = 1 - Math.exp(-12 * delta);
+
+      if (t.x > bx) t.x += (bx - t.x) * pullFactor;
+      else if (t.x < -bx) t.x += (-bx - t.x) * pullFactor;
+
+      if (t.z > bz) t.z += (bz - t.z) * pullFactor;
+      else if (t.z < -bz) t.z += (-bz - t.z) * pullFactor;
+
+      if (t.y > maxY) t.y += (maxY - t.y) * pullFactor;
+      else if (t.y < minY) t.y += (minY - t.y) * pullFactor;
     }
   });
 
@@ -1188,7 +1250,9 @@ function SceneContent({
     () => furniture.find(f => f.id === draggingId),
     [furniture, draggingId],
   );
-  const isDraggingCeiling = draggingItem?.mountType === "ceiling";
+  const draggingCat = draggingItem?.modelId ? catalogById(draggingItem.modelId) : undefined;
+  const draggingMountType = draggingItem?.mountType ?? draggingCat?.mountType ?? "floor";
+  const isDraggingCeiling = draggingMountType === "ceiling";
   useEffect(() => {
     const up = () => {
       setDraggingId(null);
@@ -1399,6 +1463,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         world={world}
         suspended={(!!walkthroughActive && !walkthroughPaused) || insideMode}
         register={(fn) => { cameraViewFn.current = fn; }}
+        selectedFurnitureId={selectedFurnitureId}
+        furniture={furniture}
       />
       <WalkControls
         world={world}
@@ -1434,12 +1500,17 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         />
       </Suspense>
       <OrbitControls ref={controlsRef} makeDefault
-        enableDamping dampingFactor={0.05}
+        enableDamping
+        dampingFactor={0.08}
+        rotateSpeed={0.85}
+        zoomSpeed={0.95}
+        panSpeed={0.95}
         screenSpacePanning
         zoomToCursor
         target={[0, 1.1, 0]}
-        maxPolarAngle={Math.PI / 2.02} minDistance={1.2}
-        maxDistance={world.maxDim * 2.5}
+        maxPolarAngle={Math.PI / 2.02}
+        minDistance={0.8}
+        maxDistance={world.maxDim * 3.0}
         enabled={!insideMode && !(walkthroughActive && !walkthroughPaused)} />
     </Canvas>
   );

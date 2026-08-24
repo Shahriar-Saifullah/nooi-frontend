@@ -356,7 +356,7 @@ export const FURNITURE_TYPES: FurnitureType[] = [
         name: "Wooden Pendant",
         path: "/models/lighting/Wooden Lighting Pendant.glb",
         thumbnail: "/models/thumbs/Wooden Lighting Pendant.webp",
-        size: { w: 7, d: 12, h: 322 },
+        size: { w: 50, d: 50, h: 85 },
         color: "#8B6914",
         tags: ["light", "chandelier", "ceiling", "pendant", "wooden", "lamp"],
         customizable: true,

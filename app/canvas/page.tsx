@@ -215,12 +215,14 @@ export default function CanvasPage() {
   // is standing on.
   const supportHeightAt = (
     x: number, z: number,
-    item: { width?: number; depth?: number; mountType?: "floor" | "ceiling" | "wall" },
+    item: { width?: number; depth?: number; mountType?: "floor" | "ceiling" | "wall"; modelId?: string },
     excludeId?: string,
   ): number => {
     // ceiling / wall mounts get their height from mountType in the scene —
     // never give them a support height or they end up above the roof
-    if (item.mountType && item.mountType !== "floor") return 0;
+    const cat = item.modelId ? catalogById(item.modelId) : undefined;
+    const mountType = item.mountType ?? cat?.mountType ?? "floor";
+    if (mountType !== "floor") return 0;
     const iw = item.width ?? 0, id = item.depth ?? 0;
     if (!iw || !id) return 0;
     const itemArea = iw * id;
@@ -234,8 +236,10 @@ export default function CanvasPage() {
     let top = 0;
     for (const o of placedFurniture) {
       if (o.id === excludeId) continue;
+      const oCat = o.modelId ? catalogById(o.modelId) : undefined;
+      const oMountType = o.mountType ?? oCat?.mountType ?? "floor";
       // a pendant light is not a shelf
-      if (o.mountType && o.mountType !== "floor") continue;
+      if (oMountType !== "floor") continue;
       const ow = o.width ?? 0, od = o.depth ?? 0, oh = o.height ?? 0;
       if (!ow || !od || !oh) continue;
       // only rest on something meaningfully larger — stops a sofa perching
