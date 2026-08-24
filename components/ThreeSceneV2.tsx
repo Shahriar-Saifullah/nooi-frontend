@@ -1376,10 +1376,18 @@ function SceneContent({
         );
       })}
 
-      {furniture.map((f) => (
-        <FurnitureItem key={f.id} item={f} world={world}
-          selected={f.id === selectedFurnitureId} />
-      ))}
+      {furniture.map((f) => {
+        const cat = f.modelId ? catalogById(f.modelId) : undefined;
+        const mountType = f.mountType ?? cat?.mountType ?? "floor";
+        // Roof & ceiling-mount items (chandeliers, pendant lights) are ONLY visible
+        // in Inside view (or walkthrough). In 3D, Top, and Front views, ceiling items
+        // are hidden to keep the dollhouse layout clean and unobstructed.
+        if (mountType === "ceiling" && !insideMode) return null;
+        return (
+          <FurnitureItem key={f.id} item={f} world={world}
+            selected={f.id === selectedFurnitureId} />
+        );
+      })}
 
       <group name="nooi-noexport">
         <ContactShadows position={[0, 0, 0]} opacity={0.22}
