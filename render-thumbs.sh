@@ -36,7 +36,10 @@ from mathutils import Vector
 argv = sys.argv[sys.argv.index("--") + 1:]
 models_dir, out_dir, size = argv[0], argv[1], int(argv[2])
 
-files = sorted(glob.glob(os.path.join(models_dir, "**", "*.glb"), recursive=True))
+files = sorted(
+    f for f in glob.glob(os.path.join(models_dir, "**", "*.glb"), recursive=True)
+    if "_decoded" not in f          # our own scratch copies
+)
 print(f"[thumbs] found {len(files)} models")
 
 def setup_scene():
@@ -94,14 +97,27 @@ def bounds(objs):
                 lo[i] = min(lo[i], w[i]); hi[i] = max(hi[i], w[i])
     return lo, hi
 
+decoded_dir = os.path.join(out_dir, "_decoded")
+os.makedirs(decoded_dir, exist_ok=True)
+
 done = skipped = 0
 for path in files:
     name = os.path.splitext(os.path.basename(path))[0]
     dest = os.path.join(out_dir, f"{name}.webp")
 
+    # Blender's glTF importer reads Draco but NOT meshopt (EXT_meshopt_
+    # compression), which is the final step of convert-asset.sh. Round-tripping
+    # through gltf-transform decodes it into plain buffers first.
+    plain = os.path.join(decoded_dir, f"{name}.glb")
+    if not os.path.exists(plain):
+        rc = os.system(f'gltf-transform cp "{path}" "{plain}" >/dev/null 2>&1')
+        if rc != 0 or not os.path.exists(plain):
+            import shutil
+            shutil.copy(path, plain)      # not compressed after all
+
     scene, cam = setup_scene()
     try:
-        bpy.ops.import_scene.gltf(filepath=path)   # handles Draco natively
+        bpy.ops.import_scene.gltf(filepath=plain)
     except Exception as e:
         print(f"[thumbs] SKIP {name}: {e}")
         skipped += 1
@@ -127,6 +143,8 @@ for path in files:
     print(f"[thumbs] {name}.webp")
     done += 1
 
+import shutil
+shutil.rmtree(decoded_dir, ignore_errors=True)
 print(f"[thumbs] rendered {done}, skipped {skipped}")
 PY
 
