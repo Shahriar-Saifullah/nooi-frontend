@@ -31,7 +31,7 @@ export default function FurnitureInspector({ item, onChange, onDelete }: Props) 
           <div className="text-sm font-semibold text-gray-800">{item.name}</div>
           {cat && (
             <div className="text-[10px] text-gray-400">
-              {Math.round(cat.size.w * sizeScale)}×{Math.round(cat.size.d * sizeScale)} cm
+              {Math.round(cat.size.w * sizeScale)}×{Math.round(cat.size.d * sizeScale)}{cat.mountType === "ceiling" ? `×${Math.round(cat.size.h * sizeScale)} cm (Ceiling)` : " cm"}
             </div>
           )}
         </div>
@@ -119,7 +119,7 @@ export default function FurnitureInspector({ item, onChange, onDelete }: Props) 
         </button>
       </div>
       <div className="mt-2 text-[10px] text-gray-400">
-        Drag the item on the floor to move it · R rotates · Delete removes
+        {item.mountType === "ceiling" ? "Drag the item on the ceiling to move it" : "Drag the item on the floor to move it"} · R rotates · Delete removes
       </div>
     </div>
   );

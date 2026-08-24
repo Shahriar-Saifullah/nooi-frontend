@@ -92,6 +92,11 @@ export default function CanvasPage() {
   const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
 
+  // ── Toast notifications ──────────────────────────────────────────────────
+  const [toast, setToast] = useState<string | null>(null);
+  const [toastAction, setToastAction] = useState<{ label: string; onClick: () => void } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── Walkthrough state ────────────────────────────────────────────────────
   const [walkthroughActive, setWalkthroughActive] = useState(false);
   const [walkthroughPaused, setWalkthroughPaused] = useState(false);
@@ -280,10 +285,30 @@ export default function CanvasPage() {
     if (!cat) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
-    // client coords → NDC → raycast onto the actual floor plane
+
+    const isCeiling = (cat as any).mountType === "ceiling";
+
+    if (isCeiling && cameraView !== "inside") {
+      setToast("Chandeliers attach to the ceiling. Switch to Inside mode to see the roof!");
+      setToastAction({
+        label: "Switch to Inside →",
+        onClick: () => {
+          handleCameraView("inside");
+          setToast(null);
+          setToastAction(null);
+        },
+      });
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => {
+        setToast(null);
+        setToastAction(null);
+      }, 7000);
+    }
+
+    // client coords → NDC → raycast onto floor or ceiling plane
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-    const hit = sceneRef.current?.floorPointFromNdc(nx, ny);
+    const hit = sceneRef.current?.floorPointFromNdc(nx, ny, isCeiling ? "ceiling" : "floor");
     const x = hit ? hit[0] : 0, z = hit ? hit[1] : 0;
     const y = supportHeightAt(x, z, {
       width: cat.size.w, depth: cat.size.d, mountType: (cat as any).mountType,
@@ -1078,6 +1103,21 @@ export default function CanvasPage() {
             </div>
           )}
 
+          {/* Toast Notification */}
+          {toast && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-[#0a0a0a]/90 text-white border border-[#c7de7d]/40 shadow-xl px-4 py-2.5 rounded-full backdrop-blur-md transition-all">
+              <span className="text-[12px] font-medium">{toast}</span>
+              {toastAction && (
+                <button
+                  onClick={toastAction.onClick}
+                  className="px-3 py-1 bg-[#004643] hover:bg-[#003633] text-white rounded-full text-[11px] font-semibold transition"
+                >
+                  {toastAction.label}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* 3D controls hint — adapts to walkthrough state */}
           {viewMode === "3d" && (
             <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4 bg-black/50 backdrop-blur-sm text-white/80 text-[11px] px-4 py-2 rounded-full pointer-events-none">
@@ -1087,7 +1127,7 @@ export default function CanvasPage() {
                 <><span>⏸ Paused — orbit freely</span><span className="opacity-40">·</span><span>▶ Resume when ready</span></>
               ) : (
                 cameraView === "inside"
-                  ? <><span>🖱 Drag to look around</span><span>⚡ Scroll to walk</span><span>⌨ WASD to move</span></>
+                  ? <><span>🖱 Drag to look</span><span>⚡ Scroll to fly</span><span>⌨ WASD to move</span><span>⬆ Q/E or Shift/Space for Up/Down</span></>
                   : <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span></>
               )}
             </div>

@@ -26,7 +26,7 @@
 
 export type FurnitureCategory =
   | "living" | "bedroom" | "dining" | "kitchen" | "bath" | "outdoor" | "decor"
-  | "structure";
+  | "structure" | "lighting";
 
 export interface AssetCredit {
   source: string;                 // "CGTrader", "Poly Haven", "in-house"
@@ -76,6 +76,7 @@ export const CATEGORY_LABELS: Record<FurnitureCategory, string> = {
   outdoor: "Outdoor",
   decor: "Decor",
   structure: "Structure",
+  lighting: "Lighting",
 };
 
 // ── Helper: keeps the variant rows short and stops category/typeId drifting ──
@@ -339,6 +340,27 @@ export const FURNITURE_TYPES: FurnitureType[] = [
         customizable: true, fitToWallHeight: true,
         credit: { source: "CGTrader — LiamCg", license: "Free — VERIFY + CREDIT AUTHOR",
                   url: "https://www.cgtrader.com/items/6198884" },
+      }),
+    ],
+  },
+
+  // ══ Lighting ══════════════════════════════════════════════════════════════
+  // Ceiling-mount fixtures. mountType "ceiling" anchors the model's top to
+  // WALL_H (2.8 m). Drop placement uses the ceiling raycast plane; enable
+  // "Inside" mode so the ceiling is visible before placing.
+  {
+    id: "chandelier", name: "Chandelier", category: "lighting",
+    variants: [
+      v("lighting", "chandelier", {
+        id: "chandelier-wooden-pendant",
+        name: "Wooden Pendant",
+        path: "/models/lighting/Wooden Lighting Pendant.glb",
+        thumbnail: "/models/thumbs/Wooden Lighting Pendant.webp",
+        size: { w: 7, d: 12, h: 322 },
+        color: "#8B6914",
+        tags: ["light", "chandelier", "ceiling", "pendant", "wooden", "lamp"],
+        customizable: true,
+        mountType: "ceiling",
       }),
     ],
   },
