@@ -58,8 +58,8 @@ export interface PlacedFurniture {
 }
 
 export interface ThreeSceneHandle {
-  /** raycast an NDC point (-1..1) onto the floor; returns world [x, z] */
-  floorPointFromNdc: (nx: number, ny: number) => [number, number] | null;
+  /** raycast an NDC point (-1..1) onto the floor or ceiling; returns world [x, z] */
+  floorPointFromNdc: (nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null;
   /** render the current view and return it as a PNG data-URL */
   captureImage: () => string | null;
   /** grayscale depth map of the current view (near = white), for
@@ -712,9 +712,6 @@ function cutsPerWall(
     const arr = map.get(idx) ?? [];
     // Stable per-opening key from its plan position (‰ coords, rounded).
     // Index would be unstable: re-analysing a plan can reorder openings and
-    // move a finish to the wrong door.
-    const key = `${op.type[0]}${Math.round(op.x)}_${Math.round(op.y)}`;
-    arr.push({ start: center - halfW, end: center + halfW, type: op.type, key });
     map.set(idx, arr);
   });
   return map;
@@ -741,17 +738,16 @@ function PlacementBridge({
   return null;
 }
 
-// ─── Walk Controls (Inside mode) ──────────────────────────────────────────────
-// First-person navigation: drag = look around (rotate the camera in place),
-// scroll = walk along the view direction, WASD/arrows = walk. No collision —
-// free flow through doorways and walls by design. Clamped to the plan area
-// and between floor and ceiling so users can't get lost.
 const EYE_HEIGHT = 1.6;
 
 function WalkControls({ world, active }: { world: World; active: boolean }) {
   const { camera, gl, controls } = useThree() as any;
-  const yaw = useRef(0);
-  const pitch = useRef(0);
+  const targetYaw = useRef(0);
+  const targetPitch = useRef(0);
+  const currentYaw = useRef(0);
+  const currentPitch = useRef(0);
+  const velocity = useRef(new THREE.Vector3());
+  const scrollImpulse = useRef(0);
   const keys = useRef<Record<string, boolean>>({});
   const look = useRef<{ x: number; y: number } | null>(null);
   const enter = useRef<null | {
@@ -763,7 +759,7 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     const bx = world.totalW * 0.9, bz = world.totalD * 0.9;
     p.x = Math.max(-bx, Math.min(bx, p.x));
     p.z = Math.max(-bz, Math.min(bz, p.z));
-    p.y = Math.max(0.4, Math.min(2.6, p.y));
+    p.y = Math.max(0.15, Math.min(WALL_H - 0.05, p.y));
   };
 
   // entering: glide down to eye height inside the plan, facing the interior
@@ -777,10 +773,16 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     const dir = new THREE.Vector3(-to.x, 0, -to.z);
     if (dir.lengthSq() < 0.01) dir.set(0, 0, -1);
     dir.normalize();
-    yaw.current = Math.atan2(-dir.x, -dir.z);
-    pitch.current = 0;
+    const initYaw = Math.atan2(-dir.x, -dir.z);
+    targetYaw.current = initYaw;
+    currentYaw.current = initYaw;
+    targetPitch.current = 0;
+    currentPitch.current = 0;
+    velocity.current.set(0, 0, 0);
+    scrollImpulse.current = 0;
+
     const toQ = new THREE.Quaternion()
-      .setFromEuler(new THREE.Euler(pitch.current, yaw.current, 0, "YXZ"));
+      .setFromEuler(new THREE.Euler(0, initYaw, 0, "YXZ"));
     enter.current = {
       from: camera.position.clone(), to,
       fromQ: camera.quaternion.clone(), toQ, t: 0,
@@ -805,16 +807,13 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
       const dx = e.clientX - look.current.x;
       const dy = e.clientY - look.current.y;
       look.current = { x: e.clientX, y: e.clientY };
-      yaw.current -= dx * 0.0045;
-      pitch.current = Math.max(-1.35, Math.min(1.35, pitch.current - dy * 0.0045));
+      targetYaw.current -= dx * 0.0035;
+      targetPitch.current = Math.max(-1.45, Math.min(1.45, targetPitch.current - dy * 0.0035));
     };
     const up = () => { look.current = null; };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      const fwd = new THREE.Vector3(0, 0, -1)
-        .applyEuler(new THREE.Euler(pitch.current, yaw.current, 0, "YXZ"));
-      camera.position.addScaledVector(fwd, -e.deltaY * 0.01);
-      clampPos(camera.position);
+      scrollImpulse.current += (e.deltaY > 0 ? -1 : 1) * 2.5;
     };
     const isTyping = (e: KeyboardEvent) =>
       e.target instanceof HTMLInputElement ||
@@ -823,8 +822,13 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     const keyHandler = (dn: boolean) => (e: KeyboardEvent) => {
       if (isTyping(e)) return;
       const k = e.key.toLowerCase();
-      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
+      const code = e.code.toLowerCase();
+      if (
+        ["w", "a", "s", "d", "e", "q", " ", "shift", "arrowup", "arrowdown", "arrowleft", "arrowright", "pageup", "pagedown"].includes(k) ||
+        ["space", "shiftleft", "shiftright"].includes(code)
+      ) {
         keys.current[k] = dn;
+        keys.current[code] = dn;
         e.preventDefault();
       }
     };
@@ -852,8 +856,6 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
 
   useFrame((_, delta) => {
     if (!active) return;
-    // hard-disable orbit while walking (furniture-drag handlers re-enable it
-    // on pointerup, so the prop alone isn't sufficient)
     if (controls) controls.enabled = false;
 
     const a = enter.current;
@@ -866,20 +868,48 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
       return;
     }
 
-    // keyboard walking, horizontal, relative to where you're facing
+    // Smooth rotation interpolation
+    const rotFactor = 1 - Math.exp(-22 * delta);
+    currentYaw.current += (targetYaw.current - currentYaw.current) * rotFactor;
+    currentPitch.current += (targetPitch.current - currentPitch.current) * rotFactor;
+
+    // Movement directions
     const k = keys.current;
     const mvF = (k["w"] || k["arrowup"] ? 1 : 0) - (k["s"] || k["arrowdown"] ? 1 : 0);
     const mvR = (k["d"] || k["arrowright"] ? 1 : 0) - (k["a"] || k["arrowleft"] ? 1 : 0);
-    if (mvF || mvR) {
-      const speed = 3.2 * delta;
-      const fwd = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current));
-      const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0));
-      camera.position.addScaledVector(fwd, mvF * speed);
-      camera.position.addScaledVector(right, mvR * speed);
-      clampPos(camera.position);
+    const mvU = (k["e"] || k[" "] || k["space"] || k["pageup"] ? 1 : 0) -
+                (k["q"] || k["shift"] || k["shiftleft"] || k["shiftright"] || k["pagedown"] ? 1 : 0);
+
+    const fwdHoriz = new THREE.Vector3(-Math.sin(currentYaw.current), 0, -Math.cos(currentYaw.current));
+    const rightHoriz = new THREE.Vector3().crossVectors(fwdHoriz, new THREE.Vector3(0, 1, 0));
+    const upVert = new THREE.Vector3(0, 1, 0);
+
+    // 3D view vector for scroll flight
+    const view3D = new THREE.Vector3(0, 0, -1)
+      .applyEuler(new THREE.Euler(currentPitch.current, currentYaw.current, 0, "YXZ"));
+
+    const moveSpeed = 3.8;
+    const targetVel = new THREE.Vector3();
+    targetVel.addScaledVector(fwdHoriz, mvF * moveSpeed);
+    targetVel.addScaledVector(rightHoriz, mvR * moveSpeed);
+    targetVel.addScaledVector(upVert, mvU * moveSpeed);
+
+    // Process scroll impulse
+    if (Math.abs(scrollImpulse.current) > 0.01) {
+      targetVel.addScaledVector(view3D, scrollImpulse.current * 1.5);
+      scrollImpulse.current *= Math.exp(-10 * delta);
+    } else {
+      scrollImpulse.current = 0;
     }
 
-    camera.quaternion.setFromEuler(new THREE.Euler(pitch.current, yaw.current, 0, "YXZ"));
+    // Smooth position velocity interpolation (inertia/damping)
+    const posFactor = 1 - Math.exp(-12 * delta);
+    velocity.current.lerp(targetVel, posFactor);
+
+    camera.position.addScaledVector(velocity.current, delta);
+    clampPos(camera.position);
+
+    camera.quaternion.setFromEuler(new THREE.Euler(currentPitch.current, currentYaw.current, 0, "YXZ"));
   }, -2);  // before drei's OrbitControls update (-1): our enabled=false must land first
 
   return null;
@@ -1152,6 +1182,13 @@ function SceneContent({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const dragStart = useRef<{ x: number; z: number } | null>(null);
   const dragArmed = useRef(false);
+  // detect whether the in-flight drag is a ceiling-mount (chandelier etc.)
+  // so the invisible drag plane can be placed at ceiling level.
+  const draggingItem = useMemo(
+    () => furniture.find(f => f.id === draggingId),
+    [furniture, draggingId],
+  );
+  const isDraggingCeiling = draggingItem?.mountType === "ceiling";
   useEffect(() => {
     const up = () => {
       setDraggingId(null);
@@ -1197,11 +1234,13 @@ function SceneContent({
         <meshStandardMaterial color="#eae7e0" roughness={1} />
       </mesh>
 
-      {/* invisible drag plane: active only while moving an item */}
+      {/* invisible drag plane: active only while moving an item.
+           Ceiling-mount items (chandeliers) use a plane at WALL_H so the
+           pointer tracks at the right height in Inside mode. */}
       {draggingId && (
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
-          position={[0, 0.001, 0]}
+          position={[0, isDraggingCeiling ? WALL_H - 0.001 : 0.001, 0]}
           visible={false}
           onPointerMove={(e) => {
             // the button must be HELD for anything to move: click = select
@@ -1306,15 +1345,15 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
     [roomWidthCm, roomDepthCm],
   );
   const controlsRef = useRef(null);
-  const raycastFn = useRef<((nx: number, ny: number) => [number, number] | null) | null>(null);
+  const raycastFn = useRef<((nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null) | null>(null);
   const exportApi = useRef<SceneExportApi | null>(null);
   const cameraViewFn = useRef<((v: CameraViewPreset) => void) | null>(null);
   const [insideMode, setInsideMode] = useState(false);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 
   useImperativeHandle(ref, () => ({
-    floorPointFromNdc: (nx: number, ny: number) =>
-      raycastFn.current ? raycastFn.current(nx, ny) : null,
+    floorPointFromNdc: (nx: number, ny: number, mountType?: "floor" | "ceiling") =>
+      raycastFn.current ? raycastFn.current(nx, ny, mountType) : null,
     captureImage: () =>
       exportApi.current ? exportApi.current.capture() : null,
     captureDepthMap: () =>
@@ -1395,11 +1434,12 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         />
       </Suspense>
       <OrbitControls ref={controlsRef} makeDefault
-        enableDamping dampingFactor={0.08}
+        enableDamping dampingFactor={0.05}
+        screenSpacePanning
         zoomToCursor
         target={[0, 1.1, 0]}
-        maxPolarAngle={Math.PI / 2.05} minDistance={3}
-        maxDistance={world.maxDim * 2.2}
+        maxPolarAngle={Math.PI / 2.02} minDistance={1.2}
+        maxDistance={world.maxDim * 2.5}
         enabled={!insideMode && !(walkthroughActive && !walkthroughPaused)} />
     </Canvas>
   );
