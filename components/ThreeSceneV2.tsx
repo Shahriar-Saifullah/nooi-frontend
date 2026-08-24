@@ -715,6 +715,15 @@ function cutsPerWall(
     const arr = map.get(idx) ?? [];
     // Stable per-opening key from its plan position (‰ coords, rounded).
     // Index would be unstable: re-analysing a plan can reorder openings and
+    const key = op.wall_id
+      ? `${op.wall_id}-${op.type}-${Math.round(op.x)}-${Math.round(op.y)}`
+      : `${op.type}-${Math.round(op.x)}-${Math.round(op.y)}`;
+    arr.push({
+      start: center - halfW,
+      end: center + halfW,
+      type: op.type,
+      key,
+    });
     map.set(idx, arr);
   });
   return map;
