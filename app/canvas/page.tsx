@@ -1132,7 +1132,7 @@ export default function CanvasPage() {
               ) : (
                 cameraView === "inside"
                   ? <><span>🖱 Drag to look</span><span>⚡ Scroll to fly</span><span>⌨ WASD to move</span><span>⬆ Q/E or Shift/Space for Up/Down</span></>
-                  : <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span></>
+                  : <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span><span>⌨ WASD / Arrows to shift camera</span></>
               )}
             </div>
           )}

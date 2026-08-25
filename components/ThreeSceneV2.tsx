@@ -1036,6 +1036,39 @@ function CameraRig({
     }
   }, [selectedFurnitureId, furniture, controls]);
 
+  const keys = useRef<Record<string, boolean>>({});
+  const velocity = useRef(new THREE.Vector3());
+
+  // Keyboard input listeners for 3D View camera position shifting (WASD, Arrows, Q/E, Space/Shift)
+  useEffect(() => {
+    if (suspended) return;
+    const isTyping = (e: KeyboardEvent) =>
+      e.target instanceof HTMLInputElement ||
+      e.target instanceof HTMLTextAreaElement ||
+      (e.target as HTMLElement)?.isContentEditable;
+
+    const handleKey = (dn: boolean) => (e: KeyboardEvent) => {
+      if (isTyping(e)) return;
+      const k = e.key.toLowerCase();
+      const code = e.code.toLowerCase();
+      if (
+        ["w", "a", "s", "d", "e", "q", " ", "shift", "arrowup", "arrowdown", "arrowleft", "arrowright", "pageup", "pagedown"].includes(k) ||
+        ["space", "shiftleft", "shiftright"].includes(code)
+      ) {
+        keys.current[k] = dn;
+        keys.current[code] = dn;
+      }
+    };
+    const kd = handleKey(true), ku = handleKey(false);
+    window.addEventListener("keydown", kd);
+    window.addEventListener("keyup", ku);
+    return () => {
+      window.removeEventListener("keydown", kd);
+      window.removeEventListener("keyup", ku);
+      keys.current = {};
+    };
+  }, [suspended]);
+
   // any manual interaction cancels animations + stops auto-reframing
   useEffect(() => {
     if (!controls) return;
@@ -1056,6 +1089,46 @@ function CameraRig({
 
   useFrame((_, delta) => {
     if (suspended) { anim.current = null; return; }
+
+    // Keyboard camera position shifting (WASD / Arrows / Q / E / Space / Shift)
+    const k = keys.current;
+    const mvF = (k["w"] || k["arrowup"] ? 1 : 0) - (k["s"] || k["arrowdown"] ? 1 : 0);
+    const mvR = (k["d"] || k["arrowright"] ? 1 : 0) - (k["a"] || k["arrowleft"] ? 1 : 0);
+    const mvU = (k["e"] || k[" "] || k["space"] || k["pageup"] ? 1 : 0) -
+                (k["q"] || k["shift"] || k["shiftleft"] || k["shiftright"] || k["pagedown"] ? 1 : 0);
+
+    if (mvF !== 0 || mvR !== 0 || mvU !== 0) {
+      anim.current = null;
+      userTouched.current = true;
+
+      const fwd = new THREE.Vector3();
+      camera.getWorldDirection(fwd);
+      const fwdHoriz = new THREE.Vector3(fwd.x, 0, fwd.z);
+      if (fwdHoriz.lengthSq() < 1e-4) fwdHoriz.set(0, 0, -1);
+      else fwdHoriz.normalize();
+
+      const rightHoriz = new THREE.Vector3().crossVectors(fwdHoriz, new THREE.Vector3(0, 1, 0)).normalize();
+      const upVert = new THREE.Vector3(0, 1, 0);
+
+      const moveSpeed = Math.max(4.5, world.maxDim * 0.45);
+      const targetVel = new THREE.Vector3();
+      targetVel.addScaledVector(fwdHoriz, mvF * moveSpeed);
+      targetVel.addScaledVector(rightHoriz, mvR * moveSpeed);
+      targetVel.addScaledVector(upVert, mvU * moveSpeed);
+
+      const posFactor = 1 - Math.exp(-14 * delta);
+      velocity.current.lerp(targetVel, posFactor);
+
+      const deltaPos = velocity.current.clone().multiplyScalar(delta);
+      camera.position.add(deltaPos);
+      if (controls) {
+        controls.target.add(deltaPos);
+        controls.update();
+      }
+    } else {
+      velocity.current.set(0, 0, 0);
+    }
+
     // preset / focus animation
     const a = anim.current;
     if (a && controls) {
@@ -1069,10 +1142,10 @@ function CameraRig({
     // Soft pan guard rails — smooth spring pull back if target strays outside bounds
     if (controls && !anim.current) {
       const t = controls.target;
-      const bx = world.totalW * 1.15;
-      const bz = world.totalD * 1.15;
-      const maxY = WALL_H * 1.5;
-      const minY = 0.0;
+      const bx = world.totalW * 1.35;
+      const bz = world.totalD * 1.35;
+      const maxY = WALL_H * 2.0;
+      const minY = -0.5;
 
       const pullFactor = 1 - Math.exp(-12 * delta);
 
@@ -1521,13 +1594,13 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         dampingFactor={0.08}
         rotateSpeed={0.85}
         zoomSpeed={0.95}
-        panSpeed={0.95}
-        screenSpacePanning
+        panSpeed={1.15}
+        screenSpacePanning={false}
         zoomToCursor
         target={[0, 1.1, 0]}
         maxPolarAngle={Math.PI / 2.02}
         minDistance={0.8}
-        maxDistance={world.maxDim * 3.0}
+        maxDistance={world.maxDim * 3.5}
         enabled={!insideMode && !(walkthroughActive && !walkthroughPaused)} />
     </Canvas>
   );
