@@ -1,44 +1,45 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Render product-style thumbnails for every .glb in the model library
+# Render catalog thumbnails for every .glb in the model library
 #
-# Why not generate these in the browser? Two reasons:
-#  1. Converted assets use Draco/meshopt compression, which the runtime
-#     thumbnail loader can't decode — those items fall back to a grey box.
-#  2. Runtime previews mean downloading multi-MB models just to draw a 100px
-#     card, with lighting and framing that vary per model.
+# Deliberately simple: one camera, three lights, no backdrop or floor geometry.
+# An earlier version added a gradient backdrop and a shadow-catching floor to
+# make the shots prettier; both broke framing (GLB imports are parented to a
+# rotation empty, so shifting meshes and adding scene geometry put the camera
+# inside the backdrop). Clean and correct beats fancy and wrong.
 #
-# Pre-rendering gives consistent three-point lighting, consistent framing, and
-# a ~20KB WebP per item. This is how furniture retailers do it.
+# Note Blender's glTF importer reads Draco but NOT meshopt, which
+# convert-asset.sh applies — so each model is round-tripped through
+# gltf-transform first to decode it.
 #
 # ── Usage ────────────────────────────────────────────────────────────────────
-#   ./render-thumbs.sh [models-dir] [output-dir] [size]
-#   ./render-thumbs.sh public/models public/models/thumbs 512
+#   ./render-thumbs.sh [models-dir] [output-dir] [size] [bg]
+#   ./render-thumbs.sh public/models public/models/thumbs 512 transparent
 #
-# Output filenames match the .glb basename, so a model at
-#   public/models/decor/vase_ceramic.glb
-# becomes
-#   public/models/thumbs/vase_ceramic.webp
+# A model at models/<any>/foo.glb becomes models/thumbs/foo.webp, which the
+# furniture library picks up by convention — no catalog edits needed.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 MODELS="${1:-public/models}"
 OUT="${2:-public/models/thumbs}"
 SIZE="${3:-512}"
+BG="${4:-transparent}"        # transparent | white
 
 mkdir -p "$OUT"
 TMP="$(mktemp -d)"
 
 cat > "$TMP/thumbs.py" <<'PY'
-import bpy, sys, os, math, glob
+import bpy, sys, os, math, glob, shutil
 from mathutils import Vector
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 models_dir, out_dir, size = argv[0], argv[1], int(argv[2])
+bg = argv[3] if len(argv) > 3 else "transparent"
 
 files = sorted(
     f for f in glob.glob(os.path.join(models_dir, "**", "*.glb"), recursive=True)
-    if "_decoded" not in f          # our own scratch copies
+    if "_decoded" not in f
 )
 print(f"[thumbs] found {len(files)} models")
 
@@ -51,36 +52,41 @@ def setup_scene():
     scene.render.engine = "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engines \
                           else "BLENDER_EEVEE"
     scene.render.resolution_x = scene.render.resolution_y = size
-    scene.render.film_transparent = True          # works on light or dark cards
+    scene.render.film_transparent = (bg == "transparent")
     scene.render.image_settings.file_format = "WEBP"
     scene.render.image_settings.quality = 90
     scene.render.image_settings.color_mode = "RGBA"
 
-    # soft ambient so nothing is pitch black
+    # Ambient fill. The first pass used 0.55 against a pure-white world, which
+    # flattened every model into pale clay. Lower ambient plus a much stronger
+    # key is what gives the shapes definition.
     world = bpy.data.worlds.new("w")
     world.use_nodes = True
-    world.node_tree.nodes["Background"].inputs[0].default_value = (1, 1, 1, 1)
-    world.node_tree.nodes["Background"].inputs[1].default_value = 0.55
+    bgn = world.node_tree.nodes["Background"]
+    bgn.inputs[0].default_value = (0.96, 0.96, 0.98, 1)
+    bgn.inputs[1].default_value = 0.30
     scene.world = world
 
-    # three-point-ish lighting: key, fill, rim
-    def add_light(name, kind, energy, loc, rot, size_=5.0):
-        d = bpy.data.lights.new(name, type=kind)
+    def add_light(name, energy, loc, rot, size_, colour):
+        d = bpy.data.lights.new(name, type="AREA")
         d.energy = energy
-        if kind == "AREA":
-            d.size = size_
+        d.size = size_
+        d.color = colour
         o = bpy.data.objects.new(name, d)
         o.location = loc
         o.rotation_euler = rot
         scene.collection.objects.link(o)
-        return o
 
-    add_light("key",  "AREA", 400, (3, -3, 4), (math.radians(50), 0, math.radians(45)), 6)
-    add_light("fill", "AREA", 120, (-3, -2, 2), (math.radians(70), 0, math.radians(-50)), 6)
-    add_light("rim",  "AREA", 180, (0, 3.5, 3), (math.radians(120), 0, 0), 5)
+    # ~5:1 key-to-fill. Even lighting reads as flat; contrast reads as form.
+    add_light("key",  900, (3.2, -3.4, 4.2),
+              (math.radians(48), 0, math.radians(42)), 5, (1.00, 0.97, 0.92))
+    add_light("fill", 180, (-3.6, -2.2, 1.8),
+              (math.radians(74), 0, math.radians(-52)), 7, (0.92, 0.95, 1.00))
+    add_light("rim",  320, (0.4, 3.6, 3.2),
+              (math.radians(122), 0, 0), 4, (1.00, 1.00, 1.00))
 
     cam_d = bpy.data.cameras.new("cam")
-    cam_d.lens = 60                                # mild telephoto: less distortion
+    cam_d.lens = 60                       # mild telephoto: less distortion
     cam = bpy.data.objects.new("cam", cam_d)
     scene.collection.objects.link(cam)
     scene.camera = cam
@@ -97,6 +103,23 @@ def bounds(objs):
                 lo[i] = min(lo[i], w[i]); hi[i] = max(hi[i], w[i])
     return lo, hi
 
+def warm_untextured(meshes):
+    """Imports with no texture arrive near-white and read as plaster. Give
+    those a warm neutral so they look like furniture. Textured materials, and
+    ones that already carry a real colour, are left alone."""
+    for o in meshes:
+        for slot in o.material_slots:
+            m = slot.material
+            if not m or not m.use_nodes:
+                continue
+            bsdf = m.node_tree.nodes.get("Principled BSDF")
+            if not bsdf or bsdf.inputs["Base Color"].is_linked:
+                continue
+            c = bsdf.inputs["Base Color"].default_value
+            if min(c[0], c[1], c[2]) > 0.78:
+                bsdf.inputs["Base Color"].default_value = (0.72, 0.66, 0.58, 1)
+                bsdf.inputs["Roughness"].default_value = 0.75
+
 decoded_dir = os.path.join(out_dir, "_decoded")
 os.makedirs(decoded_dir, exist_ok=True)
 
@@ -105,15 +128,12 @@ for path in files:
     name = os.path.splitext(os.path.basename(path))[0]
     dest = os.path.join(out_dir, f"{name}.webp")
 
-    # Blender's glTF importer reads Draco but NOT meshopt (EXT_meshopt_
-    # compression), which is the final step of convert-asset.sh. Round-tripping
-    # through gltf-transform decodes it into plain buffers first.
+    # decode meshopt/Draco into plain buffers Blender can read
     plain = os.path.join(decoded_dir, f"{name}.glb")
     if not os.path.exists(plain):
         rc = os.system(f'gltf-transform cp "{path}" "{plain}" >/dev/null 2>&1')
         if rc != 0 or not os.path.exists(plain):
-            import shutil
-            shutil.copy(path, plain)      # not compressed after all
+            shutil.copy(path, plain)
 
     scene, cam = setup_scene()
     try:
@@ -129,13 +149,16 @@ for path in files:
         skipped += 1
         continue
 
+    warm_untextured(meshes)
+
     lo, hi = bounds(meshes)
     centre = (lo + hi) / 2
     radius = max((hi - lo).length / 2, 1e-3)
 
-    # 3/4 view from slightly above — reads better than a flat elevation
-    direction = Vector((1.0, -1.35, 0.72)).normalized()
-    cam.location = centre + direction * (radius * 2.9)
+    # 3/4 view from slightly above. 2.5x fills the card without cropping
+    # wide items such as a 4.4 m sectional.
+    direction = Vector((1.0, -1.4, 0.68)).normalized()
+    cam.location = centre + direction * (radius * 2.5)
     cam.rotation_euler = (centre - cam.location).to_track_quat("-Z", "Y").to_euler()
 
     scene.render.filepath = dest
@@ -143,18 +166,14 @@ for path in files:
     print(f"[thumbs] {name}.webp")
     done += 1
 
-import shutil
 shutil.rmtree(decoded_dir, ignore_errors=True)
 print(f"[thumbs] rendered {done}, skipped {skipped}")
 PY
 
 blender --background --factory-startup --python "$TMP/thumbs.py" -- \
-        "$MODELS" "$OUT" "$SIZE"
+        "$MODELS" "$OUT" "$SIZE" "$BG"
 rm -rf "$TMP"
 
 echo
 echo "✅ Thumbnails in $OUT"
 du -sh "$OUT" 2>/dev/null || true
-echo
-echo "The library picks these up automatically: a model at models/<any>/foo.glb"
-echo "uses models/thumbs/foo.webp if it exists, else falls back to runtime render."
