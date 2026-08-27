@@ -1346,7 +1346,7 @@ function SceneContent({
   }, [doorKeysSig]);
 
   // ── drag-to-move: press on the selected item, drag along the floor ──
-  const { controls } = useThree() as any;
+  const { controls, camera, gl } = useThree() as any;
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const dragStart = useRef<{ x: number; z: number } | null>(null);
   const dragArmed = useRef(false);
@@ -1376,6 +1376,49 @@ function SceneContent({
       window.removeEventListener("blur", up);
     };
   }, [controls]);
+
+  // Ceiling drag path.
+  // Floor items drag via the invisible plane mesh below, which works because
+  // nothing sits between the camera and the floor. At ceiling height that mesh
+  // does not reliably receive R3F pointer events, so ceiling mounts are dragged
+  // with a direct raycast instead — the same approach the drop path already
+  // uses successfully via floorPointFromNdc(..., "ceiling").
+  useEffect(() => {
+    if (!draggingId || !isDraggingCeiling) return;
+    const el = gl.domElement as HTMLCanvasElement;
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WALL_H);
+    const ray = new THREE.Raycaster();
+    const hit = new THREE.Vector3();
+
+    const move = (e: PointerEvent) => {
+      if ((e.buttons ?? 0) === 0) {
+        setDraggingId(null);
+        dragStart.current = null;
+        dragArmed.current = false;
+        (window as any).__nooiFurnitureDrag = false;
+        if (controls && !(window as any).__nooiWalkMode) controls.enabled = true;
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      if (!ray.ray.intersectPlane(plane, hit)) return;
+
+      if (!dragStart.current) {
+        dragStart.current = { x: hit.x, z: hit.z };
+        return;
+      }
+      if (!dragArmed.current) {
+        if (Math.hypot(hit.x - dragStart.current.x, hit.z - dragStart.current.z) < 0.06) return;
+        dragArmed.current = true;
+      }
+      onFurnitureMove?.(draggingId, [hit.x, 0, hit.z]);
+    };
+
+    window.addEventListener("pointermove", move);
+    return () => window.removeEventListener("pointermove", move);
+  }, [draggingId, isDraggingCeiling, camera, gl, controls, onFurnitureMove]);
 
   const startDrag = (id: string) => {
     setDraggingId(id);
@@ -1407,7 +1450,7 @@ function SceneContent({
       {/* invisible drag plane: active only while moving an item.
            Ceiling-mount items (chandeliers) use a plane at WALL_H so the
            pointer tracks at the right height in Inside mode. */}
-      {draggingId && (
+      {draggingId && !isDraggingCeiling && (
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
           position={[0, isDraggingCeiling ? WALL_H - 0.001 : 0.001, 0]}
