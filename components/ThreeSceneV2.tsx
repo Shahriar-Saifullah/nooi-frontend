@@ -575,9 +575,33 @@ function GltfModel({
   const clone = useMemo(() => scene.clone(true), [scene]);
   const group = useRef<THREE.Group>(null);
 
+  // The model's size in ITS OWN local space, independent of whatever scale the
+  // parent group currently carries.
+  //
+  // This must not use Box3.setFromObject(clone): that measures WORLD bounds,
+  // and `clone` lives inside the group that already has fit.scale applied. So
+  // each resize measured the already-scaled model and divided again, shrinking
+  // it toward zero — the "furniture disappears while resizing" bug (NOOI-15).
+  const baseSize = useMemo(() => {
+    const box = new THREE.Box3();
+    const tmp = new THREE.Matrix4();
+    clone.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(clone.matrixWorld).invert();
+    clone.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!(mesh as any).isMesh || !mesh.geometry) return;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      const b = mesh.geometry.boundingBox!.clone();
+      tmp.multiplyMatrices(inv, mesh.matrixWorld);
+      b.applyMatrix4(tmp);
+      box.union(b);
+    });
+    return box;
+  }, [clone]);
+
   // auto-scale the raw model to the catalog real-world size (m), * sizeScale
   const fit = useMemo(() => {
-    const box = new THREE.Box3().setFromObject(clone);
+    const box = baseSize;
     const size = box.getSize(new THREE.Vector3());
     const s = item.sizeScale ?? 1;
     const tw = (cat!.size.w / 100) * s;
@@ -596,7 +620,7 @@ function GltfModel({
       ? WALL_H - maxY
       : -minY;
     return { scale: [sx, sy, sz] as [number, number, number], yOffset, mountType };
-  }, [clone, cat, item.sizeScale, item.mountType]);
+  }, [baseSize, cat, item.sizeScale, item.mountType]);
 
   useEffect(() => { applyOverrides(clone, item, selected); },
     [clone, item.color, item.materialPreset, selected, item]);
@@ -1410,7 +1434,11 @@ function SceneContent({
               if (Math.hypot(dx, dz) < 0.06) return;  // click jitter — ignore
               dragArmed.current = true;
             }
-            onFurnitureMove?.(draggingId, [e.point.x, 0, e.point.z]);
+            // Preserve the item's own height while dragging. Ceiling mounts
+            // get their height from mountType at render time, but zeroing Y
+            // here also wiped any surface height a floor item was resting on.
+            const keepY = isDraggingCeiling ? 0 : (draggingItem?.position[1] ?? 0);
+            onFurnitureMove?.(draggingId, [e.point.x, keepY, e.point.z]);
           }}
         >
           <planeGeometry args={[world.totalW * 3, world.totalD * 3]} />

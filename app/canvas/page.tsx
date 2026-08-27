@@ -356,8 +356,12 @@ export default function CanvasPage() {
   const handleFurnitureMove = (id: string, position: [number, number, number]) => {
     setPlacedFurniture(prev => prev.map(f => {
       if (f.id !== id) return f;
-      // re-evaluate support as it moves: drag a vase onto a table and it
-      // climbs; drag it off and it drops back to the floor
+      // Ceiling / wall mounts keep whatever the scene gave us — their height
+      // comes from mountType, not from a supporting surface.
+      const mt = f.mountType ?? "floor";
+      if (mt !== "floor") return { ...f, position };
+      // floor items re-evaluate support as they move: drag a vase onto a
+      // table and it climbs; drag it off and it drops back to the floor
       const y = supportHeightAt(position[0], position[2], f, id);
       return { ...f, position: [position[0], y, position[2]] as [number, number, number] };
     }));
