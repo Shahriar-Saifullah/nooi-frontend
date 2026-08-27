@@ -9,6 +9,9 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
+import {
+  snapToWall, resolveCollision, type WorldWall, type Footprint,
+} from "@/lib/placement/snap";
 import { doorFinishById } from "@/lib/surfaces/doors";
 import { getFaceTextures, getDoorTexture, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
@@ -120,6 +123,8 @@ interface ThreeSceneV2Props {
   onWallSelect?: (sel: WallSideSelection | null) => void;
   onFurnitureSelect?: (id: string | null) => void;
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
+  /** fired when wall-snapping re-orients an item so its back faces the wall */
+  onFurnitureRotate?: (id: string, rotation: number) => void;
   selectedFurnitureId?: string | null;
   walkthroughActive?: boolean;
   walkthroughPaused?: boolean;
@@ -753,24 +758,96 @@ function cutsPerWall(
   return map;
 }
 
+// ─── Placement validity ──────────────────────────────────────────────────────
+// "Is this position inside the building?" — the first piece of the shared
+// snap/adjacency work. Ceiling mounts use it today (a chandelier cannot hang
+// over open ground); the same helper can back collision and wall-snapping.
+
+/** room outlines in WORLD coordinates */
+export function roomPolysWorld(rooms: PolyRoom[], world: World): [number, number][][] {
+  const out: [number, number][][] = [];
+  for (const r of rooms) {
+    if (r.polygon && r.polygon.length >= 3) {
+      out.push(r.polygon.map(([x, y]) => [world.px(x), world.pz(y)] as [number, number]));
+    } else if (r.box) {
+      const x0 = world.px(r.box.left), z0 = world.pz(r.box.top);
+      const x1 = world.px(r.box.left + r.box.width);
+      const z1 = world.pz(r.box.top + r.box.height);
+      out.push([[x0, z0], [x1, z0], [x1, z1], [x0, z1]]);
+    }
+  }
+  return out;
+}
+
+function pointInPoly(x: number, z: number, poly: [number, number][]) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Clamp a world point into the nearest room. Returns the point unchanged when
+ * it is already inside one; otherwise projects it onto the closest room edge
+ * and nudges it just inside, so an item dragged past the walls stops at them
+ * instead of floating off into open space.
+ */
+export function clampIntoRooms(
+  x: number, z: number, polys: [number, number][][],
+): [number, number] {
+  if (polys.length === 0) return [x, z];
+  for (const p of polys) if (pointInPoly(x, z, p)) return [x, z];
+
+  let bx = x, bz = z, best = Infinity;
+  for (const p of polys) {
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      const [ax, az] = p[j], [cx, cz] = p[i];
+      const dx = cx - ax, dz = cz - az;
+      const len2 = dx * dx + dz * dz || 1e-9;
+      let t = ((x - ax) * dx + (z - az) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const px = ax + dx * t, pz = az + dz * t;
+      const d = (x - px) ** 2 + (z - pz) ** 2;
+      if (d < best) { best = d; bx = px; bz = pz; }
+    }
+  }
+  // pull a few centimetres inside so it is unambiguously within the room
+  const cx = polys.flat().reduce((s, p) => s + p[0], 0) / polys.flat().length;
+  const cz = polys.flat().reduce((s, p) => s + p[1], 0) / polys.flat().length;
+  const vx = cx - bx, vz = cz - bz;
+  const vl = Math.hypot(vx, vz) || 1;
+  return [bx + (vx / vl) * 0.05, bz + (vz / vl) * 0.05];
+}
+
 // ─── Scene ───────────────────────────────────────────────────────────────────
 
 // Registers a raycast helper for external drop placement (via the handle)
 function PlacementBridge({
-  register,
-}: { register: (fn: (nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null) => void }) {
+  register, rooms, world,
+}: {
+  register: (fn: (nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null) => void;
+  rooms: PolyRoom[];
+  world: World;
+}) {
   const { camera } = useThree();
   useEffect(() => {
     const ray = new THREE.Raycaster();
     const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const ceilingPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), WALL_H);
     const hit = new THREE.Vector3();
+    const polys = roomPolysWorld(rooms, world);
     register((nx, ny, mountType = "floor") => {
       ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
       const targetPlane = mountType === "ceiling" ? ceilingPlane : floorPlane;
-      return ray.ray.intersectPlane(targetPlane, hit) ? [hit.x, hit.z] : null;
+      if (!ray.ray.intersectPlane(targetPlane, hit)) return null;
+      // A ceiling mount must land under an actual ceiling, so a drop outside
+      // the building is pulled to the nearest room rather than left floating.
+      if (mountType === "ceiling") return clampIntoRooms(hit.x, hit.z, polys);
+      return [hit.x, hit.z];
     });
-  }, [camera, register]);
+  }, [camera, register, rooms, world]);
   return null;
 }
 
@@ -1307,7 +1384,7 @@ function ExportBridge({
 
 function SceneContent({
   rooms, rfWalls, openings, furniture, world,
-  onFurnitureSelect, onFurnitureMove, selectedFurnitureId,
+  onFurnitureSelect, onFurnitureMove, onFurnitureRotate, selectedFurnitureId,
   wallColors, wallSurfaces, selectedWallSide, onWallSelect,
   doorFinishes, selectedDoorKey, onDoorSelect, onDoorKeys,
   insideMode = false,
@@ -1316,6 +1393,8 @@ function SceneContent({
   world: World;
   onFurnitureSelect?: (id: string | null) => void;
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
+  /** fired when wall-snapping re-orients an item so its back faces the wall */
+  onFurnitureRotate?: (id: string, rotation: number) => void;
   selectedFurnitureId?: string | null;
   wallColors?: Record<string, string>;
   wallSurfaces?: Record<string, string>;
@@ -1385,6 +1464,7 @@ function SceneContent({
   // uses successfully via floorPointFromNdc(..., "ceiling").
   useEffect(() => {
     if (!draggingId || !isDraggingCeiling) return;
+    const ceilingPolys = roomPolysWorld(rooms, world);
     const el = gl.domElement as HTMLCanvasElement;
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WALL_H);
     const ray = new THREE.Raycaster();
@@ -1413,12 +1493,23 @@ function SceneContent({
         if (Math.hypot(hit.x - dragStart.current.x, hit.z - dragStart.current.z) < 0.06) return;
         dragArmed.current = true;
       }
-      onFurnitureMove?.(draggingId, [hit.x, 0, hit.z]);
+      // a chandelier cannot hang outside the building
+      const [cx, cz] = clampIntoRooms(hit.x, hit.z, ceilingPolys);
+      onFurnitureMove?.(draggingId, [cx, 0, cz]);
     };
 
     window.addEventListener("pointermove", move);
     return () => window.removeEventListener("pointermove", move);
-  }, [draggingId, isDraggingCeiling, camera, gl, controls, onFurnitureMove]);
+  }, [draggingId, isDraggingCeiling, camera, gl, controls, onFurnitureMove, rooms, world]);
+
+  // Walls in world space for the snap engine. VWall stores percentages of the
+  // source image; thickness is a percentage of the larger image dimension.
+  const worldWalls = useMemo<WorldWall[]>(() => rfWalls.map((w, i) => ({
+    x1: world.px(w.x1), z1: world.pz(w.y1),
+    x2: world.px(w.x2), z2: world.pz(w.y2),
+    thickness: (w.thickness / 100) * world.maxDim,
+    id: w.id ?? `wi${i}`,
+  })), [rfWalls, world]);
 
   const startDrag = (id: string) => {
     setDraggingId(id);
@@ -1481,7 +1572,38 @@ function SceneContent({
             // get their height from mountType at render time, but zeroing Y
             // here also wiped any surface height a floor item was resting on.
             const keepY = isDraggingCeiling ? 0 : (draggingItem?.position[1] ?? 0);
-            onFurnitureMove?.(draggingId, [e.point.x, keepY, e.point.z]);
+            // NOOI-17: snap to a nearby wall, then push clear of anything
+            // it would overlap. Both are no-ops when nothing is close, so a
+            // free-standing item still follows the pointer exactly.
+            let nx = e.point.x, nz = e.point.z, rot = draggingItem?.rotation ?? 0;
+            const dw = (draggingItem?.width ?? 0) / 100;
+            const dd = (draggingItem?.depth ?? 0) / 100;
+
+            if (dw > 0 && dd > 0) {
+              const snap = snapToWall(
+                { x: nx, z: nz, w: dw, d: dd, rotation: rot, id: draggingId },
+                worldWalls,
+              );
+              nx = snap.x; nz = snap.z;
+              if (snap.snapped) rot = snap.rotation;
+
+              const others: Footprint[] = furniture
+                .filter(f => f.id !== draggingId && (f.mountType ?? "floor") === "floor")
+                .map(f => ({
+                  x: f.position[0], z: f.position[2],
+                  w: (f.width ?? 0) / 100, d: (f.depth ?? 0) / 100,
+                  rotation: f.rotation ?? 0, id: f.id,
+                }))
+                .filter(f => f.w > 0 && f.d > 0);
+
+              const solved = resolveCollision(
+                { x: nx, z: nz, w: dw, d: dd, rotation: rot, id: draggingId }, others,
+              );
+              nx = solved.x; nz = solved.z;
+            }
+
+            onFurnitureMove?.(draggingId, [nx, keepY, nz]);
+            if (rot !== (draggingItem?.rotation ?? 0)) onFurnitureRotate?.(draggingId, rot);
           }}
         >
           <planeGeometry args={[world.totalW * 3, world.totalD * 3]} />
@@ -1560,6 +1682,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   onWallSelect,
   onFurnitureSelect,
   onFurnitureMove,
+  onFurnitureRotate,
   selectedFurnitureId = null,
   walkthroughActive = false,
   walkthroughPaused = false,
@@ -1616,7 +1739,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         position={[-world.totalW, world.maxDim, -world.totalD]}
         intensity={0.3}
       />
-      <PlacementBridge register={(fn) => { raycastFn.current = fn; }} />
+      <PlacementBridge register={(fn) => { raycastFn.current = fn; }}
+                       rooms={rooms} world={world} />
       <ExportBridge register={(api) => { exportApi.current = api; }} world={world} />
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
       <SurfaceTextureRefresh />
@@ -1649,6 +1773,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           insideMode={insideMode}
           onFurnitureSelect={onFurnitureSelect}
           onFurnitureMove={onFurnitureMove}
+          onFurnitureRotate={onFurnitureRotate}
           selectedFurnitureId={selectedFurnitureId}
           wallColors={wallColors}
           wallSurfaces={wallSurfaces}
