@@ -18,6 +18,10 @@ import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
 import {
+  snapToWall, resolveCollision, prefersWall, pointInPoly,
+  type WorldWall, type Footprint, type Poly,
+} from "@/lib/placement/snap";
+import {
   WALL_SURFACES, SURFACE_CATEGORY_LABELS, activeSurfaceCategories,
   type SurfaceCategory,
 } from "@/lib/surfaces/catalog";
@@ -353,6 +357,11 @@ export default function CanvasPage() {
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [placedFurniture, wallColors, wallSurfaces, doorFinishes, currentProject?.id]);
 
+  // Wall snapping can re-orient an item so its back faces the wall.
+  const handleFurnitureRotate = (id: string, rotation: number) => {
+    setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, rotation } : f));
+  };
+
   const handleFurnitureMove = (id: string, position: [number, number, number]) => {
     setPlacedFurniture(prev => prev.map(f => {
       if (f.id !== id) return f;
@@ -596,19 +605,55 @@ export default function CanvasPage() {
       });
       const stamp = Date.now();
       const newItems: PlacedFurniture[] = [];
+
+      // NOOI-16: the model reasons about a room as a rectangle and tends to
+      // leave beds and wardrobes floating near the middle. Pull anything that
+      // belongs against a wall onto the nearest one, then settle overlaps —
+      // furniture marooned mid-room is the clearest sign a machine placed it.
+      const walls = worldWalls();
+      const settled: Footprint[] = placedFurniture
+        .filter(f => (f.mountType ?? "floor") === "floor")
+        .map(f => ({
+          x: f.position[0], z: f.position[2],
+          w: (f.width ?? 0) / 100, d: (f.depth ?? 0) / 100,
+          rotation: f.rotation ?? 0, id: f.id,
+        }))
+        .filter(f => f.w > 0 && f.d > 0);
+
       data.placements.forEach((p, i) => {
         const cat = catalogById(p.modelId);
         if (!cat) return;
+
+        const id = `${cat.id}-${stamp}-${i}`;
+        let fp: Footprint = {
+          x: p.x, z: p.z,
+          w: cat.size.w / 100, d: cat.size.d / 100,
+          rotation: (p.rotation * Math.PI) / 180,
+          id,
+        };
+
+        if (walls.length > 0 && prefersWall(cat.name, cat.typeId)) {
+          // Generous threshold: the AI puts these roughly right, just not
+          // touching. Free-standing pieces (coffee table, rug) are untouched.
+          const snap = snapToWall(fp, walls, 1.2);
+          if (snap.snapped) fp = { ...fp, x: snap.x, z: snap.z, rotation: snap.rotation };
+        }
+
+        // keep clear of what is already down, including earlier items in
+        // this same batch
+        fp = resolveCollision(fp, settled);
+        settled.push(fp);
+
         newItems.push({
-          id: `${cat.id}-${stamp}-${i}`,
+          id,
           modelId: cat.id,
           name: cat.name,
           // AI returns floor coordinates; lift small items onto any surface
           // they land on, same as a manual drop
-          position: [p.x, supportHeightAt(p.x, p.z, {
+          position: [fp.x, supportHeightAt(fp.x, fp.z, {
             width: cat.size.w, depth: cat.size.d, mountType: (cat as any).mountType,
-          }), p.z],
-          rotation: (p.rotation * Math.PI) / 180,
+          }), fp.z],
+          rotation: fp.rotation,
           sizeScale: 1,
           color: null,
           materialPreset: null,
@@ -616,6 +661,7 @@ export default function CanvasPage() {
           width: cat.size.w,
           depth: cat.size.d,
           height: cat.size.h,
+          mountType: (cat as any).mountType,
         });
       });
       if (newItems.length === 0) throw new Error("No furniture could be placed — try rephrasing.");
@@ -720,6 +766,112 @@ export default function CanvasPage() {
     }
     return true;
   };
+
+  // Walls in world space, same conversion the 3D scene uses.
+  const worldWalls = (): WorldWall[] => {
+    const totalW = roomDimensionsCm.width / 100;
+    const totalD = roomDimensionsCm.depth / 100;
+    const maxDim = Math.max(totalW, totalD);
+    return rfWalls.map((w, i) => ({
+      x1: (w.x1 / 100) * totalW - totalW / 2,
+      z1: (w.y1 / 100) * totalD - totalD / 2,
+      x2: (w.x2 / 100) * totalW - totalW / 2,
+      z2: (w.y2 / 100) * totalD - totalD / 2,
+      thickness: (w.thickness / 100) * maxDim,
+      id: `wi${i}`,
+    }));
+  };
+
+  // ── NOOI-19: re-validate placements after a layout change ─────────────────
+  // Editing walls, resizing rooms or re-analysing a plan can leave furniture
+  // stranded inside a wall, outside the building, or overlapping. Rather than
+  // silently leaving a broken scene, everything is re-settled with the same
+  // rules used during manual placement, and the user is told what moved.
+  const layoutSig = useRef<string>("");
+  const [revalidateNote, setRevalidateNote] = useState<string | null>(null);
+
+  const revalidatePlacements = () => {
+    const walls = worldWalls();
+    const polys: Poly[] = roomWorldRects()
+      .map(r => r.polygon ?? [
+        [r.rect.x, r.rect.z],
+        [r.rect.x + r.rect.w, r.rect.z],
+        [r.rect.x + r.rect.w, r.rect.z + r.rect.d],
+        [r.rect.x, r.rect.z + r.rect.d],
+      ] as Poly);
+    if (polys.length === 0) return;
+
+    let moved = 0;
+    setPlacedFurniture(prev => {
+      const settled: Footprint[] = [];
+      const next = prev.map(f => {
+        // ceiling and wall mounts get their position from mountType
+        if ((f.mountType ?? "floor") !== "floor") return f;
+        const w = (f.width ?? 0) / 100, d = (f.depth ?? 0) / 100;
+        if (!w || !d) return f;
+
+        let fp: Footprint = {
+          x: f.position[0], z: f.position[2],
+          w, d, rotation: f.rotation ?? 0, id: f.id,
+        };
+
+        // still inside a room?
+        const inside = polys.some(p => pointInPoly(fp.x, fp.z, p));
+        if (!inside) {
+          // nearest room centroid is a predictable, explainable destination —
+          // better than guessing at an edge the user cannot see
+          let best: Poly | null = null, bestD = Infinity;
+          for (const p of polys) {
+            const cx = p.reduce((s, q) => s + q[0], 0) / p.length;
+            const cz = p.reduce((s, q) => s + q[1], 0) / p.length;
+            const dist = (fp.x - cx) ** 2 + (fp.z - cz) ** 2;
+            if (dist < bestD) { bestD = dist; best = p; }
+          }
+          if (best) {
+            fp.x = best.reduce((s, q) => s + q[0], 0) / best.length;
+            fp.z = best.reduce((s, q) => s + q[1], 0) / best.length;
+          }
+        }
+
+        // clear of walls, and clear of everything already settled
+        if (walls.length > 0 && prefersWall(f.name, f.modelId)) {
+          const snap = snapToWall(fp, walls, 0.8);
+          if (snap.snapped) fp = { ...fp, x: snap.x, z: snap.z, rotation: snap.rotation };
+        }
+        fp = resolveCollision(fp, settled);
+        settled.push(fp);
+
+        const dx = Math.abs(fp.x - f.position[0]), dz = Math.abs(fp.z - f.position[2]);
+        if (dx > 0.01 || dz > 0.01) moved++;
+
+        return {
+          ...f,
+          position: [fp.x, supportHeightAt(fp.x, fp.z, f, f.id), fp.z] as [number, number, number],
+          rotation: fp.rotation,
+        };
+      });
+      return next;
+    });
+
+    if (moved > 0) {
+      setRevalidateNote(`${moved} item${moved !== 1 ? "s" : ""} repositioned after the layout changed.`);
+      setTimeout(() => setRevalidateNote(null), 6000);
+    }
+  };
+
+  // Only when the layout actually changes — never on first load, which would
+  // move furniture the user deliberately placed.
+  useEffect(() => {
+    const sig = JSON.stringify([
+      rfWalls.map(w => [w.x1, w.y1, w.x2, w.y2, w.thickness]),
+      rooms.map(r => r.id),
+    ]);
+    if (!layoutSig.current) { layoutSig.current = sig; return; }
+    if (sig === layoutSig.current) return;
+    layoutSig.current = sig;
+    if (placedFurniture.length > 0) revalidatePlacements();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rfWalls, rooms]);
 
   const handleAssistantCommand = async (command: string): Promise<boolean> => {
     if (FURNISH_VERB.test(command) && FURNISH_NOUN.test(command)) {
@@ -988,6 +1140,11 @@ export default function CanvasPage() {
               <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-4 flex items-center gap-2.5">
                 <Loader2 size={14} className="animate-spin text-[#004643]" />
                 <p className="text-[12px] text-[#404040]">Choosing and placing furniture…</p>
+              </div>
+            )}
+            {revalidateNote && (
+              <div className="rounded-[10px] px-3.5 py-3 border bg-[#fffbeb] border-[#fde68a]">
+                <p className="text-[12px] leading-[1.55] text-[#92400e]">{revalidateNote}</p>
               </div>
             )}
             {assistantMsg && !isFurnishing && (
@@ -1265,6 +1422,7 @@ export default function CanvasPage() {
                     if (id) { setSelectedWall(null); setSelectedDoor(null); }
                   }}
                   onFurnitureMove={handleFurnitureMove}
+                  onFurnitureRotate={handleFurnitureRotate}
                   selectedFurnitureId={selectedFurnitureId}
                   wallColors={wallColors}
                   wallSurfaces={wallSurfaces}
