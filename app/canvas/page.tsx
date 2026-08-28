@@ -10,6 +10,7 @@ import {
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
   Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
+  Ruler,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -28,7 +29,7 @@ import {
 import { DOOR_FINISHES } from "@/lib/surfaces/doors";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
-import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms } from "@/lib/api/projects";
+import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
@@ -803,6 +804,70 @@ export default function CanvasPage() {
       thickness: (w.thickness / 100) * maxDim,
       id: `wi${i}`,
     }));
+  };
+
+  // ── NOOI-10: wall editing ─────────────────────────────────────────────────
+  // Detected walls are an estimate. Editing them changes the shell everything
+  // else depends on — 3D geometry, snapping, room bounds — so openings are
+  // carried along with their wall and the layout re-validation pass (NOOI-19)
+  // settles furniture afterwards.
+  const [editWalls, setEditWalls] = useState(false);
+  const [selectedWallIndex, setSelectedWallIndex] = useState<number | null>(null);
+  const [savingWalls, setSavingWalls] = useState(false);
+
+  /** Where an opening sits along its wall, 0–1 from (x1,y1) to (x2,y2). */
+  const openingT = (op: { x: number; y: number }, w: typeof rfWalls[number]) => {
+    const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+    const len2 = dx * dx + dy * dy || 1e-9;
+    return Math.max(0, Math.min(1, ((op.x - w.x1) * dx + (op.y - w.y1) * dy) / len2));
+  };
+
+  const handleWallChange = (index: number, wall: typeof rfWalls[number]) => {
+    setRfWalls(prev => {
+      const before = prev[index];
+      if (!before) return prev;
+      // move this wall's openings with it, preserving how far along they sat
+      setOpenings(ops => ops.map(op => {
+        const d = Math.abs((op.x - before.x1) * (before.y2 - before.y1)
+                         - (op.y - before.y1) * (before.x2 - before.x1))
+                / (Math.hypot(before.x2 - before.x1, before.y2 - before.y1) || 1e-9);
+        if (d > 1.5) return op;            // not on this wall
+        const t = openingT(op, before);
+        return { ...op, x: wall.x1 + (wall.x2 - wall.x1) * t,
+                        y: wall.y1 + (wall.y2 - wall.y1) * t };
+      }));
+      const next = [...prev];
+      next[index] = wall;
+      return next;
+    });
+  };
+
+  const commitWalls = async () => {
+    if (!currentProject?.id) return;
+    setSavingWalls(true);
+    try { await saveWalls(currentProject.id, rfWalls as any, openings); }
+    catch (err) { console.error("Failed to save walls:", err); }
+    finally { setSavingWalls(false); }
+  };
+
+  const handleWallAdd = (wall: typeof rfWalls[number]) => {
+    setRfWalls(prev => [...prev, { ...wall, id: `wu${Date.now()}` } as any]);
+    setSelectedWallIndex(rfWalls.length);
+    setTimeout(commitWalls, 0);
+  };
+
+  const handleWallDelete = (index: number) => {
+    const w = rfWalls[index];
+    if (!w) return;
+    // drop the openings that lived in it — a door with no wall is nonsense
+    setOpenings(ops => ops.filter(op => {
+      const d = Math.abs((op.x - w.x1) * (w.y2 - w.y1) - (op.y - w.y1) * (w.x2 - w.x1))
+              / (Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1e-9);
+      return d > 1.5;
+    }));
+    setRfWalls(prev => prev.filter((_, i) => i !== index));
+    setSelectedWallIndex(null);
+    setTimeout(commitWalls, 0);
   };
 
   // ── NOOI-11: add rooms by drawing a shape ─────────────────────────────────
@@ -1601,6 +1666,46 @@ export default function CanvasPage() {
                     drag on the plan
                   </span>
                 )}
+
+                <span className="w-px h-5 bg-[#e5e5e5] mx-1" />
+
+                <button
+                  onClick={() => {
+                    setEditWalls(v => !v);
+                    setDrawShape(null);
+                    setSelectedWallIndex(null);
+                  }}
+                  title="Edit walls"
+                  className={`flex items-center gap-1.5 pl-2 pr-3 h-7 rounded-full text-[11px] font-medium transition-colors ${
+                    editWalls
+                      ? "bg-[#004643] text-white"
+                      : "text-[#525252] hover:bg-[#f5f5f5]"}`}
+                >
+                  <Ruler size={13} />Walls
+                </button>
+
+                {editWalls && selectedWallIndex !== null && (
+                  <button
+                    onClick={() => handleWallDelete(selectedWallIndex)}
+                    title="Delete this wall"
+                    className="flex items-center gap-1.5 pl-2 pr-3 h-7 rounded-full
+                               text-[11px] font-medium text-[#b91c1c] hover:bg-[#fef2f2]"
+                  >
+                    <Trash2 size={13} />Delete
+                  </button>
+                )}
+
+                {editWalls && (
+                  <span className="pl-1 pr-2.5 text-[11px] text-[#737373]">
+                    {selectedWallIndex !== null
+                      ? "drag the handles"
+                      : "click a wall, or drag on empty space to add one"}
+                  </span>
+                )}
+
+                {savingWalls && (
+                  <Loader2 size={13} className="mr-2 animate-spin text-[#004643]" />
+                )}
                 {savingRoom && (
                   <Loader2 size={13} className="mr-2 animate-spin text-[#004643]" />
                 )}
@@ -1641,6 +1746,14 @@ export default function CanvasPage() {
                             }
                             drawShape={drawShape}
                             onDrawComplete={handleDrawComplete}
+                            editWalls={editWalls}
+                            walls={rfWalls as any}
+                            onWallChange={handleWallChange as any}
+                            onWallCommit={commitWalls}
+                            onWallAdd={handleWallAdd as any}
+                            onWallDelete={handleWallDelete}
+                            selectedWallIndex={selectedWallIndex}
+                            onWallSelect={setSelectedWallIndex}
                           />
                         )}
                       </div>

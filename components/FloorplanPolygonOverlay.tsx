@@ -12,6 +12,12 @@ export interface PolyRoom extends GridRoom {
 
 export type DrawShape = "rect" | "circle";
 
+export interface EditWall {
+  x1: number; y1: number; x2: number; y2: number;  // % of plan (0–100)
+  thickness: number;
+  id?: string;
+}
+
 interface Props {
   imageUrl: string;
   rooms: PolyRoom[];
@@ -23,6 +29,21 @@ interface Props {
   drawShape?: DrawShape | null;
   /** polygon in viewBox units (0–100), the same space room polygons use */
   onDrawComplete?: (polygon: [number, number][]) => void;
+
+  // ── NOOI-10: wall editing ────────────────────────────────────────────────
+  /** when true, walls are drawn with draggable endpoints */
+  editWalls?: boolean;
+  walls?: EditWall[];
+  /** fired continuously while dragging; the parent owns the wall array */
+  onWallChange?: (index: number, wall: EditWall) => void;
+  /** fired once when a drag finishes, so the parent can persist */
+  onWallCommit?: () => void;
+  onWallDelete?: (index: number) => void;
+  /** a new wall drawn end-to-end */
+  onWallAdd?: (wall: EditWall) => void;
+  /** null when nothing is selected */
+  selectedWallIndex?: number | null;
+  onWallSelect?: (index: number | null) => void;
 }
 
 /** Rectangle or ellipse as a polygon in 0–100 plan units. Circles are sampled
@@ -79,7 +100,18 @@ export default function FloorplanPolygonOverlay({
   className = "",
   drawShape = null,
   onDrawComplete,
+  editWalls = false,
+  walls = [],
+  onWallChange,
+  onWallCommit,
+  onWallDelete,
+  onWallAdd,
+  selectedWallIndex = null,
+  onWallSelect,
 }: Props) {
+  // which endpoint is being dragged: wall index + which end
+  const [dragEnd, setDragEnd] = useState<{ i: number; end: 1 | 2 } | null>(null);
+  const [newWall, setNewWall] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 
@@ -165,6 +197,97 @@ export default function FloorplanPolygonOverlay({
               fill="#004643" fillOpacity={0.25}
               stroke="#004643" strokeWidth={0.5}
               vectorEffect="non-scaling-stroke"
+            />
+          )}
+        </svg>
+      )}
+
+      {/* ── NOOI-10: wall editing layer ── */}
+      {editWalls && (
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          className="absolute inset-0 w-full h-full"
+          style={{ cursor: drawShape ? "crosshair" : "default" }}
+          onPointerMove={(e) => {
+            if (dragEnd) {
+              const [x, y] = toPlan(e);
+              const w = walls[dragEnd.i];
+              if (!w) return;
+              onWallChange?.(dragEnd.i, dragEnd.end === 1
+                ? { ...w, x1: x, y1: y }
+                : { ...w, x2: x, y2: y });
+            } else if (newWall) {
+              const [x, y] = toPlan(e);
+              setNewWall({ ...newWall, x2: x, y2: y });
+            }
+          }}
+          onPointerUp={() => {
+            if (dragEnd) { setDragEnd(null); onWallCommit?.(); }
+            if (newWall) {
+              const len = Math.hypot(newWall.x2 - newWall.x1, newWall.y2 - newWall.y1);
+              // ignore a click without a drag
+              if (len >= 2) {
+                onWallAdd?.({ ...newWall, thickness: walls[0]?.thickness ?? 1.2 });
+              }
+              setNewWall(null);
+            }
+          }}
+        >
+          {/* background captures drags that start on empty space = draw a wall */}
+          <rect
+            x={0} y={0} width={100} height={100} fill="transparent"
+            onPointerDown={(e) => {
+              const [x, y] = toPlan(e);
+              onWallSelect?.(null);
+              setNewWall({ x1: x, y1: y, x2: x, y2: y });
+            }}
+          />
+
+          {walls.map((w, i) => {
+            const selected = i === selectedWallIndex;
+            return (
+              <g key={w.id ?? i}>
+                {/* fat invisible hit line — a 1% stroke is very hard to click */}
+                <line
+                  x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2}
+                  stroke="transparent" strokeWidth={3}
+                  style={{ cursor: "pointer" }}
+                  onPointerDown={(e) => { e.stopPropagation(); onWallSelect?.(i); }}
+                />
+                <line
+                  x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2}
+                  stroke={selected ? "#004643" : "#64748b"}
+                  strokeWidth={selected ? 1.1 : 0.7}
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="none"
+                />
+                {selected && ([1, 2] as const).map(end => (
+                  <circle
+                    key={end}
+                    cx={end === 1 ? w.x1 : w.x2}
+                    cy={end === 1 ? w.y1 : w.y2}
+                    r={1.4}
+                    fill="#ffffff" stroke="#004643" strokeWidth={0.5}
+                    vectorEffect="non-scaling-stroke"
+                    style={{ cursor: "grab" }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      (e.target as Element).setPointerCapture?.(e.pointerId);
+                      setDragEnd({ i, end });
+                    }}
+                  />
+                ))}
+              </g>
+            );
+          })}
+
+          {newWall && (
+            <line
+              x1={newWall.x1} y1={newWall.y1} x2={newWall.x2} y2={newWall.y2}
+              stroke="#004643" strokeWidth={1} strokeDasharray="2 1.5"
+              vectorEffect="non-scaling-stroke" pointerEvents="none"
             />
           )}
         </svg>
