@@ -31,12 +31,19 @@ import { execFileSync } from "node:child_process";
 const THUMBS = process.argv[2] || "public/models/thumbs";
 const TOKEN = process.env.REPLICATE_API_TOKEN;
 
-// Same model family as the canvas render engine. Strength is deliberately LOW:
-// a catalog thumbnail that doesn't match the model the user actually places is
-// worse than a plain one, so fidelity beats beauty here.
-const MODEL = process.env.REPLICATE_RENDER_MODEL
-  || "adirik/interior-design:76604baddc85b1b4616e1c6475eca080da339c8875bd4996705440484a6eac38";
-const STRENGTH = Number(process.env.THUMB_STRENGTH ?? 0.45);
+// NOT the canvas render model: adirik/interior-design is trained on ROOMS and
+// has no idea what an isolated object on white is — the first attempt turned a
+// sofa into a folded napkin. A general img2img model handles single products.
+//
+// Strength is deliberately LOW. A catalog thumbnail showing a sofa that is not
+// the sofa the user places is worse than a plain one, so fidelity beats beauty.
+// Run by owner/name via POST /v1/models/{owner}/{name}/predictions — no
+// version hash. Pinned hashes go stale and the API then closes the connection
+// mid-request (EPIPE) rather than returning a clean error.
+const MODEL = process.env.THUMB_MODEL || "black-forest-labs/flux-kontext-pro";
+// Image-editing models disagree on the input field name; try one, fall back.
+const IMG_FIELDS = (process.env.THUMB_IMAGE_FIELD || "input_image,image").split(",");
+const STRENGTH = Number(process.env.THUMB_STRENGTH ?? 0.38);
 
 if (!TOKEN) {
   console.error("REPLICATE_API_TOKEN is not set.\n  export REPLICATE_API_TOKEN=r8_...");
@@ -48,8 +55,31 @@ if (!fs.existsSync(THUMBS)) {
 }
 
 
-/** filename → a readable subject for the prompt: "bed_king" → "bed king" */
-const subject = (name) => name.replace(/[_-]+/g, " ").replace(/\d+/g, "").trim();
+// The catalog knows what each model actually is; the filename does not.
+// "boca_tommy" told the model nothing, which is half of why the first attempt
+// invented an unrelated object.
+let CATALOG = [];
+try {
+  const cat = fs.readFileSync("lib/furniture/catalog.ts", "utf8");
+  const re = /id:\s*"([^"]+)"[^}]*?name:\s*"([^"]+)"[^}]*?path:\s*"([^"]+)"[^}]*?tags:\s*\[([^\]]*)\]/g;
+  let m;
+  while ((m = re.exec(cat))) {
+    CATALOG.push({
+      name: m[2],
+      base: m[3].split("/").pop().replace(/\.glb$/i, ""),
+      tags: m[4].split(",").map(s => s.trim().replace(/"/g, "")).filter(Boolean),
+    });
+  }
+} catch { /* fall back to filenames */ }
+
+const subject = (fileBase) => {
+  const hit = CATALOG.find(c => c.base === fileBase);
+  if (hit) {
+    const tags = hit.tags.slice(0, 3).join(", ");
+    return tags ? `${hit.name} — ${tags}` : hit.name;
+  }
+  return fileBase.replace(/[_-]+/g, " ").replace(/\d+/g, "").trim();
+};
 
 const sips = (args) => execFileSync("sips", args, { stdio: "ignore" });
 
@@ -69,16 +99,30 @@ async function polish(file) {
   sips(["-s", "format", "png", tmpPng.replace(".__in.png", ".__in.webp"), "--out", tmpPng]);
   fs.unlinkSync(tmpPng.replace(".__in.png", ".__in.webp"));
 
-  const dataUrl = `data:image/png;base64,${fs.readFileSync(tmpPng).toString("base64")}`;
+  // Keep the upload small. A 512px PNG as base64 can exceed 500KB, which some
+  // endpoints refuse outright — JPEG at 384px is a fraction of that and plenty
+  // for a thumbnail. (A white matte also gives img2img something to work with
+  // where the render was transparent.)
+  const tmpJpg = tmpPng.replace(".__in.png", ".__in.jpg");
+  sips(["-Z", "384", tmpPng]);
+  sips(["-s", "format", "jpeg", "-s", "formatOptions", "85", tmpPng, "--out", tmpJpg]);
+  const dataUrl = `data:image/jpeg;base64,${fs.readFileSync(tmpJpg).toString("base64")}`;
+  const uploadKb = Math.round(fs.statSync(tmpJpg).size / 1024);
+  fs.unlinkSync(tmpJpg);
+  if (process.env.DEBUG) console.log(`   upload ${uploadKb} KB`);
 
   const prompt = [
-    `Professional product photograph of a ${subject(name)}.`,
-    "Keep the exact same shape, proportions and viewing angle as the input.",
-    "Studio lighting, soft shadow on a plain light background, realistic materials",
-    "and fabric texture, sharp focus, furniture catalog photography, 8k.",
+    `Professional furniture catalog photograph of: ${subject(name)}.`,
+    "Identical shape, proportions and camera angle to the input image.",
+    "Realistic materials and fabric texture, soft studio lighting,",
+    "gentle contact shadow, plain off-white background, sharp focus, 8k.",
   ].join(" ");
 
-  const res = await fetch("https://api.replicate.com/v1/predictions", {
+  const endpoint = MODEL.includes(":")
+    ? "https://api.replicate.com/v1/predictions"
+    : `https://api.replicate.com/v1/models/${MODEL}/predictions`;
+
+  const post = (imgField) => fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${TOKEN}`,
@@ -86,31 +130,63 @@ async function polish(file) {
       Prefer: "wait",                     // block until finished
     },
     body: JSON.stringify({
-      version: MODEL.includes(":") ? MODEL.split(":")[1] : undefined,
-      model: MODEL.includes(":") ? undefined : MODEL,
+      ...(MODEL.includes(":") ? { version: MODEL.split(":")[1] } : {}),
       input: {
-        image: dataUrl,
+        [imgField]: dataUrl,
         prompt,
         negative_prompt:
-          "different shape, different furniture, extra objects, room interior, "
-          + "people, text, watermark, cartoon, illustration, blurry, distorted",
-        num_inference_steps: 30,
-        guidance_scale: 12,
+          "different object, different shape, extra objects, room interior, walls, "
+          + "floor, people, hands, text, watermark, logo, cartoon, illustration, "
+          + "painting, blurry, deformed, duplicated",
+        num_inference_steps: 35,
+        guidance_scale: 9,
         prompt_strength: STRENGTH,
       },
     }),
   });
 
+  // Field names differ between models; a 422 usually means the wrong one.
+  let res, lastBody = "";
+  for (const field of IMG_FIELDS) {
+    res = await post(field);
+    if (res.ok) break;
+    lastBody = (await res.text()).slice(0, 200);
+    if (res.status !== 422) break;
+    if (process.env.DEBUG) console.log(`   "${field}" rejected, trying next`);
+  }
+
   fs.unlinkSync(tmpPng);
 
-  if (!res.ok) {
-    console.log(`✗ ${name}: HTTP ${res.status} ${(await res.text()).slice(0, 120)}`);
+  if (!res || !res.ok) {
+    console.log(`✗ ${name}: HTTP ${res?.status} ${lastBody}`);
     return "failed";
   }
-  const json = await res.json();
+  let json = await res.json();
+
+  // `Prefer: wait` only holds the connection for ~60s, and a cold model start
+  // routinely exceeds that — the request then returns status "starting" with no
+  // output. Poll until it actually finishes.
+  const DEADLINE = Date.now() + 5 * 60 * 1000;
+  while (
+    json?.status && !["succeeded", "failed", "canceled"].includes(json.status)
+    && json?.urls?.get && Date.now() < DEADLINE
+  ) {
+    await new Promise(r => setTimeout(r, 2500));
+    const poll = await fetch(json.urls.get, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    if (!poll.ok) break;
+    json = await poll.json();
+  }
+
+  if (json.status !== "succeeded") {
+    console.log(`✗ ${name}: ${json.status ?? "no status"}${json.error ? " — " + json.error : ""}`);
+    return "failed";
+  }
+
   const out = Array.isArray(json.output) ? json.output[0] : json.output;
   if (!out) {
-    console.log(`✗ ${name}: no output (${json.status}${json.error ? ": " + json.error : ""})`);
+    console.log(`✗ ${name}: finished with no image`);
     return "failed";
   }
 
@@ -138,6 +214,8 @@ for (const f of files) {
     if (r === "done") done++; else if (r === "skipped") skipped++; else failed++;
   } catch (e) {
     console.log(`✗ ${f}: ${e.message}`);
+    if (e.cause) console.log(`   cause: ${e.cause.message ?? e.cause}`);
+    if (process.env.DEBUG) console.log(e);
     failed++;
   }
 }
