@@ -110,10 +110,17 @@ export function snapToWall(
     return { x: f.x, z: f.z, rotation: f.rotation, snapped: false };
   }
 
-  // Face the item away from the wall: its back sits against the surface.
-  const rotation = hit.angle + Math.PI / 2;
-  const [, halfD] = halfExtents({ w: f.w, d: f.d, rotation });
-  const gap = hit.wall.thickness / 2 + halfD;
+  // The item's WIDTH runs along the wall and its DEPTH faces it — a 220x90
+  // sofa against a wall shows 220 of frontage, not 90.
+  const rotation = hit.angle;
+
+  // Offset must be the half-extent measured along the WALL NORMAL, not a fixed
+  // axis: for a horizontal wall that is the z extent, for a vertical wall the
+  // x extent. Taking one blindly sank items into vertical walls by the
+  // difference between their width and depth.
+  const [hx, hz] = halfExtents({ w: f.w, d: f.d, rotation });
+  const alongNormal = Math.abs(hit.nx) * hx + Math.abs(hit.nz) * hz;
+  const gap = hit.wall.thickness / 2 + alongNormal;
 
   return {
     x: hit.px + hit.nx * gap,

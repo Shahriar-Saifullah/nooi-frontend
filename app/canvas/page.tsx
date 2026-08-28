@@ -18,7 +18,7 @@ import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
 import {
-  snapToWall, resolveCollision, prefersWall, pointInPoly,
+  snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom,
   type WorldWall, type Footprint, type Poly,
 } from "@/lib/placement/snap";
 import {
@@ -619,6 +619,14 @@ export default function CanvasPage() {
       // belongs against a wall onto the nearest one, then settle overlaps —
       // furniture marooned mid-room is the clearest sign a machine placed it.
       const walls = worldWalls();
+      const targetRoom = roomPayload.find(r => r.id === data.targetRoomId);
+      const roomPoly: Poly | null = targetRoom?.polygon ?? (targetRoom ? [
+        [targetRoom.rect.x, targetRoom.rect.z],
+        [targetRoom.rect.x + targetRoom.rect.w, targetRoom.rect.z],
+        [targetRoom.rect.x + targetRoom.rect.w, targetRoom.rect.z + targetRoom.rect.d],
+        [targetRoom.rect.x, targetRoom.rect.z + targetRoom.rect.d],
+      ] as Poly : null);
+
       const settled: Footprint[] = placedFurniture
         .filter(f => (f.mountType ?? "floor") === "floor")
         .map(f => ({
@@ -644,7 +652,14 @@ export default function CanvasPage() {
           // Generous threshold: the AI puts these roughly right, just not
           // touching. Free-standing pieces (coffee table, rug) are untouched.
           const snap = snapToWall(fp, walls, 1.2);
-          if (snap.snapped) fp = { ...fp, x: snap.x, z: snap.z, rotation: snap.rotation };
+          if (snap.snapped) {
+            const moved = { ...fp, x: snap.x, z: snap.z, rotation: snap.rotation };
+            // Snapping targets the nearest wall, which near a corner or a thin
+            // partition can be the far side. Only accept the snap if the whole
+            // footprint still sits inside the room the AI chose.
+            const room = roomPoly;
+            if (!room || fitsInRoom(moved, room)) fp = moved;
+          }
         }
 
         // keep clear of what is already down, including earlier items in
@@ -951,7 +966,13 @@ export default function CanvasPage() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return;
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const k = e.key.toLowerCase();
+      // Ctrl+Y is the conventional redo on Windows; ⇧⌘Z on macOS. Support both
+      // everywhere rather than sniffing the platform — the wrong guess is worse
+      // than accepting an extra shortcut.
+      if (k === "y") { e.preventDefault(); redo(); return; }
+      if (k !== "z") return;
       e.preventDefault();
       if (e.shiftKey) redo(); else undo();
     };
@@ -959,6 +980,12 @@ export default function CanvasPage() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placedFurniture, wallColors, wallSurfaces, doorFinishes]);
+
+  // Tooltips should name the shortcut the user actually presses.
+  const isMac = typeof navigator !== "undefined"
+    && /Mac|iPhone|iPad/i.test(navigator.userAgent);
+  const undoHint = isMac ? "⌘Z" : "Ctrl+Z";
+  const redoHint = isMac ? "⇧⌘Z" : "Ctrl+Y";
 
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
@@ -1164,7 +1191,7 @@ export default function CanvasPage() {
               <button
                 onClick={undo}
                 disabled={!canUndo}
-                title="Undo (⌘Z)"
+                title={`Undo (${undoHint})`}
                 className="w-8 h-8 flex items-center justify-center rounded-full border border-[#e5e5e5] text-[#525252] hover:bg-gray-50 disabled:opacity-35 disabled:hover:bg-transparent"
               >
                 <Undo2 size={14} />
@@ -1172,7 +1199,7 @@ export default function CanvasPage() {
               <button
                 onClick={redo}
                 disabled={!canRedo}
-                title="Redo (⇧⌘Z)"
+                title={`Redo (${redoHint})`}
                 className="w-8 h-8 flex items-center justify-center rounded-full border border-[#e5e5e5] text-[#525252] hover:bg-gray-50 disabled:opacity-35 disabled:hover:bg-transparent"
               >
                 <Redo2 size={14} />
