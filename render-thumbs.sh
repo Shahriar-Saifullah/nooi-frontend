@@ -25,6 +25,11 @@ MODELS="${1:-public/models}"
 OUT="${2:-public/models/thumbs}"
 SIZE="${3:-512}"
 BG="${4:-transparent}"        # transparent | white
+FORCE="${FORCE:-0}"           # FORCE=1 re-renders models that already have one
+
+# Incremental by default: only models without a thumbnail are rendered, so
+# this is cheap to run after adding an asset (NOOI-23) rather than a full
+# rebuild every time.
 
 mkdir -p "$OUT"
 TMP="$(mktemp -d)"
@@ -36,6 +41,7 @@ from mathutils import Vector
 argv = sys.argv[sys.argv.index("--") + 1:]
 models_dir, out_dir, size = argv[0], argv[1], int(argv[2])
 bg = argv[3] if len(argv) > 3 else "transparent"
+force = (len(argv) > 4 and argv[4] == "1")
 
 files = sorted(
     f for f in glob.glob(os.path.join(models_dir, "**", "*.glb"), recursive=True)
@@ -128,6 +134,14 @@ for path in files:
     name = os.path.splitext(os.path.basename(path))[0]
     dest = os.path.join(out_dir, f"{name}.webp")
 
+    # Skip models that already have a preview unless it is older than the
+    # model itself — that way replacing a .glb regenerates its thumbnail.
+    if not force and os.path.exists(dest):
+        if os.path.getmtime(dest) >= os.path.getmtime(path):
+            skipped += 1
+            continue
+        print(f"[thumbs] {name}: model is newer, re-rendering")
+
     # decode meshopt/Draco into plain buffers Blender can read
     plain = os.path.join(decoded_dir, f"{name}.glb")
     if not os.path.exists(plain):
@@ -167,13 +181,27 @@ for path in files:
     done += 1
 
 shutil.rmtree(decoded_dir, ignore_errors=True)
-print(f"[thumbs] rendered {done}, skipped {skipped}")
+print(f"[thumbs] rendered {done}, up to date {skipped}")
 PY
 
 blender --background --factory-startup --python "$TMP/thumbs.py" -- \
-        "$MODELS" "$OUT" "$SIZE" "$BG"
+        "$MODELS" "$OUT" "$SIZE" "$BG" "$FORCE"
 rm -rf "$TMP"
 
 echo
 echo "✅ Thumbnails in $OUT"
 du -sh "$OUT" 2>/dev/null || true
+
+# Fail loudly if any model still lacks a preview — a silent gap means a grey
+# card in the catalog, which is the exact problem this script exists to fix.
+missing=0
+while IFS= read -r m; do
+  base="$(basename "${m%.glb}")"
+  [ -f "$OUT/$base.webp" ] || { echo "⚠️  no thumbnail for $base"; missing=$((missing+1)); }
+done < <(find "$MODELS" -name '*.glb' -not -path '*_decoded*')
+
+if [ "$missing" -gt 0 ]; then
+  echo
+  echo "$missing model(s) without a preview — see warnings above."
+  exit 1
+fi

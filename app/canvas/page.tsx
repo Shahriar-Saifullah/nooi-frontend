@@ -9,7 +9,7 @@ import {
   SlidersHorizontal, Loader2, RotateCw, Trash2,
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
-  Link2, Check, X, Camera, Maximize2, ArrowLeftRight,
+  Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -28,7 +28,7 @@ import {
 import { DOOR_FINISHES } from "@/lib/surfaces/doors";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import { useProjectStore } from "@/lib/store";
-import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene } from "@/lib/api/projects";
+import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
@@ -49,13 +49,19 @@ const ThreeSceneV2 = dynamic(() => import("@/components/ThreeSceneV2"), {
 
 const FALLBACK_COLORS = ["#c3f4f0", "#b9eac5", "#87ddd7", "#f7dfad", "#d5dbda", "#ffc9c0"];
 
-function toGridRoom(room: any, index: number): GridRoom {
+function toGridRoom(room: any, index: number): GridRoom & {
+  width?: number; length?: number; height?: number;
+} {
   return {
     id: room.id, name: room.name,
     color: room.color || FALLBACK_COLORS[index % FALLBACK_COLORS.length],
     box: room.box, polygon: room.polygon,
     gridRow: room.gridRow, gridCol: room.gridCol,
     rowWeight: room.rowWeight, colWeight: room.colWeight,
+    // NOOI-21: the real measurements were dropped here, which is why they
+    // could not be edited after the plan was analysed. They drive the whole
+    // world scale, so they have to survive into the canvas.
+    width: room.width, length: room.length, height: room.height,
   };
 }
 
@@ -72,7 +78,9 @@ export default function CanvasPage() {
   const [mounted, setMounted] = useState(false);
 
   const { currentProject, setProjectRooms, setProject } = useProjectStore();
-  const [rooms, setRooms] = useState<GridRoom[]>([]);
+  const [rooms, setRooms] = useState<Array<GridRoom & {
+    width?: number; length?: number; height?: number;
+  }>>([]);
   const [buildingPerimeter, setBuildingPerimeter] = useState<[number,number][] | null>(null);
   const [rfWalls, setRfWalls] = useState<Array<{x1:number;y1:number;x2:number;y2:number;thickness:number}>>([]);
   const [openings, setOpenings] = useState<Array<{type:'door'|'window';wall:'horizontal'|'vertical';x:number;y:number;width:number}>>([]);
@@ -782,6 +790,180 @@ export default function CanvasPage() {
     }));
   };
 
+  // ── NOOI-11: add rooms by drawing a shape ─────────────────────────────────
+  // Plans often miss a room the CV pipeline could not close, or the user wants
+  // to sketch one that does not exist yet. Drawn rooms are ordinary polygons in
+  // the same 0–100 plan space as detected ones, so everything downstream — 3D
+  // floors, wall snapping, containment, AI furnishing — treats them identically.
+  const [drawShape, setDrawShape] = useState<"rect" | "circle" | null>(null);
+  const [savingRoom, setSavingRoom] = useState(false);
+
+  const handleDrawComplete = async (polygon: [number, number][]) => {
+    setDrawShape(null);
+    const xs = polygon.map(p => p[0]), ys = polygon.map(p => p[1]);
+    const left = Math.min(...xs), top = Math.min(...ys);
+    const boxW = Math.max(...xs) - left, boxH = Math.max(...ys) - top;
+
+    // seed real-world size from the current plan scale so the room is roughly
+    // right immediately; the user can correct it in the measurements panel
+    const planW = roomDimensionsCm.width / 100, planD = roomDimensionsCm.depth / 100;
+
+    const room = {
+      id: `room-${Date.now()}`,
+      name: "New Room",
+      color: FALLBACK_COLORS[rooms.length % FALLBACK_COLORS.length],
+      polygon,
+      box: { left, top, width: boxW, height: boxH },
+      width: Math.round((boxW / 100) * planW * 10) / 10,
+      length: Math.round((boxH / 100) * planD * 10) / 10,
+    };
+
+    const next = [...rooms, room];
+    setRooms(next as any);
+    setSelectedRoomId(room.id);
+
+    if (currentProject?.id) {
+      setSavingRoom(true);
+      try { await saveRooms(currentProject.id, next as any); }
+      catch (err) { console.error("Failed to save room:", err); }
+      finally { setSavingRoom(false); }
+    }
+  };
+
+  // ── NOOI-21: edit AI-detected measurements ─────────────────────────────────
+  // The floorplan service estimates room sizes from OCR'd dimension text, and
+  // it gets them wrong often enough that they must be correctable. Editing one
+  // rescales the whole world, so the change is persisted and the layout
+  // re-validation pass (NOOI-19) settles the furniture afterwards.
+  const [dimDraft, setDimDraft] = useState<{ w: string; l: string } | null>(null);
+  const [savingDims, setSavingDims] = useState(false);
+
+  const selectedRoom = rooms.find(r => r.id === selectedRoomId) ?? null;
+
+  useEffect(() => {
+    if (!selectedRoom) { setDimDraft(null); return; }
+    setDimDraft({
+      w: selectedRoom.width != null ? String(selectedRoom.width) : "",
+      l: selectedRoom.length != null ? String(selectedRoom.length) : "",
+    });
+  }, [selectedRoomId]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveRoomDimensions = async () => {
+    if (!selectedRoom || !dimDraft || !currentProject?.id) return;
+    const w = parseFloat(dimDraft.w), l = parseFloat(dimDraft.l);
+    if (!Number.isFinite(w) || !Number.isFinite(l) || w <= 0 || l <= 0) return;
+
+    const next = rooms.map(r =>
+      r.id === selectedRoom.id ? { ...r, width: w, length: l } : r);
+    setRooms(next);
+    setSavingDims(true);
+    try {
+      await saveDimensions(currentProject.id, next as any);
+    } catch (err) {
+      console.error("Failed to save dimensions:", err);
+    } finally {
+      setSavingDims(false);
+    }
+  };
+
+  // ── NOOI-22: undo / redo ───────────────────────────────────────────────────
+  // Snapshots of the editable scene. Snapshots rather than inverse operations
+  // because several systems now move furniture on their own — wall snapping,
+  // collision resolution, layout re-validation — and reconstructing an inverse
+  // for each of those is far more fragile than remembering the previous state.
+  //
+  // Changes are coalesced on a short timer so one drag becomes one undo step
+  // instead of a hundred.
+  type SceneSnapshot = {
+    furniture: PlacedFurniture[];
+    wallColors: Record<string, string>;
+    wallSurfaces: Record<string, string>;
+    doorFinishes: Record<string, string>;
+  };
+
+  const undoStack = useRef<SceneSnapshot[]>([]);
+  const redoStack = useRef<SceneSnapshot[]>([]);
+  const lastSnapshot = useRef<SceneSnapshot | null>(null);
+  const applyingHistory = useRef(false);
+  const historyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [historyTick, setHistoryTick] = useState(0);   // re-render for button state
+  const HISTORY_LIMIT = 50;
+
+  const currentSnapshot = (): SceneSnapshot => ({
+    furniture: placedFurniture,
+    wallColors, wallSurfaces, doorFinishes,
+  });
+
+  const applySnapshot = (s: SceneSnapshot) => {
+    applyingHistory.current = true;
+    setPlacedFurniture(s.furniture);
+    setWallColors(s.wallColors);
+    setWallSurfaces(s.wallSurfaces);
+    setDoorFinishes(s.doorFinishes);
+    setSelectedFurnitureId(null);
+    setSelectedWall(null);
+    setSelectedDoor(null);
+  };
+
+  useEffect(() => {
+    if (applyingHistory.current) {
+      applyingHistory.current = false;
+      lastSnapshot.current = currentSnapshot();
+      return;
+    }
+    if (!lastSnapshot.current) {          // first render: baseline only
+      lastSnapshot.current = currentSnapshot();
+      return;
+    }
+    if (historyTimer.current) clearTimeout(historyTimer.current);
+    historyTimer.current = setTimeout(() => {
+      const prev = lastSnapshot.current;
+      if (!prev) return;
+      undoStack.current.push(prev);
+      if (undoStack.current.length > HISTORY_LIMIT) undoStack.current.shift();
+      redoStack.current = [];             // a new action invalidates the redo path
+      lastSnapshot.current = currentSnapshot();
+      setHistoryTick(t => t + 1);
+    }, 700);
+    return () => { if (historyTimer.current) clearTimeout(historyTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placedFurniture, wallColors, wallSurfaces, doorFinishes]);
+
+  const undo = () => {
+    const prev = undoStack.current.pop();
+    if (!prev) return;
+    if (historyTimer.current) clearTimeout(historyTimer.current);
+    redoStack.current.push(currentSnapshot());
+    applySnapshot(prev);
+    setHistoryTick(t => t + 1);
+  };
+
+  const redo = () => {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    if (historyTimer.current) clearTimeout(historyTimer.current);
+    undoStack.current.push(currentSnapshot());
+    applySnapshot(next);
+    setHistoryTick(t => t + 1);
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return;
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placedFurniture, wallColors, wallSurfaces, doorFinishes]);
+
+  const canUndo = undoStack.current.length > 0;
+  const canRedo = redoStack.current.length > 0;
+  void historyTick;   // stacks live in refs; this state forces the re-render
+
   // ── NOOI-19: re-validate placements after a layout change ─────────────────
   // Editing walls, resizing rooms or re-analysing a plan can leave furniture
   // stranded inside a wall, outside the building, or overlapping. Rather than
@@ -975,6 +1157,28 @@ export default function CanvasPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+
+          {/* Undo / redo */}
+          {!walkthroughActive && (
+            <div className="flex items-center gap-0.5 mr-1">
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                title="Undo (⌘Z)"
+                className="w-8 h-8 flex items-center justify-center rounded-full border border-[#e5e5e5] text-[#525252] hover:bg-gray-50 disabled:opacity-35 disabled:hover:bg-transparent"
+              >
+                <Undo2 size={14} />
+              </button>
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                title="Redo (⇧⌘Z)"
+                className="w-8 h-8 flex items-center justify-center rounded-full border border-[#e5e5e5] text-[#525252] hover:bg-gray-50 disabled:opacity-35 disabled:hover:bg-transparent"
+              >
+                <Redo2 size={14} />
+              </button>
+            </div>
+          )}
 
           {/* Furniture count — hidden during walkthrough to save header space */}
           {viewMode === "3d" && !walkthroughActive && placedFurniture.length > 0 && (
@@ -1338,6 +1542,43 @@ export default function CanvasPage() {
               style={{ backgroundColor: "#e8e8e8" }}
               onClick={() => setSelectedRoomId(null)}
             >
+              {/* Room drawing tools */}
+              <div
+                className="absolute top-4 left-4 z-20 flex items-center gap-1 bg-white
+                           border border-[#e5e5e5] rounded-full p-1 shadow-sm"
+                onClick={e => e.stopPropagation()}
+              >
+                <span className="pl-2.5 pr-1 text-[11px] text-[#737373]">Add room</span>
+                <button
+                  onClick={() => setDrawShape(drawShape === "rect" ? null : "rect")}
+                  title="Draw a rectangular room"
+                  className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
+                    drawShape === "rect"
+                      ? "bg-[#004643] text-white"
+                      : "text-[#525252] hover:bg-[#f5f5f5]"}`}
+                >
+                  <Square size={13} />   {/* already imported for walkthrough stop */}
+                </button>
+                <button
+                  onClick={() => setDrawShape(drawShape === "circle" ? null : "circle")}
+                  title="Draw a round room"
+                  className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
+                    drawShape === "circle"
+                      ? "bg-[#004643] text-white"
+                      : "text-[#525252] hover:bg-[#f5f5f5]"}`}
+                >
+                  <Circle size={13} />
+                </button>
+                {drawShape && (
+                  <span className="pl-1.5 pr-2.5 text-[11px] text-[#004643] font-medium">
+                    drag on the plan
+                  </span>
+                )}
+                {savingRoom && (
+                  <Loader2 size={13} className="mr-2 animate-spin text-[#004643]" />
+                )}
+              </div>
+
               <div style={{ transform: `scale(${zoom / 100})` }} className="transition-transform duration-100 origin-center">
                 <div
                   className="bg-white border border-[#d4d4d4] rounded-[12px] shadow-lg relative overflow-hidden flex items-center justify-center"
@@ -1371,6 +1612,8 @@ export default function CanvasPage() {
                             onRoomClick={(id) =>
                               setSelectedRoomId(selectedRoomId === id ? null : id)
                             }
+                            drawShape={drawShape}
+                            onDrawComplete={handleDrawComplete}
                           />
                         )}
                       </div>
@@ -1487,7 +1730,76 @@ export default function CanvasPage() {
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto scrollbar-hide px-3 py-4">
-              {selectedFurniture ? (
+              {viewMode === "2d" && selectedRoom ? (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <input
+                      value={selectedRoom.name}
+                      onChange={e => setRooms(prev => prev.map(r =>
+                        r.id === selectedRoom.id ? { ...r, name: e.target.value } : r))}
+                      onBlur={() => currentProject?.id && saveRooms(currentProject.id, rooms as any)
+                        .catch(err => console.error("Failed to save room name:", err))}
+                      className="w-full text-[13px] font-semibold text-[#0a0a0a] bg-transparent
+                                 border-b border-transparent hover:border-[#e5e5e5]
+                                 focus:border-[#004643] focus:outline-none pb-0.5"
+                    />
+                    <p className="text-[11px] text-[#a3a3a3] mt-1">
+                      Measurements detected from the plan. Correct them if they're wrong —
+                      everything else scales from these.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase">Width (m)</span>
+                      <input
+                        type="number" min="0.5" step="0.1"
+                        value={dimDraft?.w ?? ""}
+                        onChange={e => setDimDraft(d => ({ w: e.target.value, l: d?.l ?? "" }))}
+                        className="px-2.5 py-2 border border-[#e5e5e5] rounded-[8px] text-[13px]
+                                   focus:outline-none focus:ring-2 focus:ring-[#c7de7d]"
+                        placeholder="—"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase">Length (m)</span>
+                      <input
+                        type="number" min="0.5" step="0.1"
+                        value={dimDraft?.l ?? ""}
+                        onChange={e => setDimDraft(d => ({ w: d?.w ?? "", l: e.target.value }))}
+                        className="px-2.5 py-2 border border-[#e5e5e5] rounded-[8px] text-[13px]
+                                   focus:outline-none focus:ring-2 focus:ring-[#c7de7d]"
+                        placeholder="—"
+                      />
+                    </label>
+                  </div>
+
+                  {dimDraft && parseFloat(dimDraft.w) > 0 && parseFloat(dimDraft.l) > 0 && (
+                    <p className="text-[11px] text-[#737373]">
+                      Floor area ≈ {(parseFloat(dimDraft.w) * parseFloat(dimDraft.l)).toFixed(1)} m²
+                    </p>
+                  )}
+
+                  <button
+                    onClick={saveRoomDimensions}
+                    disabled={
+                      savingDims || !dimDraft ||
+                      !(parseFloat(dimDraft.w) > 0) || !(parseFloat(dimDraft.l) > 0) ||
+                      (parseFloat(dimDraft.w) === selectedRoom.width &&
+                       parseFloat(dimDraft.l) === selectedRoom.length)
+                    }
+                    className="w-full py-2 rounded-[8px] bg-[#004643] hover:bg-[#003633] text-white
+                               text-[12px] font-medium disabled:opacity-40"
+                  >
+                    {savingDims ? "Saving…" : "Save measurements"}
+                  </button>
+
+                  <p className="text-[10.5px] text-[#a3a3a3] leading-[1.5]">
+                    Changing a room's size rescales the plan, so furniture may be
+                    repositioned to stay inside the walls.
+                  </p>
+                </div>
+              ) : selectedFurniture ? (
                 <FurnitureInspector
                   item={selectedFurniture}
                   onChange={patchSelected}
@@ -1725,7 +2037,11 @@ export default function CanvasPage() {
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-10">
                   <Sofa size={28} className="text-[#d4d4d4]" />
                   <p className="text-[12px] font-semibold text-[#525252]">Nothing selected</p>
-                  <p className="text-[11px] text-[#a3a3a3]">Click a furniture item, wall or door in the 3D scene to edit it</p>
+                  <p className="text-[11px] text-[#a3a3a3]">
+                    {viewMode === "2d"
+                      ? "Click a room in the floor plan to edit its measurements"
+                      : "Click a furniture item, wall or door in the 3D scene to edit it"}
+                  </p>
                 </div>
               )}
             </div>
