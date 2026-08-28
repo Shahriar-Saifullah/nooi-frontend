@@ -829,6 +829,62 @@ export default function CanvasPage() {
     return Math.max(0, Math.min(1, ((op.x - w.x1) * dx + (op.y - w.y1) * dy) / len2));
   };
 
+  /**
+   * Carry room boundaries with a moved wall.
+   *
+   * Room polygons trace the wall lines, so moving a wall without them leaves
+   * floors and walls diverging. Each vertex sitting on the wall keeps its
+   * position ALONG the wall and its perpendicular offset, with the offset
+   * rotated by however much the wall turned — so dragging one endpoint swings
+   * the boundary correctly rather than just sliding it.
+   */
+  const VERTEX_ON_WALL = 2.0;   // plan units (0–100); walls are ~1.2 thick
+
+  const dragRoomsWithWall = (
+    before: typeof rfWalls[number], after: typeof rfWalls[number],
+  ) => {
+    const bdx = before.x2 - before.x1, bdy = before.y2 - before.y1;
+    const blen2 = bdx * bdx + bdy * bdy;
+    if (blen2 < 1e-9) return;
+
+    const angBefore = Math.atan2(bdy, bdx);
+    const angAfter = Math.atan2(after.y2 - after.y1, after.x2 - after.x1);
+    const dAng = angAfter - angBefore;
+    const cos = Math.cos(dAng), sin = Math.sin(dAng);
+
+    const moveVertex = ([vx, vy]: [number, number]): [number, number] => {
+      let t = ((vx - before.x1) * bdx + (vy - before.y1) * bdy) / blen2;
+      if (t < -0.05 || t > 1.05) return [vx, vy];      // beyond the segment
+      t = Math.max(0, Math.min(1, t));
+      const cxp = before.x1 + bdx * t, cyp = before.y1 + bdy * t;
+      const px = vx - cxp, py = vy - cyp;
+      if (Math.hypot(px, py) > VERTEX_ON_WALL) return [vx, vy];   // not on it
+
+      return [
+        after.x1 + (after.x2 - after.x1) * t + (px * cos - py * sin),
+        after.y1 + (after.y2 - after.y1) * t + (px * sin + py * cos),
+      ];
+    };
+
+    setRooms(prev => prev.map(r => {
+      if (!r.polygon || r.polygon.length < 3) return r;
+      const poly = r.polygon.map(moveVertex);
+      const changed = poly.some((p, i) =>
+        Math.abs(p[0] - r.polygon![i][0]) > 1e-6 ||
+        Math.abs(p[1] - r.polygon![i][1]) > 1e-6);
+      if (!changed) return r;
+
+      // keep the box fallback in step with the polygon
+      const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
+      const left = Math.min(...xs), top = Math.min(...ys);
+      return {
+        ...r,
+        polygon: poly,
+        box: { left, top, width: Math.max(...xs) - left, height: Math.max(...ys) - top },
+      };
+    }));
+  };
+
   const handleWallChange = (index: number, wall: typeof rfWalls[number]) => {
     setRfWalls(prev => {
       const before = prev[index];
@@ -843,6 +899,8 @@ export default function CanvasPage() {
         return { ...op, x: wall.x1 + (wall.x2 - wall.x1) * t,
                         y: wall.y1 + (wall.y2 - wall.y1) * t };
       }));
+      dragRoomsWithWall(before, wall);
+
       const next = [...prev];
       next[index] = wall;
       return next;
@@ -852,9 +910,16 @@ export default function CanvasPage() {
   const commitWalls = async () => {
     if (!currentProject?.id) return;
     setSavingWalls(true);
-    try { await saveWalls(currentProject.id, rfWalls as any, openings); }
-    catch (err) { console.error("Failed to save walls:", err); }
-    finally { setSavingWalls(false); }
+    try {
+      // rooms moved with the wall, so both have to be persisted together —
+      // saving one without the other leaves the plan inconsistent on reload
+      await saveWalls(currentProject.id, rfWalls as any, openings);
+      await saveRooms(currentProject.id, rooms as any);
+    } catch (err) {
+      console.error("Failed to save walls:", err);
+    } finally {
+      setSavingWalls(false);
+    }
   };
 
   const handleWallAdd = (wall: typeof rfWalls[number]) => {
@@ -1645,8 +1710,11 @@ export default function CanvasPage() {
             >
               {/* Room drawing tools */}
               <div
-                className="absolute top-4 left-4 z-20 flex items-center gap-1 bg-white
-                           border border-[#e5e5e5] rounded-full p-1 shadow-sm"
+                // sits below the 2D/3D tabs, which are centred at the top;
+                // wraps rather than overlapping them on narrow viewports
+                className="absolute top-[68px] left-4 right-4 z-20 flex flex-wrap
+                           items-center gap-1 bg-white border border-[#e5e5e5]
+                           rounded-[18px] p-1 shadow-sm w-fit max-w-[calc(100%-2rem)]"
                 onClick={e => e.stopPropagation()}
               >
                 <span className="pl-2.5 pr-1 text-[11px] text-[#737373]">Add room</span>
