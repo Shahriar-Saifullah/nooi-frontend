@@ -131,6 +131,60 @@ export function snapToWall(
   };
 }
 
+/**
+ * Push an item clear of every wall it overlaps.
+ *
+ * Room polygons trace the wall CENTRELINE, so an item sitting neatly inside a
+ * room polygon can still be buried up to half a wall thickness. Containment
+ * checks alone therefore do not prevent clipping — this does, by treating each
+ * wall as a solid band and evicting anything inside it.
+ *
+ * Iterated because pushing out of one wall can push into another in a corner.
+ */
+export function pushOutOfWalls(
+  f: Footprint, walls: WorldWall[], clearance = 0.02, passes = 4,
+): Footprint {
+  let cur = { ...f };
+  const [hw, hd] = halfExtents(cur);
+
+  for (let pass = 0; pass < passes; pass++) {
+    let moved = false;
+
+    for (const w of walls) {
+      const dx = w.x2 - w.x1, dz = w.z2 - w.z1;
+      const len2 = dx * dx + dz * dz;
+      if (len2 < 1e-9) continue;
+
+      let t = ((cur.x - w.x1) * dx + (cur.z - w.z1) * dz) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const px = w.x1 + dx * t, pz = w.z1 + dz * t;
+
+      let nx = cur.x - px, nz = cur.z - pz;
+      let dist = Math.hypot(nx, nz);
+      if (dist < 1e-6) {
+        // dead centre on the wall: evict along the wall's perpendicular
+        const L = Math.sqrt(len2);
+        nx = -dz / L; nz = dx / L; dist = 0;
+      } else {
+        nx /= dist; nz /= dist;
+      }
+
+      // how far the footprint reaches along this wall's normal
+      const reach = Math.abs(nx) * hw + Math.abs(nz) * hd;
+      const needed = w.thickness / 2 + reach + clearance;
+      if (dist >= needed) continue;
+
+      const push = needed - dist;
+      cur.x += nx * push;
+      cur.z += nz * push;
+      moved = true;
+    }
+
+    if (!moved) break;
+  }
+  return cur;
+}
+
 // ── Collision ────────────────────────────────────────────────────────────────
 
 export function overlaps(a: Footprint, b: Footprint, gap = 0.02): boolean {

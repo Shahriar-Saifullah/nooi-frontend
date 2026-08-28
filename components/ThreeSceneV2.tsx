@@ -10,7 +10,8 @@ import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
 import {
-  snapToWall, resolveCollision, type WorldWall, type Footprint,
+  snapToWall, resolveCollision, pushOutOfWalls,
+  type WorldWall, type Footprint,
 } from "@/lib/placement/snap";
 import { doorFinishById } from "@/lib/surfaces/doors";
 import { getFaceTextures, getDoorTexture, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
@@ -1596,9 +1597,11 @@ function SceneContent({
                 }))
                 .filter(f => f.w > 0 && f.d > 0);
 
-              const solved = resolveCollision(
+              let solved = resolveCollision(
                 { x: nx, z: nz, w: dw, d: dd, rotation: rot, id: draggingId }, others,
               );
+              // never leave an item embedded in a wall
+              solved = pushOutOfWalls(solved, worldWalls);
               nx = solved.x; nz = solved.z;
             }
 
