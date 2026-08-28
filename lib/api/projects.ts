@@ -188,7 +188,6 @@ export interface FurniturePlacement {
   sizeScale?: number;
   color?: string | null;
   materialPreset?: string | null;
-  mountType?: "floor" | "ceiling" | "wall";
   scale?: [number, number, number];
   width?: number;
   depth?: number;
@@ -297,4 +296,29 @@ export async function renderScene(
   const json = await res.json();
   if (!json.success) throw new Error(json.error || 'Render failed');
   return json.data as { image_url: string };
+}
+
+// ─── NOOI-10: wall editing ───────────────────────────────────────────────────
+
+export interface EditableWall {
+  x1: number; y1: number; x2: number; y2: number;   // % of plan
+  thickness: number;
+  id?: string;
+}
+
+export async function saveWalls(
+  projectId: string,
+  walls: EditableWall[],
+  openings?: unknown[],
+) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/walls`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ walls, ...(openings !== undefined ? { openings } : {}) }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || 'Failed to save walls');
+  return json.data as { room_data: unknown };
 }
