@@ -17,6 +17,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import {
   FURNITURE_CATALOG, FURNITURE_TYPES, CATEGORY_LABELS,
@@ -87,11 +88,60 @@ function Thumb({ item, className = "" }: { item: CatalogItem; className?: string
   );
 }
 
+/**
+ * NOOI-03 — large preview on hover.
+ * Rendered into a portal, not inside the card: the library panel is narrow
+ * and scrolls, so an in-flow popover would be clipped by both.
+ */
+function HoverPreview({ item, x, y }: { item: CatalogItem; x: number; y: number }) {
+  if (typeof document === "undefined") return null;
+  const W = 240;
+  const left = Math.max(12, x - W - 16);            // sits left of the panel
+  const top = Math.min(Math.max(12, y - 110), window.innerHeight - 300);
+  return createPortal(
+    <div
+      className="fixed z-[200] w-[240px] rounded-[14px] border border-[#e5e5e5]
+                 bg-white shadow-[0_16px_40px_-8px_rgba(0,0,0,0.22)]
+                 overflow-hidden pointer-events-none"
+      style={{ left, top }}
+    >
+      <div className="aspect-square bg-[#fafafa] flex items-center justify-center">
+        <Thumb item={item} className="!aspect-square !border-0 !bg-transparent" />
+      </div>
+      <div className="px-3 py-2.5 border-t border-[#f0f0f0]">
+        <p className="text-[13px] font-semibold text-[#0a0a0a] leading-tight">{item.name}</p>
+        <p className="text-[11px] text-[#737373] mt-0.5">
+          {item.size.w} × {item.size.d} × {item.size.h} cm
+        </p>
+        {item.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {item.tags.slice(0, 4).map(t => (
+              <span key={t} className="px-1.5 py-0.5 rounded-full bg-[#f5f5f5]
+                                       text-[9.5px] text-[#525252]">{t}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function VariantCard({
   item, onQuickAdd,
 }: { item: CatalogItem; onQuickAdd?: (item: CatalogItem) => void }) {
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   return (
+    <>
+    {hover && <HoverPreview item={item} x={hover.x} y={hover.y} />}
     <div
+      onMouseEnter={e => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        setHover({ x: r.left, y: r.top });
+      }}
+      onMouseLeave={() => setHover(null)}
+      // dragging should not leave a preview stranded on screen
+      onDragStartCapture={() => setHover(null)}
       draggable
       onDragStart={e => {
         e.dataTransfer.setData(DND_MIME, item.id);
@@ -112,6 +162,7 @@ function VariantCard({
         {item.size.w}×{item.size.d} cm
       </div>
     </div>
+    </>
   );
 }
 
