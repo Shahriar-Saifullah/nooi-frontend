@@ -19,7 +19,7 @@ import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
 import {
-  snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom,
+  snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom, pushOutOfWalls,
   type WorldWall, type Footprint, type Poly,
 } from "@/lib/placement/snap";
 import {
@@ -663,9 +663,16 @@ export default function CanvasPage() {
           }
         }
 
+        // Evict from wall volume. This applies to everything, not just the
+        // wall-hugging categories: room polygons follow the wall centreline,
+        // so an item can sit "inside the room" and still be buried in a wall.
+        if (walls.length > 0) fp = pushOutOfWalls(fp, walls);
+
         // keep clear of what is already down, including earlier items in
         // this same batch
         fp = resolveCollision(fp, settled);
+        // collision resolution can shove an item back into a wall
+        if (walls.length > 0) fp = pushOutOfWalls(fp, walls);
         settled.push(fp);
 
         newItems.push({
@@ -1033,9 +1040,9 @@ export default function CanvasPage() {
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return;
       if (!(e.metaKey || e.ctrlKey)) return;
       const k = e.key.toLowerCase();
-      // Ctrl+Y is the conventional redo on Windows; ⇧⌘Z on macOS. Support both
-      // everywhere rather than sniffing the platform — the wrong guess is worse
-      // than accepting an extra shortcut.
+      // Redo: ⌘Y / Ctrl+Y everywhere, plus ⇧⌘Z for the macOS convention.
+      // Deliberately not ⌘X — that is Cut, and shadowing it would surprise
+      // anyone who selects something and expects it to be cut.
       if (k === "y") { e.preventDefault(); redo(); return; }
       if (k !== "z") return;
       e.preventDefault();
@@ -1050,7 +1057,7 @@ export default function CanvasPage() {
   const isMac = typeof navigator !== "undefined"
     && /Mac|iPhone|iPad/i.test(navigator.userAgent);
   const undoHint = isMac ? "⌘Z" : "Ctrl+Z";
-  const redoHint = isMac ? "⇧⌘Z" : "Ctrl+Y";
+  const redoHint = isMac ? "⌘Y" : "Ctrl+Y";
 
   const canUndo = undoStack.current.length > 0;
   const canRedo = redoStack.current.length > 0;
@@ -1112,7 +1119,9 @@ export default function CanvasPage() {
           const snap = snapToWall(fp, walls, 0.8);
           if (snap.snapped) fp = { ...fp, x: snap.x, z: snap.z, rotation: snap.rotation };
         }
+        if (walls.length > 0) fp = pushOutOfWalls(fp, walls);
         fp = resolveCollision(fp, settled);
+        if (walls.length > 0) fp = pushOutOfWalls(fp, walls);
         settled.push(fp);
 
         const dx = Math.abs(fp.x - f.position[0]), dz = Math.abs(fp.z - f.position[2]);
