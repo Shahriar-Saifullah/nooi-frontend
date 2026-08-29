@@ -40,6 +40,66 @@ export function halfExtents(f: Pick<Footprint, "w" | "d" | "rotation">): [number
   return [(swapped ? f.d : f.w) / 2, (swapped ? f.w : f.d) / 2];
 }
 
+// ── Plan → world projection ──────────────────────────────────────────────────
+// SINGLE SOURCE OF TRUTH for "where is this wall, really".
+//
+// Walls are stored as percentages of the source image. Three places used to
+// convert them independently — the 3D renderer, the canvas page, and the scene
+// — and they disagreed on all three counts: the renderer clamps thickness and
+// the engine did not, the renderer extends walls half a thickness at each end
+// and the engine did not, and the renderer projects every wall onto its
+// dominant axis while the engine took the raw two-point segment. Furniture
+// therefore snapped to walls that were not where they were drawn.
+//
+// Everything now goes through this function. If the renderer's assumptions
+// change, they change HERE and the engine follows.
+
+export interface PlanWall {
+  x1: number; y1: number;     // % of plan (0–100)
+  x2: number; y2: number;
+  thickness: number;          // % of the larger plan dimension
+  id?: string;
+}
+
+/** Matches MIN_WALL_T / MAX_WALL_T in ThreeSceneV2 — a drawn wall is never
+ *  thinner or fatter than this regardless of what the detector reported. */
+export const WALL_T_MIN = 0.09;
+export const WALL_T_MAX = 0.20;
+
+export function planWallsToWorld(
+  walls: PlanWall[], totalW: number, totalD: number,
+): WorldWall[] {
+  const maxDim = Math.max(totalW, totalD);
+  const px = (x: number) => (x / 100) * totalW - totalW / 2;
+  const pz = (y: number) => (y / 100) * totalD - totalD / 2;
+
+  return walls.map((w, i) => {
+    const thickness = Math.min(WALL_T_MAX,
+      Math.max(WALL_T_MIN, (w.thickness / 100) * maxDim));
+    const half = thickness / 2;
+    const id = w.id ?? `wi${i}`;
+
+    // The renderer draws each wall axis-aligned along whichever axis it spans
+    // furthest, and extends it half a thickness at both ends so corners
+    // interpenetrate instead of leaving a slit. Mirror both exactly.
+    const horiz = Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1);
+    if (horiz) {
+      const z = pz((w.y1 + w.y2) / 2);
+      return {
+        x1: px(Math.min(w.x1, w.x2)) - half, z1: z,
+        x2: px(Math.max(w.x1, w.x2)) + half, z2: z,
+        thickness, id,
+      };
+    }
+    const x = px((w.x1 + w.x2) / 2);
+    return {
+      x1: x, z1: pz(Math.min(w.y1, w.y2)) - half,
+      x2: x, z2: pz(Math.max(w.y1, w.y2)) + half,
+      thickness, id,
+    };
+  });
+}
+
 // ── Walls ────────────────────────────────────────────────────────────────────
 
 export interface WallHit {
