@@ -34,8 +34,13 @@ interface Props {
   /** when true, walls are drawn with draggable endpoints */
   editWalls?: boolean;
   walls?: EditWall[];
-  /** fired continuously while dragging; the parent owns the wall array */
-  onWallChange?: (index: number, wall: EditWall) => void;
+  /** Fired continuously while dragging; the parent owns the wall array.
+   *  `dragRooms: false` marks a wall that moved only to stay welded to the
+   *  wall the user grabbed — room boundaries must follow the grabbed wall
+   *  once, not once per wall meeting at that corner. */
+  onWallChange?: (
+    index: number, wall: EditWall, opts?: { dragRooms?: boolean },
+  ) => void;
   /** fired once when a drag finishes, so the parent can persist */
   onWallCommit?: () => void;
   onWallDelete?: (index: number) => void;
@@ -88,6 +93,52 @@ export function axisAlign(w: EditWall): EditWall {
 const isHoriz = (w: EditWall) =>
   Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1);
 
+/**
+ * Move one end of a wall to (x, y) without ever skewing it.
+ *
+ * The grabbed handle goes exactly where the cursor is. Along the wall's own
+ * axis that lengthens or shortens it; across that axis the WHOLE wall slides,
+ * because a wall with two different cross-axis coordinates is a wall the 3D
+ * renderer cannot draw. (An earlier version simply ignored cross-axis motion,
+ * which made vertical walls impossible to move sideways at all.)
+ */
+export function moveWallEnd(w: EditWall, end: 1 | 2, x: number, y: number): EditWall {
+  const a = axisAlign(w);
+  if (isHoriz(a)) {
+    return end === 1
+      ? { ...a, x1: x, y1: y, y2: y }
+      : { ...a, x2: x, y1: y, y2: y };
+  }
+  return end === 1
+    ? { ...a, y1: y, x1: x, x2: x }
+    : { ...a, y2: y, x1: x, x2: x };
+}
+
+/** How close two endpoints must be, in plan units, to count as one corner. */
+const WELD_RADIUS = 1.5;
+
+export interface WeldRef { i: number; end: 1 | 2 }
+
+/**
+ * Every other wall endpoint sitting on the corner at (x, y).
+ *
+ * Without this, dragging one wall tears it away from the walls it met and
+ * leaves the shell open — the room polygon follows the wall it is attached to
+ * and collapses into a wedge, which is what the 3D view was showing.
+ */
+function weldTargets(
+  walls: EditWall[], skip: number, x: number, y: number,
+): WeldRef[] {
+  const out: WeldRef[] = [];
+  walls.forEach((raw, i) => {
+    if (i === skip) return;
+    const w = axisAlign(raw);
+    if (Math.hypot(w.x1 - x, w.y1 - y) <= WELD_RADIUS) out.push({ i, end: 1 });
+    else if (Math.hypot(w.x2 - x, w.y2 - y) <= WELD_RADIUS) out.push({ i, end: 2 });
+  });
+  return out;
+}
+
 /** polygon (or box fallback) → SVG points string in viewBox units (0-100) */
 function toPoints(room: PolyRoom): string | null {
   if (room.polygon && room.polygon.length >= 3) {
@@ -132,11 +183,14 @@ export default function FloorplanPolygonOverlay({
   onWallSelect,
 }: Props) {
   // which endpoint is being dragged: wall index + which end
-  const [dragEnd, setDragEnd] = useState<{ i: number; end: 1 | 2 } | null>(null);
+  const [dragEnd, setDragEnd] =
+    useState<{ i: number; end: 1 | 2; weld: WeldRef[] } | null>(null);
   // dragging the wall LINE translates the whole wall (the gesture people
   // actually reach for when they want to "move the left wall in")
-  const [dragBody, setDragBody] =
-    useState<{ i: number; px: number; py: number; wall: EditWall } | null>(null);
+  const [dragBody, setDragBody] = useState<{
+    i: number; px: number; py: number; wall: EditWall;
+    weld1: WeldRef[]; weld2: WeldRef[];
+  } | null>(null);
   const [newWall, setNewWall] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -241,28 +295,39 @@ export default function FloorplanPolygonOverlay({
             if (dragEnd) {
               const w = walls[dragEnd.i];
               if (!w) return;
-              // Endpoint handles LENGTHEN, they do not skew: only the
-              // along-axis coordinate moves. Letting an endpoint wander off
-              // axis produced a wall the 2D view drew one way, the 3D view
-              // drew another, and the snap engine placed furniture against a
-              // third — use the line itself to reposition a wall.
-              const aligned = axisAlign(w);
-              const next: EditWall = isHoriz(aligned)
-                ? (dragEnd.end === 1 ? { ...aligned, x1: x } : { ...aligned, x2: x })
-                : (dragEnd.end === 1 ? { ...aligned, y1: y } : { ...aligned, y2: y });
-              onWallChange?.(dragEnd.i, axisAlign(next));
+              // the grabbed handle follows the cursor in BOTH axes; the wall
+              // stays straight because moveWallEnd slides it rather than
+              // bending it
+              onWallChange?.(dragEnd.i, moveWallEnd(w, dragEnd.end, x, y));
+              // carry the walls that met it at this corner, so the shell
+              // stays closed instead of tearing open
+              for (const t of dragEnd.weld) {
+                const n = walls[t.i];
+                if (n) onWallChange?.(t.i, moveWallEnd(n, t.end, x, y),
+                                      { dragRooms: false });
+              }
               return;
             }
 
             if (dragBody) {
               const dx = x - dragBody.px, dy = y - dragBody.py;
               const w = axisAlign(dragBody.wall);
-              const moved: EditWall = {
+              const moved = axisAlign({
                 ...w,
                 x1: w.x1 + dx, x2: w.x2 + dx,
                 y1: w.y1 + dy, y2: w.y2 + dy,
-              };
-              onWallChange?.(dragBody.i, axisAlign(moved));
+              });
+              onWallChange?.(dragBody.i, moved);
+              for (const t of dragBody.weld1) {
+                const n = walls[t.i];
+                if (n) onWallChange?.(t.i, moveWallEnd(n, t.end, moved.x1, moved.y1),
+                                      { dragRooms: false });
+              }
+              for (const t of dragBody.weld2) {
+                const n = walls[t.i];
+                if (n) onWallChange?.(t.i, moveWallEnd(n, t.end, moved.x2, moved.y2),
+                                      { dragRooms: false });
+              }
               return;
             }
 
@@ -317,7 +382,11 @@ export default function FloorplanPolygonOverlay({
                     (e.target as Element).setPointerCapture?.(e.pointerId);
                     onWallSelect?.(i);
                     const [px, py] = toPlan(e);
-                    setDragBody({ i, px, py, wall: w });
+                    setDragBody({
+                      i, px, py, wall: w,
+                      weld1: weldTargets(walls, i, w.x1, w.y1),
+                      weld2: weldTargets(walls, i, w.x2, w.y2),
+                    });
                   }}
                 />
                 <line
@@ -336,11 +405,16 @@ export default function FloorplanPolygonOverlay({
                     r={1.4}
                     fill="#ffffff" stroke="#004643" strokeWidth={0.5}
                     vectorEffect="non-scaling-stroke"
-                    style={{ cursor: isHoriz(w) ? "ew-resize" : "ns-resize" }}
+                    style={{ cursor: "grab" }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       (e.target as Element).setPointerCapture?.(e.pointerId);
-                      setDragEnd({ i, end });
+                      setDragEnd({
+                        i, end,
+                        weld: weldTargets(walls, i,
+                          end === 1 ? w.x1 : w.x2,
+                          end === 1 ? w.y1 : w.y2),
+                      });
                     }}
                   />
                 ))}
