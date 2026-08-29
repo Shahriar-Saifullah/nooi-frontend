@@ -10,7 +10,8 @@ import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
 import {
-  snapToWall, resolveCollision, pushOutOfWalls,
+  snapToWall, resolveCollision, pushOutOfWalls, planWallsToWorld,
+  WALL_T_MIN, WALL_T_MAX,
   type WorldWall, type Footprint,
 } from "@/lib/placement/snap";
 import { doorFinishById } from "@/lib/surfaces/doors";
@@ -137,8 +138,8 @@ interface ThreeSceneV2Props {
 const WALL_H = 2.8;
 const DOOR_H = 2.1;
 const SILL_H = 0.9;
-const MIN_WALL_T = 0.09;
-const MAX_WALL_T = 0.2;
+const MIN_WALL_T = WALL_T_MIN;
+const MAX_WALL_T = WALL_T_MAX;
 
 const OUTDOOR = /porch|patio|balcon|deck|terrace|garden/i;
 
@@ -202,7 +203,14 @@ function WallWithOpenings({
 
   let a0 = horiz ? world.px(Math.min(wall.x1, wall.x2)) : world.pz(Math.min(wall.y1, wall.y2));
   let a1 = horiz ? world.px(Math.max(wall.x1, wall.x2)) : world.pz(Math.max(wall.y1, wall.y2));
-  const c = horiz ? world.pz(wall.y1) : world.px(wall.x1);
+  // Cross-axis position from the wall's MIDPOINT, not endpoint 1. Reading
+  // y1 / x1 alone meant dragging endpoint 2 sideways in the 2D editor changed
+  // the data and the room polygons but left the 3D wall exactly where it was
+  // — the "floor moved, walls did not" bug. The midpoint at least tracks both
+  // ends; the 2D editor now also keeps walls axis-aligned so the two agree.
+  const c = horiz
+    ? world.pz((wall.y1 + wall.y2) / 2)
+    : world.px((wall.x1 + wall.x2) / 2);
   if (a1 - a0 < 0.05) return null;
   // extend by half a thickness at both ends: perpendicular walls now
   // interpenetrate at corners instead of meeting with a visible slit
@@ -1505,12 +1513,10 @@ function SceneContent({
 
   // Walls in world space for the snap engine. VWall stores percentages of the
   // source image; thickness is a percentage of the larger image dimension.
-  const worldWalls = useMemo<WorldWall[]>(() => rfWalls.map((w, i) => ({
-    x1: world.px(w.x1), z1: world.pz(w.y1),
-    x2: world.px(w.x2), z2: world.pz(w.y2),
-    thickness: (w.thickness / 100) * world.maxDim,
-    id: w.id ?? `wi${i}`,
-  })), [rfWalls, world]);
+  const worldWalls = useMemo<WorldWall[]>(
+    () => planWallsToWorld(rfWalls, world.totalW, world.totalD),
+    [rfWalls, world],
+  );
 
   const startDrag = (id: string) => {
     setDraggingId(id);

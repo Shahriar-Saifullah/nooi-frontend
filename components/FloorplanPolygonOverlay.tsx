@@ -66,6 +66,28 @@ function shapeToPolygon(
   });
 }
 
+/**
+ * Collapse a wall onto its dominant axis.
+ *
+ * ThreeSceneV2 renders every wall axis-aligned: it picks the axis the wall
+ * spans furthest along and takes a single cross-axis coordinate. A wall stored
+ * with y1 !== y2 therefore looks one way in this editor and another way in 3D,
+ * and the snap engine — which reads the raw segment — believes a third thing.
+ * Keeping the stored wall axis-aligned makes all three agree.
+ */
+export function axisAlign(w: EditWall): EditWall {
+  const horiz = Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1);
+  if (horiz) {
+    const y = (w.y1 + w.y2) / 2;
+    return { ...w, y1: y, y2: y };
+  }
+  const x = (w.x1 + w.x2) / 2;
+  return { ...w, x1: x, x2: x };
+}
+
+const isHoriz = (w: EditWall) =>
+  Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1);
+
 /** polygon (or box fallback) → SVG points string in viewBox units (0-100) */
 function toPoints(room: PolyRoom): string | null {
   if (room.polygon && room.polygon.length >= 3) {
@@ -111,6 +133,10 @@ export default function FloorplanPolygonOverlay({
 }: Props) {
   // which endpoint is being dragged: wall index + which end
   const [dragEnd, setDragEnd] = useState<{ i: number; end: 1 | 2 } | null>(null);
+  // dragging the wall LINE translates the whole wall (the gesture people
+  // actually reach for when they want to "move the left wall in")
+  const [dragBody, setDragBody] =
+    useState<{ i: number; px: number; py: number; wall: EditWall } | null>(null);
   const [newWall, setNewWall] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -210,28 +236,57 @@ export default function FloorplanPolygonOverlay({
           className="absolute inset-0 w-full h-full"
           style={{ cursor: drawShape ? "crosshair" : "default" }}
           onPointerMove={(e) => {
+            const [x, y] = toPlan(e);
+
             if (dragEnd) {
-              const [x, y] = toPlan(e);
               const w = walls[dragEnd.i];
               if (!w) return;
-              onWallChange?.(dragEnd.i, dragEnd.end === 1
-                ? { ...w, x1: x, y1: y }
-                : { ...w, x2: x, y2: y });
-            } else if (newWall) {
-              const [x, y] = toPlan(e);
-              setNewWall({ ...newWall, x2: x, y2: y });
+              // Endpoint handles LENGTHEN, they do not skew: only the
+              // along-axis coordinate moves. Letting an endpoint wander off
+              // axis produced a wall the 2D view drew one way, the 3D view
+              // drew another, and the snap engine placed furniture against a
+              // third — use the line itself to reposition a wall.
+              const aligned = axisAlign(w);
+              const next: EditWall = isHoriz(aligned)
+                ? (dragEnd.end === 1 ? { ...aligned, x1: x } : { ...aligned, x2: x })
+                : (dragEnd.end === 1 ? { ...aligned, y1: y } : { ...aligned, y2: y });
+              onWallChange?.(dragEnd.i, axisAlign(next));
+              return;
             }
+
+            if (dragBody) {
+              const dx = x - dragBody.px, dy = y - dragBody.py;
+              const w = axisAlign(dragBody.wall);
+              const moved: EditWall = {
+                ...w,
+                x1: w.x1 + dx, x2: w.x2 + dx,
+                y1: w.y1 + dy, y2: w.y2 + dy,
+              };
+              onWallChange?.(dragBody.i, axisAlign(moved));
+              return;
+            }
+
+            if (newWall) setNewWall({ ...newWall, x2: x, y2: y });
           }}
           onPointerUp={() => {
             if (dragEnd) { setDragEnd(null); onWallCommit?.(); }
+            if (dragBody) { setDragBody(null); onWallCommit?.(); }
             if (newWall) {
               const len = Math.hypot(newWall.x2 - newWall.x1, newWall.y2 - newWall.y1);
               // ignore a click without a drag
               if (len >= 2) {
-                onWallAdd?.({ ...newWall, thickness: walls[0]?.thickness ?? 1.2 });
+                onWallAdd?.(axisAlign({
+                  ...newWall, thickness: walls[0]?.thickness ?? 1.2,
+                }));
               }
               setNewWall(null);
             }
+          }}
+          // a pointer that leaves the window must not leave a wall glued to
+          // the cursor for the rest of the session
+          onPointerCancel={() => { setDragEnd(null); setDragBody(null); setNewWall(null); }}
+          onLostPointerCapture={() => {
+            if (dragEnd || dragBody) { setDragEnd(null); setDragBody(null); onWallCommit?.(); }
           }}
         >
           {/* background captures drags that start on empty space = draw a wall */}
@@ -244,16 +299,26 @@ export default function FloorplanPolygonOverlay({
             }}
           />
 
-          {walls.map((w, i) => {
+          {walls.map((raw, i) => {
+            // Draw the wall the way the 3D scene will actually build it, so
+            // this editor is a faithful preview rather than a second opinion.
+            const w = axisAlign(raw);
             const selected = i === selectedWallIndex;
             return (
-              <g key={w.id ?? i}>
-                {/* fat invisible hit line — a 1% stroke is very hard to click */}
+              <g key={raw.id ?? i}>
+                {/* fat invisible hit line — a 1% stroke is very hard to click.
+                    Press-and-drag on it moves the whole wall. */}
                 <line
                   x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2}
                   stroke="transparent" strokeWidth={3}
-                  style={{ cursor: "pointer" }}
-                  onPointerDown={(e) => { e.stopPropagation(); onWallSelect?.(i); }}
+                  style={{ cursor: selected ? "move" : "pointer" }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    (e.target as Element).setPointerCapture?.(e.pointerId);
+                    onWallSelect?.(i);
+                    const [px, py] = toPlan(e);
+                    setDragBody({ i, px, py, wall: w });
+                  }}
                 />
                 <line
                   x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2}
@@ -271,7 +336,7 @@ export default function FloorplanPolygonOverlay({
                     r={1.4}
                     fill="#ffffff" stroke="#004643" strokeWidth={0.5}
                     vectorEffect="non-scaling-stroke"
-                    style={{ cursor: "grab" }}
+                    style={{ cursor: isHoriz(w) ? "ew-resize" : "ns-resize" }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -283,13 +348,18 @@ export default function FloorplanPolygonOverlay({
             );
           })}
 
-          {newWall && (
-            <line
-              x1={newWall.x1} y1={newWall.y1} x2={newWall.x2} y2={newWall.y2}
-              stroke="#004643" strokeWidth={1} strokeDasharray="2 1.5"
-              vectorEffect="non-scaling-stroke" pointerEvents="none"
-            />
-          )}
+          {newWall && (() => {
+            // preview the wall as it will be stored: snapped to whichever axis
+            // the drag has travelled furthest along
+            const p = axisAlign({ ...newWall, thickness: 0 });
+            return (
+              <line
+                x1={p.x1} y1={p.y1} x2={p.x2} y2={p.y2}
+                stroke="#004643" strokeWidth={1} strokeDasharray="2 1.5"
+                vectorEffect="non-scaling-stroke" pointerEvents="none"
+              />
+            );
+          })()}
         </svg>
       )}
 

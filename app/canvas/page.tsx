@@ -20,6 +20,7 @@ import FurnitureInspector from "@/components/FurnitureInspector";
 import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
 import {
   snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom, pushOutOfWalls,
+  planWallsToWorld,
   type WorldWall, type Footprint, type Poly,
 } from "@/lib/placement/snap";
 import {
@@ -798,20 +799,13 @@ export default function CanvasPage() {
     return true;
   };
 
-  // Walls in world space, same conversion the 3D scene uses.
-  const worldWalls = (): WorldWall[] => {
-    const totalW = roomDimensionsCm.width / 100;
-    const totalD = roomDimensionsCm.depth / 100;
-    const maxDim = Math.max(totalW, totalD);
-    return rfWalls.map((w, i) => ({
-      x1: (w.x1 / 100) * totalW - totalW / 2,
-      z1: (w.y1 / 100) * totalD - totalD / 2,
-      x2: (w.x2 / 100) * totalW - totalW / 2,
-      z2: (w.y2 / 100) * totalD - totalD / 2,
-      thickness: (w.thickness / 100) * maxDim,
-      id: `wi${i}`,
-    }));
-  };
+  // Walls in world space. This MUST be the same projection the 3D scene
+  // draws, or furniture snaps to walls that are not where the user sees them:
+  // the old copy here skipped the renderer's thickness clamp, skipped its
+  // half-thickness end extension, kept skewed segments the renderer flattens,
+  // and reissued ids as `wi${i}` even for walls that carried their own.
+  const worldWalls = (): WorldWall[] =>
+    planWallsToWorld(rfWalls, roomDimensionsCm.width / 100, roomDimensionsCm.depth / 100);
 
   // ── NOOI-10: wall editing ─────────────────────────────────────────────────
   // Detected walls are an estimate. Editing them changes the shell everything
@@ -885,35 +879,67 @@ export default function CanvasPage() {
     }));
   };
 
-  const handleWallChange = (index: number, wall: typeof rfWalls[number]) => {
-    setRfWalls(prev => {
-      const before = prev[index];
-      if (!before) return prev;
-      // move this wall's openings with it, preserving how far along they sat
-      setOpenings(ops => ops.map(op => {
-        const d = Math.abs((op.x - before.x1) * (before.y2 - before.y1)
-                         - (op.y - before.y1) * (before.x2 - before.x1))
-                / (Math.hypot(before.x2 - before.x1, before.y2 - before.y1) || 1e-9);
-        if (d > 1.5) return op;            // not on this wall
-        const t = openingT(op, before);
-        return { ...op, x: wall.x1 + (wall.x2 - wall.x1) * t,
-                        y: wall.y1 + (wall.y2 - wall.y1) * t };
-      }));
-      dragRoomsWithWall(before, wall);
+  /**
+   * The wall position the last onWallChange emitted, per index.
+   *
+   * dragRoomsWithWall applies a DELTA, so it needs the wall's previous pose.
+   * Reading that from React state is not safe inside a drag: pointermove is a
+   * continuous event, React may batch several into one render, and a stale
+   * baseline makes the delta too large — room polygons then slide further than
+   * the wall they are supposed to be following. This ref is written
+   * synchronously on every emit, so the baseline is always the real one.
+   */
+  const wallBaseline = useRef<Map<number, typeof rfWalls[number]>>(new Map());
 
+  const handleWallChange = (index: number, wall: typeof rfWalls[number]) => {
+    const before = wallBaseline.current.get(index) ?? rfWalls[index];
+    if (!before) return;
+    wallBaseline.current.set(index, wall);
+
+    // NOTE: these used to run INSIDE the setRfWalls updater. Updaters must be
+    // pure — React invokes them during render and re-invokes them freely, so
+    // openings and room polygons were being moved more than once per drag
+    // frame while the wall itself moved once.
+
+    // move this wall's openings with it, preserving how far along they sat
+    setOpenings(ops => ops.map(op => {
+      const d = Math.abs((op.x - before.x1) * (before.y2 - before.y1)
+                       - (op.y - before.y1) * (before.x2 - before.x1))
+              / (Math.hypot(before.x2 - before.x1, before.y2 - before.y1) || 1e-9);
+      if (d > 1.5) return op;            // not on this wall
+      const t = openingT(op, before);
+      return { ...op, x: wall.x1 + (wall.x2 - wall.x1) * t,
+                      y: wall.y1 + (wall.y2 - wall.y1) * t };
+    }));
+    dragRoomsWithWall(before, wall);
+
+    setRfWalls(prev => {
       const next = [...prev];
       next[index] = wall;
       return next;
     });
   };
 
-  const commitWalls = async () => {
+  /**
+   * Persist walls + rooms together.
+   *
+   * The overrides exist because add / delete used to fire
+   * `setTimeout(commitWalls, 0)`, and that closure captured the CURRENT
+   * render's rfWalls — i.e. the array from before the add or delete. The new
+   * wall was never saved, and reappeared missing on reload.
+   */
+  const commitWalls = async (
+    wallsOverride?: typeof rfWalls,
+    openingsOverride?: typeof openings,
+  ) => {
+    wallBaseline.current.clear();
     if (!currentProject?.id) return;
     setSavingWalls(true);
     try {
       // rooms moved with the wall, so both have to be persisted together —
       // saving one without the other leaves the plan inconsistent on reload
-      await saveWalls(currentProject.id, rfWalls as any, openings);
+      await saveWalls(currentProject.id, (wallsOverride ?? rfWalls) as any,
+                      openingsOverride ?? openings);
       await saveRooms(currentProject.id, rooms as any);
     } catch (err) {
       console.error("Failed to save walls:", err);
@@ -923,23 +949,26 @@ export default function CanvasPage() {
   };
 
   const handleWallAdd = (wall: typeof rfWalls[number]) => {
-    setRfWalls(prev => [...prev, { ...wall, id: `wu${Date.now()}` } as any]);
-    setSelectedWallIndex(rfWalls.length);
-    setTimeout(commitWalls, 0);
+    const next = [...rfWalls, { ...wall, id: `wu${Date.now()}` } as any];
+    setRfWalls(next);
+    setSelectedWallIndex(next.length - 1);
+    void commitWalls(next);
   };
 
   const handleWallDelete = (index: number) => {
     const w = rfWalls[index];
     if (!w) return;
     // drop the openings that lived in it — a door with no wall is nonsense
-    setOpenings(ops => ops.filter(op => {
+    const nextOpenings = openings.filter(op => {
       const d = Math.abs((op.x - w.x1) * (w.y2 - w.y1) - (op.y - w.y1) * (w.x2 - w.x1))
               / (Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1e-9);
       return d > 1.5;
-    }));
-    setRfWalls(prev => prev.filter((_, i) => i !== index));
+    });
+    const nextWalls = rfWalls.filter((_, i) => i !== index);
+    setOpenings(nextOpenings);
+    setRfWalls(nextWalls);
     setSelectedWallIndex(null);
-    setTimeout(commitWalls, 0);
+    void commitWalls(nextWalls, nextOpenings);
   };
 
   // ── NOOI-11: add rooms by drawing a shape ─────────────────────────────────
