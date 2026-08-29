@@ -114,10 +114,69 @@ export function moveWallEnd(w: EditWall, end: 1 | 2, x: number, y: number): Edit
     : { ...a, y2: y, x1: x, x2: x };
 }
 
-/** How close two endpoints must be, in plan units, to count as one corner. */
-const WELD_RADIUS = 1.5;
+/** How close two endpoints must be, in plan units, to count as one corner.
+ *  Matches VERTEX_ON_WALL in the canvas page — detected walls are ~1.2 thick
+ *  and rarely terminate on exactly the same coordinate. */
+const WELD_RADIUS = 2.0;
 
 export interface WeldRef { i: number; end: 1 | 2 }
+
+/**
+ * Walls that END somewhere along the BODY of `host` — a T-junction rather than
+ * a corner.
+ *
+ * Interior partitions almost always meet an exterior wall this way: the
+ * partition stops in the middle of the wall, not at either of its ends. Corner
+ * welding alone therefore leaves every partition behind when the exterior wall
+ * moves, and the shell opens up along its whole length — floor with no walls
+ * around it, which is what the extended side of the plan was showing.
+ *
+ * A T follower only tracks the host's CROSS-axis position: it reaches further
+ * to stay attached, it does not slide along.
+ */
+function tJunctions(
+  walls: EditWall[], skip: number, host: EditWall, taken: WeldRef[],
+): WeldRef[] {
+  const h = axisAlign(host);
+  const horiz = isHoriz(h);
+  const lo = Math.min(horiz ? h.x1 : h.y1, horiz ? h.x2 : h.y2);
+  const hi = Math.max(horiz ? h.x1 : h.y1, horiz ? h.x2 : h.y2);
+  const cross = horiz ? h.y1 : h.x1;
+
+  const out: WeldRef[] = [];
+  walls.forEach((raw, i) => {
+    if (i === skip) return;
+    const w = axisAlign(raw);
+    ([1, 2] as const).forEach((end) => {
+      // a corner weld already owns this endpoint and positions it precisely
+      if (taken.some(t => t.i === i && t.end === end)) return;
+      const ex = end === 1 ? w.x1 : w.x2;
+      const ey = end === 1 ? w.y1 : w.y2;
+      const along = horiz ? ex : ey;
+      const off = horiz ? ey : ex;
+      if (Math.abs(off - cross) <= WELD_RADIUS
+          && along >= lo - WELD_RADIUS && along <= hi + WELD_RADIUS) {
+        out.push({ i, end });
+      }
+    });
+  });
+  return out;
+}
+
+/** Reach a T follower's endpoint out to the host wall's new cross-axis
+ *  position, leaving its own along-axis coordinate alone. */
+function followHost(
+  follower: EditWall, end: 1 | 2, hostHoriz: boolean, hostCross: number,
+): EditWall {
+  const a = axisAlign(follower);
+  const ownX = end === 1 ? a.x1 : a.x2;
+  const ownY = end === 1 ? a.y1 : a.y2;
+  return moveWallEnd(
+    a, end,
+    hostHoriz ? ownX : hostCross,
+    hostHoriz ? hostCross : ownY,
+  );
+}
 
 /**
  * Every other wall endpoint sitting on the corner at (x, y).
@@ -184,12 +243,12 @@ export default function FloorplanPolygonOverlay({
 }: Props) {
   // which endpoint is being dragged: wall index + which end
   const [dragEnd, setDragEnd] =
-    useState<{ i: number; end: 1 | 2; weld: WeldRef[] } | null>(null);
+    useState<{ i: number; end: 1 | 2; weld: WeldRef[]; tee: WeldRef[] } | null>(null);
   // dragging the wall LINE translates the whole wall (the gesture people
   // actually reach for when they want to "move the left wall in")
   const [dragBody, setDragBody] = useState<{
     i: number; px: number; py: number; wall: EditWall;
-    weld1: WeldRef[]; weld2: WeldRef[];
+    weld1: WeldRef[]; weld2: WeldRef[]; tee: WeldRef[];
   } | null>(null);
   const [newWall, setNewWall] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -298,12 +357,21 @@ export default function FloorplanPolygonOverlay({
               // the grabbed handle follows the cursor in BOTH axes; the wall
               // stays straight because moveWallEnd slides it rather than
               // bending it
-              onWallChange?.(dragEnd.i, moveWallEnd(w, dragEnd.end, x, y));
+              const next = moveWallEnd(w, dragEnd.end, x, y);
+              onWallChange?.(dragEnd.i, next);
               // carry the walls that met it at this corner, so the shell
               // stays closed instead of tearing open
               for (const t of dragEnd.weld) {
                 const n = walls[t.i];
                 if (n) onWallChange?.(t.i, moveWallEnd(n, t.end, x, y),
+                                      { dragRooms: false });
+              }
+              // and the partitions that T into it along its length
+              const nHoriz = isHoriz(next);
+              const nCross = nHoriz ? next.y1 : next.x1;
+              for (const t of dragEnd.tee) {
+                const n = walls[t.i];
+                if (n) onWallChange?.(t.i, followHost(n, t.end, nHoriz, nCross),
                                       { dragRooms: false });
               }
               return;
@@ -326,6 +394,13 @@ export default function FloorplanPolygonOverlay({
               for (const t of dragBody.weld2) {
                 const n = walls[t.i];
                 if (n) onWallChange?.(t.i, moveWallEnd(n, t.end, moved.x2, moved.y2),
+                                      { dragRooms: false });
+              }
+              const bHoriz = isHoriz(moved);
+              const bCross = bHoriz ? moved.y1 : moved.x1;
+              for (const t of dragBody.tee) {
+                const n = walls[t.i];
+                if (n) onWallChange?.(t.i, followHost(n, t.end, bHoriz, bCross),
                                       { dragRooms: false });
               }
               return;
@@ -382,10 +457,11 @@ export default function FloorplanPolygonOverlay({
                     (e.target as Element).setPointerCapture?.(e.pointerId);
                     onWallSelect?.(i);
                     const [px, py] = toPlan(e);
+                    const weld1 = weldTargets(walls, i, w.x1, w.y1);
+                    const weld2 = weldTargets(walls, i, w.x2, w.y2);
                     setDragBody({
-                      i, px, py, wall: w,
-                      weld1: weldTargets(walls, i, w.x1, w.y1),
-                      weld2: weldTargets(walls, i, w.x2, w.y2),
+                      i, px, py, wall: w, weld1, weld2,
+                      tee: tJunctions(walls, i, w, [...weld1, ...weld2]),
                     });
                   }}
                 />
@@ -409,11 +485,12 @@ export default function FloorplanPolygonOverlay({
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       (e.target as Element).setPointerCapture?.(e.pointerId);
+                      const weld = weldTargets(walls, i,
+                        end === 1 ? w.x1 : w.x2,
+                        end === 1 ? w.y1 : w.y2);
                       setDragEnd({
-                        i, end,
-                        weld: weldTargets(walls, i,
-                          end === 1 ? w.x1 : w.x2,
-                          end === 1 ? w.y1 : w.y2),
+                        i, end, weld,
+                        tee: tJunctions(walls, i, w, weld),
                       });
                     }}
                   />
