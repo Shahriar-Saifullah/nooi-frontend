@@ -891,7 +891,11 @@ export default function CanvasPage() {
    */
   const wallBaseline = useRef<Map<number, typeof rfWalls[number]>>(new Map());
 
-  const handleWallChange = (index: number, wall: typeof rfWalls[number]) => {
+  const handleWallChange = (
+    index: number,
+    wall: typeof rfWalls[number],
+    opts?: { dragRooms?: boolean },
+  ) => {
     const before = wallBaseline.current.get(index) ?? rfWalls[index];
     if (!before) return;
     wallBaseline.current.set(index, wall);
@@ -911,7 +915,11 @@ export default function CanvasPage() {
       return { ...op, x: wall.x1 + (wall.x2 - wall.x1) * t,
                       y: wall.y1 + (wall.y2 - wall.y1) * t };
     }));
-    dragRoomsWithWall(before, wall);
+    // Only the wall the user actually grabbed drags the room boundary. Walls
+    // that moved to stay welded at a corner must not drag it too: a vertex
+    // sitting on that corner is within reach of both walls and would be moved
+    // twice in one frame, sliding the room clear of the shell.
+    if (opts?.dragRooms !== false) dragRoomsWithWall(before, wall);
 
     setRfWalls(prev => {
       const next = [...prev];
