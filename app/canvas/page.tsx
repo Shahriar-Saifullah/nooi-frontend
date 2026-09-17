@@ -17,6 +17,7 @@ import CanvasPromptBox from "@/components/CanvasPromptBox";
 import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
+import FurnitureListPanel from "@/components/FurnitureListPanel";
 import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
 import {
   snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom, pushOutOfWalls,
@@ -366,6 +367,36 @@ export default function CanvasPage() {
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [placedFurniture, wallColors, wallSurfaces, doorFinishes, currentProject?.id]);
+
+  // ─── Canvas → Shop ─────────────────────────────────────────────────────────
+  // The save above is debounced 1500ms. Navigating inside that window would
+  // leave the shop reading a stale room, so flush the pending save and wait for
+  // it to land before leaving the canvas.
+  const [furnitureListOpen, setFurnitureListOpen] = useState(false);
+  const [shopBusy, setShopBusy] = useState(false);
+
+  const goToShop = async () => {
+    if (!currentProject?.id || shopBusy) return;
+    setShopBusy(true);
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    try {
+      await saveFurniture(
+        currentProject.id,
+        placedFurniture as any,
+        wallColors,
+        wallSurfaces,
+        doorFinishes,
+      );
+      router.push(`/shop?project=${currentProject.id}`);
+    } catch (err) {
+      console.error("Could not save the room before opening the shop:", err);
+      setShopBusy(false);
+      // TODO(NOOI-51): surface this in the panel instead of only the console
+    }
+  };
 
   // Wall snapping can re-orient an item so its back faces the wall.
   const handleFurnitureRotate = (id: string, rotation: number) => {
@@ -1383,10 +1414,34 @@ export default function CanvasPage() {
             </div>
           )}
 
-          {/* Furniture count — hidden during walkthrough to save header space */}
+          {/* Furniture count — opens the item list and the route into the shop.
+              Hidden during walkthrough to save header space. */}
           {viewMode === "3d" && !walkthroughActive && placedFurniture.length > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f0f7f6] border border-[#c7de7d] rounded-full text-[12px] font-medium text-[#004643]">
-              <Sofa size={12} />{placedFurniture.length} item{placedFurniture.length !== 1 ? "s" : ""}
+            <div className="relative">
+              <button
+                onClick={() => setFurnitureListOpen(o => !o)}
+                aria-expanded={furnitureListOpen}
+                aria-haspopup="dialog"
+                title="See everything in this room"
+                className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-full text-[12px] font-medium text-[#004643] transition-colors
+                            focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#004643]
+                            ${furnitureListOpen
+                              ? "bg-[#c7de7d] border-[#c7de7d]"
+                              : "bg-[#f0f7f6] border-[#c7de7d] hover:bg-[#e4f0ee]"}`}
+              >
+                <Sofa size={12} />{placedFurniture.length} item{placedFurniture.length !== 1 ? "s" : ""}
+              </button>
+
+              {furnitureListOpen && (
+                <FurnitureListPanel
+                  items={placedFurniture}
+                  selectedId={selectedFurnitureId}
+                  onSelect={setSelectedFurnitureId}
+                  onClose={() => setFurnitureListOpen(false)}
+                  onShop={goToShop}
+                  shopBusy={shopBusy}
+                />
+              )}
             </div>
           )}
 
