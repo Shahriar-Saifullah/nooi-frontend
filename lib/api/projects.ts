@@ -57,6 +57,9 @@ export interface Project {
       y: number;
       width: number;
     }>;
+    /** Placed items, written by saveFurniture. The canvas and the shop both
+        read this, so it is declared here rather than cast at each call site. */
+    furniture?: FurniturePlacement[];
   };
   created_at: string;
   updated_at: string;
