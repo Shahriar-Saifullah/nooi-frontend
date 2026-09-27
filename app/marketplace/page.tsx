@@ -1,441 +1,708 @@
 "use client";
 
-import React, { useState } from "react";
-import Link from "next/link";
-import Image from "next/image";
-import { motion } from "framer-motion";
-import { Search, ArrowRight, Check, Globe, ShieldCheck, Clock, ChevronDown, TrendingDown, Truck } from "lucide-react";
-import Navbar from "@/components/Navbar";
-import { useMarketplaceTranslations, useLanguage } from "@/lib/i18n/useTranslations";
+/**
+ * Marketplace — screen 01
+ * ----------------------------------------------------------------------------
+ * Two stacked sections:
+ *
+ *   "Shop this room"  Only when ?project=<id> is present, which is how the
+ *                     canvas hands off. Lists what the shopper placed, matched
+ *                     to real products, with per-item selection and a bulk add.
+ *
+ *   "All furniture"   The browsable grid — group chips, vendor and price
+ *                     filters, sort, and paging.
+ *
+ * Notes for whoever picks this up next:
+ *
+ *   Grouping uses groupPlacedFurniture from FurnitureListPanel, the same
+ *   function the canvas panel uses. Six identical dining chairs must read as
+ *   one row with ×6 in both places or the cart totals won't match what the
+ *   shopper was shown.
+ *
+ *   Copy lives in the COPY map below rather than lib/i18n/translations.ts. The
+ *   page is self-contained that way; move the strings across when the
+ *   translation files get consolidated. Arabic must not regress — the previous
+ *   version of this page was fully translated.
+ *
+ *   Ratings are deliberately absent. See the note in ProductCard.
+ */
 
-function LanguageToggle() {
-  const { language, toggleLanguage } = useLanguage();
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Search, SlidersHorizontal, Check, X, ArrowLeft, Box, Loader2,
+} from "lucide-react";
+
+import Navbar from "@/components/Navbar";
+import ProductCard from "@/components/marketplace/ProductCard";
+import { useLanguage } from "@/lib/i18n/useTranslations";
+import { useCartStore } from "@/lib/store/cart.store";
+import { getProject } from "@/lib/api/projects";
+import {
+  getFacets, getProducts, getCanvasMatches,
+  type Facets, type MarketplaceProduct, type ProductVariant, type ProductQuery,
+} from "@/lib/api/marketplace";
+import { groupPlacedFurniture, type FurnitureGroup } from "@/components/FurnitureListPanel";
+import { rankProducts, type ProductMatch } from "@/lib/matching/products";
+
+// ─── Copy ────────────────────────────────────────────────────────────────────
+
+const COPY = {
+  en: {
+    fromDesign: "From your design",
+    roomTitleA: "Shop this room,",
+    roomTitleB: "piece by piece",
+    roomNote: "We matched what you placed to real products from our vendors.",
+    openDesign: "Open design",
+    addSelected: (n: number) => `Add ${n} to cart`,
+    selected: (n: number, t: number) => `${n} of ${t} selected`,
+    noMatches: "No vendor carries this piece yet.",
+    allFurniture: "All furniture",
+    countLabel: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
+    search: "Search furniture",
+    vendor: "Vendor",
+    price: "Price",
+    allVendors: "All vendors",
+    anyPrice: "Any price",
+    inStockOnly: "In stock",
+    threeDOnly: "3D ready",
+    clearAll: "Clear all",
+    sort: "Sort",
+    sortNewest: "Newest",
+    sortPriceAsc: "Price: low to high",
+    sortPriceDesc: "Price: high to low",
+    sortLead: "Fastest delivery",
+    emptyTitle: "No furniture matches",
+    emptyBody: "Try a broader search, another category, or remove a filter.",
+    clearFilters: "Clear all filters",
+    loadMore: "Load more",
+    threeD: "3D ready",
+    inCart: "In cart",
+    addToCart: "Add to cart",
+    soldOut: "Sold out",
+    days: "days",
+    from: "from",
+  },
+  ar: {
+    fromDesign: "من تصميمك",
+    roomTitleA: "تسوّق هذه الغرفة،",
+    roomTitleB: "قطعة بقطعة",
+    roomNote: "طابقنا ما وضعته مع منتجات حقيقية من موردينا.",
+    openDesign: "فتح التصميم",
+    addSelected: (n: number) => `أضف ${n} إلى السلة`,
+    selected: (n: number, t: number) => `${n} من ${t} محدد`,
+    noMatches: "لا يوجد مورد لهذه القطعة بعد.",
+    allFurniture: "كل الأثاث",
+    countLabel: (n: number) => `${n} منتج`,
+    search: "ابحث عن أثاث",
+    vendor: "المورد",
+    price: "السعر",
+    allVendors: "كل الموردين",
+    anyPrice: "أي سعر",
+    inStockOnly: "متوفر",
+    threeDOnly: "جاهز ثلاثي الأبعاد",
+    clearAll: "مسح الكل",
+    sort: "ترتيب",
+    sortNewest: "الأحدث",
+    sortPriceAsc: "السعر: من الأقل",
+    sortPriceDesc: "السعر: من الأعلى",
+    sortLead: "أسرع توصيل",
+    emptyTitle: "لا توجد نتائج",
+    emptyBody: "جرّب بحثًا أوسع أو فئة أخرى أو أزل أحد عوامل التصفية.",
+    clearFilters: "مسح كل عوامل التصفية",
+    loadMore: "عرض المزيد",
+    threeD: "ثلاثي الأبعاد",
+    inCart: "في السلة",
+    addToCart: "أضف إلى السلة",
+    soldOut: "نفدت الكمية",
+    days: "يوم",
+    from: "من",
+  },
+} as const;
+
+const PAGE_SIZE = 12;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Cheapest in-stock variant, else cheapest overall. What "add to cart" buys. */
+function defaultVariant(product: MarketplaceProduct): ProductVariant | null {
+  const active = product.variants.filter(v => v.is_active);
+  if (!active.length) return null;
+  const inStock = active.filter(v => v.stock_quantity > 0);
+  const pool = inStock.length ? inStock : active;
+  return pool.reduce((best, v) => (Number(v.price) < Number(best.price) ? v : best), pool[0]);
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+
+function MarketplaceInner() {
+  const router = useRouter();
+  const params = useSearchParams();
+  const projectId = params.get("project");
+
+  const { language } = useLanguage();
+  const t = COPY[language === "ar" ? "ar" : "en"];
+  const isArabic = language === "ar";
+
+  const cartItems = useCartStore(s => s.items);
+  const addItemOptimistic = useCartStore(s => s.addItemOptimistic);
+  const removeItemOptimistic = useCartStore(s => s.removeItemOptimistic);
+  const updateQuantityOptimistic = useCartStore(s => s.updateQuantityOptimistic);
+
+  // Filters
+  const [group, setGroup] = useState("All");
+  const [retailerId, setRetailerId] = useState("All");
+  const [priceBand, setPriceBand] = useState("All");
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [threeDOnly, setThreeDOnly] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ProductQuery["sort"]>("newest");
+  const [page, setPage] = useState(1);
+
+  // Data
+  const [facets, setFacets] = useState<Facets | null>(null);
+  const [products, setProducts] = useState<MarketplaceProduct[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Room band
+  const [roomLoading, setRoomLoading] = useState(Boolean(projectId));
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [roomThumb, setRoomThumb] = useState<string | null>(null);
+  const [roomRows, setRoomRows] = useState<
+    { group: FurnitureGroup; match: ProductMatch | null }[]
+  >([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // ── Price formatting ───────────────────────────────────────────────────────
+  const toArabicDigits = useCallback(
+    (s: string) => (isArabic ? s.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[+d]) : s),
+    [isArabic],
+  );
+
+  const formatPrice = useCallback(
+    (value: number) => toArabicDigits(`$${Math.round(value).toLocaleString("en-US")}`),
+    [toArabicDigits],
+  );
+
+  const formatNumber = useCallback(
+    (value: number) => toArabicDigits(String(value)),
+    [toArabicDigits],
+  );
+
+  // ── Facets ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    getFacets().then(setFacets).catch(err => {
+      console.error("[marketplace] facets failed:", err);
+    });
+  }, []);
+
+  // ── Grid ───────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    const band = priceBand === "All" ? null : priceBand.split("-").map(Number);
+
+    getProducts({
+      group,
+      retailerId,
+      search: search.trim() || undefined,
+      minPrice: band ? band[0] : undefined,
+      maxPrice: band && band[1] ? band[1] : undefined,
+      inStock: inStockOnly || undefined,
+      sort,
+      page,
+      limit: PAGE_SIZE,
+    })
+      .then(res => {
+        if (cancelled) return;
+        // 3D-ready is a client-side narrowing — every seeded product has a
+        // canvas_model_id today, so it only bites once vendors list pieces
+        // without a model.
+        const rows = threeDOnly ? res.products.filter(p => p.is_3d) : res.products;
+        setProducts(prev => (page === 1 ? rows : [...prev, ...rows]));
+        setTotal(res.total);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error("[marketplace] products failed:", err);
+        setError(String(err.message ?? err));
+      })
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => { cancelled = true; };
+  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, search, sort, page]);
+
+  // Any filter change resets paging.
+  useEffect(() => {
+    setPage(1);
+  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, search, sort]);
+
+  // ── Room band ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+
+    (async () => {
+      setRoomLoading(true);
+      try {
+        const project = await getProject(projectId);
+        if (cancelled) return;
+
+        setProjectName(project.name);
+        setRoomThumb(project.thumbnail_url);
+
+        const placed = project.room_data?.furniture ?? [];
+        const groups = groupPlacedFurniture(placed as any);
+
+        // One request per distinct model. Placed rooms are small, so this is a
+        // handful of calls, not a storm.
+        const rows = await Promise.all(
+          groups.map(async g => {
+            if (!g.sample.modelId) return { group: g, match: null };
+            try {
+              const candidates = await getCanvasMatches(g.sample.modelId);
+              const ranked = rankProducts(g, candidates);
+              return { group: g, match: ranked[0] ?? null };
+            } catch {
+              return { group: g, match: null };
+            }
+          }),
+        );
+
+        if (cancelled) return;
+        setRoomRows(rows);
+        // Everything matched starts selected — the shopper came here to buy.
+        setSelected(new Set(rows.filter(r => r.match).map(r => r.group.key)));
+      } catch (err) {
+        if (!cancelled) console.error("[marketplace] room load failed:", err);
+      } finally {
+        if (!cancelled) setRoomLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // ── Cart ───────────────────────────────────────────────────────────────────
+
+  const quantityFor = useCallback(
+    (product: MarketplaceProduct) => {
+      const ids = new Set(product.variants.map(v => v.id));
+      return cartItems
+        .filter(i => ids.has(i.variant_id))
+        .reduce((n, i) => n + i.quantity, 0);
+    },
+    [cartItems],
+  );
+
+  const addToCart = useCallback(
+    (product: MarketplaceProduct, quantity = 1) => {
+      const variant = defaultVariant(product);
+      if (!variant) return;
+
+      const existing = cartItems.find(i => i.variant_id === variant.id);
+      if (existing) {
+        updateQuantityOptimistic(existing.id, existing.quantity + quantity);
+        return;
+      }
+
+      addItemOptimistic({
+        id: variant.id, // local cart keys on the variant; server sync replaces it
+        variant_id: variant.id,
+        quantity,
+        product_data: {
+          title: product.title,
+          price: Number(variant.price),
+          retailer_name: product.retailer?.name,
+          color: variant.color ?? undefined,
+          image: variant.images?.[0],
+        },
+      });
+    },
+    [cartItems, addItemOptimistic, updateQuantityOptimistic],
+  );
+
+  const decrement = useCallback(
+    (product: MarketplaceProduct) => {
+      const ids = new Set(product.variants.map(v => v.id));
+      const item = cartItems.find(i => ids.has(i.variant_id));
+      if (!item) return;
+      if (item.quantity <= 1) removeItemOptimistic(item.id);
+      else updateQuantityOptimistic(item.id, item.quantity - 1);
+    },
+    [cartItems, removeItemOptimistic, updateQuantityOptimistic],
+  );
+
+  const addSelectedRoomItems = useCallback(() => {
+    for (const row of roomRows) {
+      if (!row.match || !selected.has(row.group.key)) continue;
+      addToCart(row.match.product, row.group.qty);
+    }
+  }, [roomRows, selected, addToCart]);
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const anyFilter =
+    group !== "All" || retailerId !== "All" || priceBand !== "All" ||
+    inStockOnly || threeDOnly || search.trim().length > 0;
+
+  const clearAll = () => {
+    setGroup("All"); setRetailerId("All"); setPriceBand("All");
+    setInStockOnly(false); setThreeDOnly(false); setSearch(""); setSort("newest");
+  };
+
+  const priceBands = useMemo(() => {
+    if (!facets) return [];
+    const { max } = facets.price;
+    return [
+      { v: "All", l: t.anyPrice },
+      { v: "0-250", l: `< ${formatPrice(250)}` },
+      { v: "250-750", l: `${formatPrice(250)} – ${formatPrice(750)}` },
+      { v: "750-2000", l: `${formatPrice(750)} – ${formatPrice(2000)}` },
+      { v: `2000-${Math.ceil(max)}`, l: `> ${formatPrice(2000)}` },
+    ];
+  }, [facets, formatPrice, t.anyPrice]);
+
+  const matchedCount = roomRows.filter(r => r.match && selected.has(r.group.key)).length;
+  const hasMore = products.length < total;
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
-    <button
-      onClick={toggleLanguage}
-      className="flex items-center gap-1.5 text-[#9ca3af] text-[12px] font-bold cursor-pointer hover:text-neutral-700 transition-colors"
-    >
-      <Globe className="w-4 h-4" />
-      <span>{language === "en" ? "العربية" : "English"}</span>
-      <ChevronDown className="w-3 h-3" />
-    </button>
+    <div className="min-h-screen bg-white" dir={isArabic ? "rtl" : "ltr"}>
+      <Navbar />
+
+      <main className="max-w-[1180px] mx-auto px-5 pb-20">
+        {/* ─── Shop this room ─────────────────────────────────────────────── */}
+        {projectId && (
+          <section
+            aria-label="Shop your design"
+            className="mt-6 grid md:grid-cols-[minmax(0,380px)_1fr] gap-6 p-5 rounded-2xl border border-[#E6EBEA] bg-[#FBFCFC]"
+          >
+            <div className="rounded-xl overflow-hidden bg-[#F1F4F4] aspect-[4/3]">
+              {roomThumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={roomThumb} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-[#B3B9B9] text-[12px]">
+                  <Box size={26} strokeWidth={1.25} />
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col min-w-0">
+              <span className="text-[11.5px] text-[#646968]">
+                {t.fromDesign}
+                {projectName ? ` · ${projectName}` : ""}
+              </span>
+
+              <h1 className="mt-1 text-[26px] leading-tight text-[#101212]">
+                {t.roomTitleA}{" "}
+                <span
+                  className="italic"
+                  style={{ fontFamily: "var(--font-instrument), Georgia, serif" }}
+                >
+                  {t.roomTitleB}
+                </span>
+              </h1>
+
+              <p className="mt-1.5 text-[12.5px] text-[#646968]">{t.roomNote}</p>
+
+              <div className="mt-4 flex-1 divide-y divide-[#E6EBEA] border-y border-[#E6EBEA]">
+                {roomLoading && (
+                  <div className="py-6 flex items-center gap-2 text-[12.5px] text-[#8E9493]">
+                    <Loader2 size={14} className="animate-spin" />
+                  </div>
+                )}
+
+                {!roomLoading && roomRows.map(({ group: g, match }) => {
+                  const on = selected.has(g.key);
+                  const qty = match ? quantityFor(match.product) : 0;
+
+                  return (
+                    <div key={g.key} className="flex items-center gap-3 py-2.5">
+                      <button
+                        role="checkbox"
+                        aria-checked={on}
+                        aria-label={`Select ${g.cat?.name ?? g.sample.name}`}
+                        disabled={!match}
+                        onClick={() =>
+                          setSelected(prev => {
+                            const next = new Set(prev);
+                            if (next.has(g.key)) next.delete(g.key);
+                            else next.add(g.key);
+                            return next;
+                          })
+                        }
+                        className={`shrink-0 w-[18px] h-[18px] rounded-[5px] border flex items-center justify-center transition-colors
+                          ${on ? "bg-[#004643] border-[#004643] text-white" : "bg-white border-[#D5DBDA]"}
+                          disabled:opacity-30 disabled:cursor-not-allowed`}
+                      >
+                        {on && <Check size={11} strokeWidth={3} />}
+                      </button>
+
+                      <span className="shrink-0 w-10 h-10 rounded-lg bg-[#F1F4F4] border border-[#E6EBEA] overflow-hidden flex items-center justify-center">
+                        {g.cat?.thumbnail ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={g.cat.thumbnail} alt="" className="w-full h-full object-contain" />
+                        ) : (
+                          <Box size={15} className="text-[#B3B9B9]" strokeWidth={1.25} />
+                        )}
+                      </span>
+
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12.5px] font-medium text-[#101212] truncate">
+                          {g.cat?.name ?? g.sample.name}
+                          {g.qty > 1 && (
+                            <span className="ms-1.5 text-[11px] text-[#8E9493]">×{g.qty}</span>
+                          )}
+                        </span>
+                        <span className="block text-[11px] text-[#8E9493] truncate">
+                          {match
+                            ? `${match.product.retailer?.name ?? ""} · ${match.product.lead_time_days} ${t.days}`
+                            : t.noMatches}
+                        </span>
+                      </span>
+
+                      {qty > 0 && (
+                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-[#E7FBEB] text-[10.5px] font-medium text-[#28603A]">
+                          {t.inCart}
+                        </span>
+                      )}
+
+                      <span className="shrink-0 text-[12.5px] font-semibold text-[#004643] tabular-nums">
+                        {match ? formatPrice(match.product.from_price * g.qty) : "—"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-[11.5px] text-[#646968]">
+                  {t.selected(matchedCount, roomRows.length)}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => router.push(`/canvas?project=${projectId}`)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] font-medium text-[#004643] transition-colors hover:bg-[#F1F4F4]"
+                  >
+                    <ArrowLeft size={13} className={isArabic ? "rotate-180" : ""} />
+                    {t.openDesign}
+                  </button>
+                  <button
+                    onClick={addSelectedRoomItems}
+                    disabled={matchedCount === 0}
+                    className="px-4 py-2 rounded-full bg-[#004643] text-white text-[12.5px] font-medium transition-colors hover:bg-[#003836] disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {t.addSelected(matchedCount)}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ─── All furniture ──────────────────────────────────────────────── */}
+        <section aria-label="All furniture" className="mt-10">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-[19px] font-medium text-[#101212]">{t.allFurniture}</h2>
+            <span className="text-[12px] text-[#8E9493]">{t.countLabel(total)}</span>
+          </div>
+
+          {/* Group chips */}
+          <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1">
+            {(facets?.groups ?? []).map(g => (
+              <button
+                key={g.group}
+                onClick={() => setGroup(g.group)}
+                className={`shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-[12.5px] transition-colors
+                  ${group === g.group
+                    ? "bg-[#004643] border-[#004643] text-white"
+                    : "bg-white border-[#D5DBDA] text-[#343837] hover:bg-[#F1F4F4]"}`}
+              >
+                {g.group}
+                <span className={group === g.group ? "text-white/60" : "text-[#8E9493]"}>
+                  {g.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Filter bar */}
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <span className="relative">
+              <Search size={13} className="absolute start-3 top-1/2 -translate-y-1/2 text-[#8E9493]" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder={t.search}
+                className="ps-8 pe-3 py-1.5 w-[190px] rounded-full border border-[#D5DBDA] bg-white text-[12.5px] text-[#101212] placeholder:text-[#B3B9B9] focus:outline-none focus:border-[#87DDD7]"
+              />
+            </span>
+
+            <select
+              value={priceBand}
+              onChange={e => setPriceBand(e.target.value)}
+              aria-label={t.price}
+              className="px-3 py-1.5 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] text-[#343837] focus:outline-none focus:border-[#87DDD7]"
+            >
+              {priceBands.map(o => (
+                <option key={o.v} value={o.v}>{o.l}</option>
+              ))}
+            </select>
+
+            <select
+              value={retailerId}
+              onChange={e => setRetailerId(e.target.value)}
+              aria-label={t.vendor}
+              className="px-3 py-1.5 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] text-[#343837] focus:outline-none focus:border-[#87DDD7]"
+            >
+              <option value="All">{t.allVendors}</option>
+              {(facets?.vendors ?? []).map(v => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+
+            {[
+              { on: inStockOnly, set: setInStockOnly, label: t.inStockOnly },
+              { on: threeDOnly, set: setThreeDOnly, label: t.threeDOnly },
+            ].map(tog => (
+              <button
+                key={tog.label}
+                onClick={() => tog.set(!tog.on)}
+                aria-pressed={tog.on}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[12.5px] transition-colors
+                  ${tog.on
+                    ? "bg-[#F3FEFD] border-[#87DDD7] text-[#004643]"
+                    : "bg-white border-[#D5DBDA] text-[#343837] hover:bg-[#F1F4F4]"}`}
+              >
+                {tog.on && <Check size={11} strokeWidth={3} />}
+                {tog.label}
+              </button>
+            ))}
+
+            {anyFilter && (
+              <button
+                onClick={clearAll}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-[12px] text-[#812F28] hover:underline"
+              >
+                <X size={12} />
+                {t.clearAll}
+              </button>
+            )}
+
+            <span className="ms-auto flex items-center gap-2">
+              <label className="text-[11.5px] text-[#8E9493]">
+                <SlidersHorizontal size={12} className="inline me-1" />
+                {t.sort}
+              </label>
+              <select
+                value={sort}
+                onChange={e => setSort(e.target.value as ProductQuery["sort"])}
+                className="px-3 py-1.5 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] text-[#343837] focus:outline-none focus:border-[#87DDD7]"
+              >
+                <option value="newest">{t.sortNewest}</option>
+                <option value="price_asc">{t.sortPriceAsc}</option>
+                <option value="price_desc">{t.sortPriceDesc}</option>
+                <option value="lead_time">{t.sortLead}</option>
+              </select>
+            </span>
+          </div>
+
+          {/* Results */}
+          {error && (
+            <div className="mt-8 p-4 rounded-xl border border-[#812F28]/25 bg-[#FFFAF9] text-[12.5px] text-[#812F28]">
+              {error}
+            </div>
+          )}
+
+          {loading && page === 1 && (
+            <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="rounded-xl border border-[#E6EBEA] overflow-hidden">
+                  <div className="aspect-[4/3] bg-[#F1F4F4] animate-pulse" />
+                  <div className="p-3.5 space-y-2">
+                    <div className="h-2.5 w-1/3 bg-[#F1F4F4] rounded animate-pulse" />
+                    <div className="h-3 w-3/4 bg-[#F1F4F4] rounded animate-pulse" />
+                    <div className="h-7 bg-[#F1F4F4] rounded-full animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!loading && !error && products.length === 0 && (
+            <div className="mt-10 py-14 text-center">
+              <div className="text-[15px] font-medium text-[#101212]">{t.emptyTitle}</div>
+              <div className="mt-1.5 text-[12.5px] text-[#646968]">{t.emptyBody}</div>
+              {anyFilter && (
+                <button
+                  onClick={clearAll}
+                  className="mt-4 px-4 py-2 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] font-medium text-[#004643] hover:bg-[#F1F4F4]"
+                >
+                  {t.clearFilters}
+                </button>
+              )}
+            </div>
+          )}
+
+          {products.length > 0 && (
+            <>
+              <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {products.map(p => (
+                  <ProductCard
+                    key={p.id}
+                    product={p}
+                    quantity={quantityFor(p)}
+                    onOpen={prod => router.push(`/marketplace/${prod.id}`)}
+                    onAdd={prod => addToCart(prod, 1)}
+                    onIncrement={prod => addToCart(prod, 1)}
+                    onDecrement={decrement}
+                    formatPrice={formatPrice}
+                    formatNumber={formatNumber}
+                    labels={{
+                      threeD: t.threeD,
+                      inCart: t.inCart,
+                      addToCart: t.addToCart,
+                      soldOut: t.soldOut,
+                      days: t.days,
+                      from: t.from,
+                    }}
+                  />
+                ))}
+              </div>
+
+              {hasMore && (
+                <div className="mt-8 flex justify-center">
+                  <button
+                    onClick={() => setPage(p => p + 1)}
+                    disabled={loading}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] font-medium text-[#004643] hover:bg-[#F1F4F4] disabled:opacity-50"
+                  >
+                    {loading && <Loader2 size={13} className="animate-spin" />}
+                    {t.loadMore}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </main>
+    </div>
   );
 }
 
 export default function MarketplacePage() {
-  const t = useMarketplaceTranslations();
-  const { language } = useLanguage();
-
-  // Convert price string digits to Arabic-Indic numerals
-  const arPrice = (p: string) => language === "ar" ? p.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[+d]) : p;
-
-  const categories = [
-    { name: t.categories.seating,  img: "/assets/seating.png",  bg: "#f8f8f8" },
-    { name: t.categories.lighting, img: "/assets/lighting.png", bg: "#c2915b" },
-    { name: t.categories.tables,   img: "/assets/tables.png",   bg: "#e2e2e2" },
-    { name: t.categories.storage,  img: "/assets/storage.png",  bg: "#d8d8d8" },
-    { name: t.categories.decor,    img: "/assets/decor.png",    bg: "#b8b8b8" },
-    { name: t.categories.outdoor,  img: "/assets/outdoor.png",  bg: "#e8e1d5" },
-  ];
-
+  // useSearchParams needs a Suspense boundary or the route opts out of static
+  // rendering and the build warns.
   return (
-    <div className="relative min-h-screen bg-white font-schibsted overflow-x-hidden antialiased">
-
-      <Navbar />
-
-      {/* HERO */}
-      <section className="pt-[180px] pb-[80px] px-4 flex flex-col items-center text-center relative overflow-hidden bg-[#E9F0EF]">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white border border-[#e2eaf0] rounded-full px-[14px] py-[6px] flex items-center gap-[8px] mb-10 shadow-sm"
-        >
-          <div className="w-[8px] h-[8px] rounded-full bg-[#8bec5c]" />
-          <span className="font-schibsted font-medium text-[13px] text-[#555f6d]">{t.hero.badge}</span>
-        </motion.div>
-
-        <motion.h1
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="max-w-[1200px] font-schibsted font-semibold text-[48px] md:text-[84px] leading-[1.05] text-[#111d27] mb-8 tracking-[-3px]"
-        >
-          {t.hero.headlineLine1}<br />
-          <span className={`font-instrument italic font-normal text-[#004643] tracking-normal`}>
-            {t.hero.headlineLine2}
-          </span>
-        </motion.h1>
-
-        <motion.p
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="max-w-[660px] text-[18px] md:text-[21px] text-[#555f6d] leading-[1.5] mb-14 font-schibsted opacity-70"
-        >
-          {t.hero.subtext}
-        </motion.p>
-
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.3 }}
-          className="w-full max-w-[900px] h-[64px] md:h-[74px] bg-white border border-[#F3F4F6] rounded-[16px] flex items-center p-1.5 md:p-2 shadow-[0_30px_60px_rgba(0,0,0,0.08)] mb-14 md:mb-20 mx-auto"
-        >
-          <div className="flex-1 flex items-center gap-2 md:gap-4 pl-3 md:pl-10">
-            <Image width={24} height={24} src="/assets/sofaIcon.png" alt="" className="w-5 h-5 md:w-6 md:h-6 opacity-40 shrink-0" />
-            <input type="text" placeholder={t.hero.searchPlaceholder} className="w-full bg-transparent outline-none text-[15px] md:text-[18px] text-[#111d27] placeholder:text-[#9ca3af] font-schibsted" />
-          </div>
-          <div className="hidden md:block w-px h-8 bg-[#E5E7EB] mx-2" />
-          <button className="h-[52px] md:h-[60px] px-5 md:px-10 bg-[#004643] text-white rounded-[11px] font-bold text-[15px] md:text-[17px] hover:bg-[#003330] transition-all flex items-center gap-2 shrink-0">
-            <span className="hidden md:inline">{t.hero.browseCatalog}</span>
-            <ArrowRight className={`w-5 h-5`} />
-          </button>
-        </motion.div>
-
-        <div className="flex items-center gap-4">
-          {[Globe, Check, Clock, ShieldCheck].map((Icon, i) => (
-            <div key={i} className="w-[44px] h-[44px] border border-[#d1d5db] rounded-[10px] flex items-center justify-center bg-white/40 shadow-sm">
-              <Icon className="w-5 h-5 text-[#555f6d] opacity-60" />
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* CATALOG SECTION */}
-      <section className="py-[80px] md:py-[120px] px-4 bg-white overflow-hidden">
-        <div className="max-w-[1240px] mx-auto flex flex-col lg:flex-row items-center gap-[40px] md:gap-[80px] lg:gap-[120px]">
-          <div className="flex-1 relative w-full">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              className="relative rounded-[24px] md:rounded-[32px] bg-[#f8fafc] aspect-square sm:aspect-[1.3/1] w-full flex items-center justify-center border border-[#e2eaf0] shadow-sm overflow-hidden"
-            >
-              <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-6">
-                <div className="relative w-full h-full rounded-xl md:rounded-2xl overflow-hidden flex items-center justify-center">
-                  <Image fill src="/assets/furnitureCatalog.png" alt="Furniture Catalog" className="object-cover" />
-                </div>
-              </div>
-              <div className="absolute bottom-3 sm:bottom-6 left-3 sm:left-6 right-3 sm:right-6 h-[56px] sm:h-[80px] bg-white/90 backdrop-blur-xl border border-white rounded-[16px] md:rounded-[24px] shadow-lg flex items-center justify-between px-4 sm:px-8 z-20">
-                <div className="flex flex-col">
-                  <span className="text-[10px] md:text-[12px] text-[#555f6d] font-medium tracking-tight">{t.hero.itemsAvailable}</span>
-                  <span className="text-[18px] md:text-[24px] font-bold text-[#111d27]">{language === "ar" ? "٢.٤ مليون+" : "2.4 Million+"}</span>
-                </div>
-                <div className="w-[36px] md:w-[44px] h-[36px] md:h-[44px] bg-[#DFF8E6] rounded-full flex items-center justify-center">
-                  <Image width={24} height={24} src="/assets/tickIcon.svg" alt="Tick" className="w-5 h-5 md:w-6 md:h-6" />
-                </div>
-              </div>
-            </motion.div>
-          </div>
-
-          <div className="flex-1 max-w-[600px] text-center lg:text-left">
-            <div className="bg-[#ECFDF5] border border-[#D1FAE5] rounded-full px-4 py-1.5 w-fit mb-6 md:mb-8 mx-auto lg:mx-0">
-              <span className="text-[12px] md:text-[13px] font-bold text-[#059669] uppercase tracking-wider">{t.catalog.badge}</span>
-            </div>
-            <h2 className="max-w-[540px] mx-auto lg:mx-0 text-[32px] sm:text-[42px] md:text-[46px] font-bold text-[#111d27] leading-[1.1] mb-6 md:mb-8 tracking-[-1px] md:tracking-[-1.5px] font-schibsted">
-              {t.catalog.heading}
-            </h2>
-            <p className="text-[16px] md:text-[18px] text-[#4B5563] leading-[1.6] md:leading-[1.7] mb-8 md:mb-10 opacity-70 px-2 lg:px-0">
-              {t.catalog.body}
-            </p>
-
-            <div className="flex flex-col gap-6 md:gap-8 mb-10 md:mb-12 text-left">
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#004643" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7L12 12L22 7L12 2Z"/><path d="M2 17L12 22L22 17"/><path d="M2 12L12 17L22 12"/></svg>
-                </div>
-                <div>
-                  <h4 className="text-[17px] md:text-[18px] font-bold text-[#111d27] mb-1">{t.catalog.feature1Title}</h4>
-                  <p className="max-w-[540px] text-[13px] md:text-[14px] text-[#4B5563] opacity-70 leading-relaxed">{t.catalog.feature1Desc}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-4">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#004643" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 3H2L10 12.46V19L14 21V12.46L22 3Z"/></svg>
-                </div>
-                <div>
-                  <h4 className="text-[17px] md:text-[18px] font-bold text-[#111d27] mb-1">{t.catalog.feature2Title}</h4>
-                  <p className="max-w-[540px] text-[13px] md:text-[14px] text-[#4B5563] opacity-70 leading-relaxed">{t.catalog.feature2Desc}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-center lg:justify-start">
-              <button className="group relative h-[48px] pl-4 pr-1 bg-[#004643] text-white rounded-[16px] font-bold text-[15px] hover:bg-[#003330] transition-all flex items-center gap-3 shadow-[0_20px_40px_rgba(0,70,67,0.15)]">
-                {t.catalog.cta}
-                <div className="w-[40px] h-[40px] bg-white rounded-[12px] flex items-center justify-center group-hover:scale-105 transition-transform">
-                  <ArrowRight className={`w-4 h-4 text-black`} />
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* PRICING VISIBILITY */}
-      <section className="py-[120px] px-4 bg-[#f8fafc] overflow-hidden">
-        <div className="max-w-[1240px] mx-auto flex flex-col lg:flex-row items-center gap-[60px] md:gap-[80px] lg:gap-[120px]">
-          <div className="flex-1 max-w-[500px] text-center lg:text-left">
-            <div className="bg-[#eff6ff] border border-[#dbeafe] rounded-full px-4 py-1.5 w-fit mb-8 mx-auto lg:mx-0">
-              <span className="text-[13px] font-bold text-[#2563eb] uppercase tracking-wider">{t.pricing.badge}</span>
-            </div>
-            <h2 className="max-w-[800px] text-[34px] md:text-[46px] font-bold text-[#111d27] leading-[1.1] mb-8 tracking-[-1.5px] font-schibsted">
-              {t.pricing.heading}
-            </h2>
-            <p className="text-[18px] text-[#555f6d] leading-[1.7] mb-12 opacity-70">{t.pricing.body}</p>
-
-            <div className="flex flex-col sm:flex-row gap-6 text-left">
-              <div className="flex-1 bg-white p-6 rounded-[24px] border border-black/[0.03] shadow-sm">
-                <div className="w-10 h-10 bg-[#eff6ff] rounded-xl flex items-center justify-center mb-5">
-                  <TrendingDown className="w-6 h-6 text-[#2563eb]" />
-                </div>
-                <h4 className="text-[18px] font-bold text-[#111d27] mb-2">{t.pricing.guarantee}</h4>
-                <p className="text-[14px] text-[#555f6d] opacity-70 leading-relaxed">{t.pricing.guaranteeDesc}</p>
-              </div>
-              <div className="flex-1 bg-white p-6 rounded-[24px] border border-black/[0.03] shadow-sm">
-                <div className="w-10 h-10 bg-[#fff7ed] rounded-xl flex items-center justify-center mb-5">
-                  <Truck className="w-6 h-6 text-[#ea580c]" />
-                </div>
-                <h4 className="text-[18px] font-bold text-[#111d27] mb-2">{t.pricing.leadTime}</h4>
-                <p className="text-[14px] text-[#555f6d] opacity-70 leading-relaxed">{t.pricing.leadTimeDesc}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 relative w-full flex justify-center">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              className="relative w-full max-w-[540px] bg-white rounded-[32px] p-8 shadow-[0_40px_100px_rgba(0,0,0,0.05)] border border-black/[0.03]"
-            >
-              <div className="flex items-center gap-5 mb-10">
-                <div className="w-[80px] h-[80px] bg-[#f1f5f9] rounded-2xl flex items-center justify-center p-2 overflow-hidden">
-                  <Image width={100} height={100} src="/assets/Furniture 4 3.png" alt="Chair" className="w-full h-auto object-contain" />
-                </div>
-                <div>
-                  <h4 className="text-[20px] font-bold text-[#111d27] mb-1">{language === "ar" ? "كرسي Eames لاونج" : "Eames Lounge Chair"}</h4>
-                  <p className="text-[14px] text-[#555f6d] mb-2">{language === "ar" ? "خشب الجوز، جلد أسود" : "Walnut Wood, Black Leather"}</p>
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 bg-[#f1f5f9] text-[11px] font-bold text-[#555f6d] rounded-full uppercase tracking-wider">Herman Miller</span>
-                    <span className="px-3 py-1 bg-[#DFF8E6] text-[11px] font-bold text-[#10B981] rounded-full uppercase tracking-wider">{t.pricing.inStock}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between p-4 bg-[#F0FDF4] rounded-2xl border border-[#D1FAE5]">
-                  <div className="flex items-center gap-4">
-                    <div className="w-2.5 h-2.5 bg-[#10B981] rounded-full" />
-                    <span className="text-[16px] font-bold text-[#065F46]">{language === "ar" ? "Design Within Reach" : "Design Within Reach"}</span>
-                  </div>
-                  <span className="text-[18px] font-bold text-[#065F46]">{arPrice("$6,495.00")}</span>
-                </div>
-                <div className="flex items-center justify-between p-4 rounded-2xl hover:bg-[#f8fafc] transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-2.5 h-2.5 border-2 border-[#e2eaf0] rounded-full" />
-                    <span className="text-[16px] font-medium text-[#555f6d]">{language === "ar" ? "Herman Miller Direct" : "Herman Miller Direct"}</span>
-                  </div>
-                  <span className="text-[16px] font-bold text-[#111d27] opacity-60">{arPrice("$6,995.00")}</span>
-                </div>
-                <div className="flex items-center justify-between p-4 rounded-2xl hover:bg-[#f8fafc] transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-2.5 h-2.5 border-2 border-[#e2eaf0] rounded-full" />
-                    <span className="text-[16px] font-medium text-[#555f6d]">{language === "ar" ? "موزّع محلي (نيويورك)" : "Local Dealer (NY)"}</span>
-                  </div>
-                  <span className="text-[16px] font-bold text-[#111d27] opacity-60">{arPrice("$6,250.00")}</span>
-                </div>
-              </div>
-            </motion.div>
-            <div className="absolute -top-20 -right-20 w-[300px] h-[300px] bg-[#8bec5c]/10 blur-[120px] rounded-full -z-10" />
-          </div>
-        </div>
-      </section>
-
-      {/* MULTI-VENDOR CHECKOUT */}
-      <section className="py-[80px] md:py-[120px] px-4 bg-white">
-        <div className="max-w-[1240px] mx-auto text-center mb-10 md:mb-16">
-          <h2 className="text-[32px] sm:text-[42px] md:text-[56px] font-bold text-[#111d27] mb-4 md:mb-6 tracking-[-1px] md:tracking-[-1.5px] font-schibsted">{t.checkout.heading}</h2>
-          <p className="max-w-[640px] mx-auto text-[16px] md:text-[18px] text-[#555f6d] leading-[1.6] opacity-70 font-schibsted px-4">{t.checkout.body}</p>
-        </div>
-
-        <div className="max-w-[1240px] mx-auto relative rounded-[24px] md:rounded-[40px] bg-[#004643] p-6 md:p-16 overflow-hidden flex flex-col lg:flex-row items-center gap-12 md:gap-24">
-          <div className="absolute inset-0 opacity-10 pointer-events-none">
-            <svg className="w-full h-full" viewBox="0 0 1200 600" fill="none">
-              <path d="M-100 600C200 400 400 500 700 300C1000 100 1300 200 1400 0" stroke="white" strokeWidth="2" />
-              <path d="M-100 500C300 300 500 400 800 200C1100 0 1400 100 1500 -100" stroke="white" strokeWidth="2" />
-            </svg>
-          </div>
-
-          <div className="flex-1 text-white relative z-10 w-full text-center lg:text-left flex flex-col items-center lg:items-start">
-            <h3 className="text-[24px] md:text-[32px] font-bold mb-8 md:mb-10 tracking-tight">{t.checkout.cartLabel}</h3>
-            <div className="flex flex-col gap-8 md:gap-10 text-left w-full max-w-[420px]">
-              <div className="flex items-start gap-4 md:gap-5">
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/10 rounded-full flex items-center justify-center shrink-0">
-                  <div className="w-5 h-5 md:w-6 md:h-6 bg-white/20 rounded-full" />
-                </div>
-                <div>
-                  <h4 className="text-[18px] md:text-[20px] font-bold mb-1 md:mb-2">{t.checkout.invoice}</h4>
-                  <p className="text-white/60 text-[14px] md:text-[15px] leading-relaxed">{t.checkout.invoiceDesc}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-4 md:gap-5">
-                <div className="w-10 h-10 md:w-12 md:h-12 bg-white/10 rounded-full flex items-center justify-center shrink-0">
-                  <div className="w-5 h-5 md:w-6 md:h-6 bg-white/20 rounded-full" />
-                </div>
-                <div>
-                  <h4 className="text-[18px] md:text-[20px] font-bold mb-1 md:mb-2">{t.checkout.concierge}</h4>
-                  <p className="text-white/60 text-[14px] md:text-[15px] leading-relaxed">{t.checkout.conciergeDesc}</p>
-                </div>
-              </div>
-            </div>
-            <button className={`mt-10 md:mt-12 h-[52px] md:h-[56px] pr-1 bg-[#94A3B8]/30 hover:bg-[#94A3B8]/40 backdrop-blur-md text-white rounded-[18px] md:rounded-[20px] font-bold text-[14px] md:text-[15px] transition-all flex items-center gap-3 md:gap-4 border border-white/10 shadow-lg pl-5 md:pl-6 pr-1`}>
-              {t.checkout.startSourcing}
-              <div className="w-[44px] h-[44px] md:w-[48px] md:h-[48px] bg-white rounded-[14px] md:rounded-[16px] flex items-center justify-center">
-                <ArrowRight className={`w-4 h-4 md:w-5 md:h-5 text-black`} />
-              </div>
-            </button>
-          </div>
-
-          <div className="flex-1 w-full flex justify-center">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              className="w-full max-w-[440px] md:max-w-[480px] bg-white rounded-[24px] md:rounded-[32px] p-6 md:p-8 shadow-2xl relative z-10"
-            >
-              <div className="flex justify-between items-center mb-6 md:mb-8 pb-4 border-b border-[#f1f5f9]">
-                <h4 className="text-[16px] md:text-[18px] font-bold text-[#111d27]">{t.checkout.cartTitle}</h4>
-                <span className="text-[12px] md:text-[13px] text-[#94a3b8] font-bold uppercase tracking-wider">{t.checkout.cartItems}</span>
-              </div>
-              <div className="flex flex-col gap-5 md:gap-6 mb-8 md:mb-10">
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 md:w-16 md:h-16 bg-[#f8fafc] rounded-xl md:rounded-[16px] overflow-hidden p-2 flex items-center justify-center border border-[#e2eaf0]">
-                    <Image width={40} height={40} src="/assets/seating.png" alt="" className="w-full h-full object-contain" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex justify-between items-center">
-                      <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">{language === "ar" ? "أريكة Svelto" : "Svelto Sofa"}</h5>
-                      <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">{arPrice("$1,200")}</span>
-                    </div>
-                    <p className="text-[11px] md:text-[12px] text-[#94a3b8]">{t.checkout.vendor}: Article</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 md:w-16 md:h-16 bg-[#f8fafc] rounded-xl md:rounded-[16px] overflow-hidden p-2 flex items-center justify-center border border-[#e2eaf0]">
-                    <Image width={40} height={40} src="/assets/lighting.png" alt="" className="w-full h-full object-contain" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex justify-between items-center">
-                      <h5 className="text-[14px] md:text-[16px] font-bold text-[#111d27]">{language === "ar" ? "مصباح Akari 1A" : "Akari Lamp 1A"}</h5>
-                      <span className="text-[14px] md:text-[15px] font-bold text-[#111d27]">{arPrice("$350")}</span>
-                    </div>
-                    <p className="text-[11px] md:text-[12px] text-[#94a3b8]">{t.checkout.vendor}: Noguchi Shop</p>
-                  </div>
-                </div>
-              </div>
-              <div className="pt-5 md:pt-6 border-t border-[#f1f5f9] mb-6 md:mb-8 flex justify-between items-center">
-                <span className="text-[14px] md:text-[15px] text-[#555f6d] font-medium">{t.checkout.total}</span>
-                <span className="text-[20px] md:text-[24px] font-bold text-[#004643]">{arPrice("$1,550.00")}</span>
-              </div>
-              <button className="w-full h-[52px] md:h-[56px] bg-[#004643] text-white rounded-[14px] md:rounded-[16px] font-bold text-[14px] md:text-[15px] hover:bg-[#003330] transition-all shadow-[0_15px_30px_rgba(0,70,67,0.15)]">
-                {t.checkout.proceedCheckout}
-              </button>
-            </motion.div>
-          </div>
-        </div>
-      </section>
-
-      {/* POPULAR CATEGORIES */}
-      <section className="py-[120px] px-4 bg-[#F8FAFC]">
-        <div className="max-w-[1240px] mx-auto text-left mb-12">
-          <h2 className="text-[32px] font-bold text-[#111d27] tracking-tight font-schibsted">{t.categories.heading}</h2>
-        </div>
-        <div className="max-w-[1240px] mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
-          {categories.map((cat, i) => (
-            <motion.div key={i} initial={{ opacity: 0, scale: 0.95 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }} className="group cursor-pointer">
-              <div className="aspect-square w-full rounded-[32px] mb-4 overflow-hidden relative border border-black/5" style={{ backgroundColor: cat.bg }}>
-                <Image fill src={cat.img} alt={cat.name} className="object-cover group-hover:scale-110 transition-transform duration-500" />
-              </div>
-              <p className="text-center text-[15px] font-bold text-[#555f6d] group-hover:text-[#111d27] transition-colors">{cat.name}</p>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer className="bg-[#f5f7fa] pt-[72px] lg:pt-[90px] pb-9">
-        <div className="max-w-[1240px] mx-auto px-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_1fr] gap-10 lg:gap-12 mb-14 lg:mb-16">
-            <div>
-              <Link href="/public" className="flex items-center gap-[10px] mb-6">
-                <Image width={34} height={34} src="/assets/logo.png" alt="NOOI" className="w-[34px] h-auto object-contain" />
-                <span className="font-inter font-bold text-[20px] text-neutral-900 tracking-tight uppercase">NOOI</span>
-              </Link>
-              <p className="text-[#6b7280] mb-8 text-[14px] leading-relaxed max-w-[320px] font-schibsted opacity-80">{t.footer.tagline}</p>
-              <div className="relative max-w-[340px] mb-8">
-                <input type="email" placeholder={t.footer.emailPlaceholder} className="w-full h-[52px] bg-white border border-[#e8eaec] rounded-[10px] px-5 outline-none focus:border-[#004643] transition-colors text-[14px] pr-[110px]" />
-                <button className="absolute right-1.5 top-1.5 h-[40px] bg-[#004643] text-white px-6 rounded-[8px] text-[13px] font-bold hover:bg-[#003330] transition-colors">{t.footer.subscribe}</button>
-              </div>
-              <div className="flex items-center gap-6">
-                <div className="flex items-center gap-2 cursor-pointer opacity-60 hover:opacity-100 transition-opacity">
-                  <div className="w-5 h-5 flex items-center justify-center border border-black rounded p-0.5"><Image width={16} height={16} src="/assets/windows.svg" alt="" className="w-full h-full grayscale" /></div>
-                  <span className="text-[12px] font-bold">{t.footer.windowsApp}</span>
-                </div>
-                <div className="flex items-center gap-2 cursor-pointer opacity-60 hover:opacity-100 transition-opacity">
-                  <div className="w-5 h-5 flex items-center justify-center border border-black rounded p-0.5"><Image width={16} height={16} src="/assets/apple.svg" alt="" className="w-full h-full grayscale" /></div>
-                  <span className="text-[12px] font-bold">{t.footer.macApp}</span>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <h5 className="text-[14px] font-bold text-[#111D27] mb-6 tracking-tight uppercase">{t.footer.productHeading}</h5>
-              <ul className="space-y-4 text-[14px] text-[#6b7280] font-schibsted">
-                {[t.footer.productLinks.floorPlanner, t.footer.productLinks.interiorDesign, t.footer.productLinks.kitchenCloset, t.footer.productLinks.viewer3d, t.footer.productLinks.customFurniture].map((l) => (
-                  <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors opacity-80">{l}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h5 className="text-[14px] font-bold text-[#111D27] mb-6 tracking-tight uppercase">{t.footer.companyHeading}</h5>
-              <ul className="space-y-4 text-[14px] text-[#6b7280] font-schibsted">
-                {[t.footer.companyLinks.aboutUs, t.footer.companyLinks.contact, t.footer.companyLinks.affiliate, t.footer.companyLinks.careers].map((l) => (
-                  <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors opacity-80">{l}</li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h5 className="text-[14px] font-bold text-[#111D27] mb-6 tracking-tight uppercase">{t.footer.resourcesHeading}</h5>
-              <ul className="space-y-4 text-[14px] text-[#6b7280] font-schibsted">
-                {[t.footer.resourcesLinks.designIdeas, t.footer.resourcesLinks.tutorial, t.footer.resourcesLinks.helpCenter, t.footer.resourcesLinks.app].map((l) => (
-                  <li key={l} className="hover:text-[#004643] cursor-pointer transition-colors opacity-80">{l}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          <div className="pt-8 border-t border-[#f0f0f0] flex flex-col sm:flex-row items-center justify-between gap-6">
-            <p className="text-[#9ca3af] text-[12px] font-schibsted">{t.footer.legal}</p>
-            <div className="flex items-center gap-8 text-[12px] text-[#9ca3af] font-schibsted">
-              <span className="hover:text-[#111d27] cursor-pointer">{t.footer.terms}</span>
-              <span className="hover:text-[#111d27] cursor-pointer">{t.footer.privacy}</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex gap-4">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="w-8 h-8 rounded-full border border-neutral-200 flex items-center justify-center hover:bg-[#004643] group transition-all cursor-pointer">
-                    <Globe className="w-4 h-4 text-neutral-400 group-hover:text-white transition-colors" />
-                  </div>
-                ))}
-              </div>
-              <div className="w-px h-4 bg-neutral-200 mx-2" />
-              <LanguageToggle />
-            </div>
-          </div>
-        </div>
-      </footer>
-    </div>
+    <Suspense fallback={<div className="min-h-screen bg-white" />}>
+      <MarketplaceInner />
+    </Suspense>
   );
 }

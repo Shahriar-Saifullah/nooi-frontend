@@ -174,7 +174,7 @@ export function pickVariant(
   target: TargetSize | null,
   wantColor?: string | null,
 ): ProductVariant | null {
-  const variants = product.product_variants?.filter(v => v.is_active) ?? [];
+  const variants = product.variants?.filter(v => v.is_active) ?? [];
   if (variants.length === 0) return null;
 
   const scored = variants.map(v => {

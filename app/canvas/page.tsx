@@ -390,7 +390,7 @@ export default function CanvasPage() {
         wallSurfaces,
         doorFinishes,
       );
-      router.push(`/shop?project=${currentProject.id}`);
+      router.push(`/marketplace?project=${currentProject.id}`);
     } catch (err) {
       console.error("Could not save the room before opening the shop:", err);
       setShopBusy(false);
