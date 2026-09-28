@@ -5,8 +5,26 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { useHomeTranslations, useLanguage } from "@/lib/i18n/useTranslations";
+import { getCurrentUser, type AuthUser } from "@/lib/api/auth";
 
 export default function Navbar() {
+    /* Auth state. The navbar is shared by marketing and signed-in pages, so it
+       has to reflect who is looking at it — showing "Log in" to someone who is
+       already logged in is worse than showing nothing. `checked` guards the
+       first paint: rendering the logged-out buttons and then swapping them
+       reads as a flicker, so we render neither until we know. */
+    const [user, setUser] = useState<AuthUser | null>(null);
+    const [checked, setChecked] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        getCurrentUser()
+            .then(res => { if (!cancelled) setUser(res.success ? res.data.user : null); })
+            .catch(() => { if (!cancelled) setUser(null); })
+            .finally(() => { if (!cancelled) setChecked(true); });
+        return () => { cancelled = true; };
+    }, []);
+
     const [productsOpen, setProductsOpen] = useState(false);
     const [aboutOpen, setAboutOpen] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -141,7 +159,26 @@ export default function Navbar() {
                     <button className="relative hidden lg:flex w-[46px] h-[46px] items-center justify-center hover:bg-black/5 rounded-full transition-colors shrink-0">
                         <Image fill src="/assets/container-svg.svg" alt="Help" className="" />
                     </button>
-                    <div className="flex items-center gap-[2px] md:gap-[4px] h-[40px] md:h-[46px] bg-white border border-[#e6e6e8] p-[2px] md:p-[4px] rounded-[10px] md:rounded-[12px] flex-nowrap shrink-0">
+                    {checked && user ? (
+                        <Link
+                            href="/dashboard"
+                            className="flex items-center gap-2 h-[40px] md:h-[46px] ps-[4px] pe-[14px] bg-white border border-[#e6e6e8] rounded-[10px] md:rounded-[12px] shrink-0 hover:bg-neutral-50 transition-colors"
+                            title={user.full_name || user.email}
+                        >
+                            <span className="w-[32px] h-[32px] md:w-[36px] md:h-[36px] rounded-full bg-[#004643] text-white flex items-center justify-center text-[13px] font-schibsted font-medium overflow-hidden shrink-0">
+                                {user.avatar_url ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                    (user.full_name || user.email || "?").trim().charAt(0).toUpperCase()
+                                )}
+                            </span>
+                            <span className="hidden md:block max-w-[120px] truncate font-schibsted text-[14px] font-medium text-[#272e35]">
+                                {user.full_name || user.email}
+                            </span>
+                        </Link>
+                    ) : (
+                    <div className={`flex items-center gap-[2px] md:gap-[4px] h-[40px] md:h-[46px] bg-white border border-[#e6e6e8] p-[2px] md:p-[4px] rounded-[10px] md:rounded-[12px] flex-nowrap shrink-0 transition-opacity ${checked ? "opacity-100" : "opacity-0"}`}>
                         <Link
                             href="/authpage/signin"
                             className="h-full px-4 md:px-[16px] flex items-center justify-center bg-[#f8f8f8] rounded-[6px] md:rounded-[8px] text-[#272e35] text-[13px] md:text-[16px] font-schibsted font-medium hover:bg-neutral-100 transition-colors whitespace-nowrap"
@@ -155,6 +192,7 @@ export default function Navbar() {
                             {t.nav.startFree}
                         </Link>
                     </div>
+                    )}
                     <button
                         className="md:hidden w-[40px] h-[40px] flex flex-col items-center justify-center gap-1.5 p-2 rounded-lg hover:bg-black/5 ml-1"
                         onClick={() => setIsMenuOpen(!isMenuOpen)}

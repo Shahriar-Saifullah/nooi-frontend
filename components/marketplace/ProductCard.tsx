@@ -109,7 +109,7 @@ export default function ProductCard({
           <span className="text-[13.5px] font-medium text-[#101212] truncate">
             {product.title}
           </span>
-          <span className="shrink-0 text-[13.5px] font-semibold text-[#004643] tabular-nums">
+          <span className="shrink-0 text-[13.5px] font-semibold text-[#004643]">
             {multiplePrices && (
               <span className="text-[10.5px] font-normal text-[#8E9493] me-1">
                 {labels.from}

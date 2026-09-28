@@ -57,6 +57,7 @@ const COPY = {
     addSelected: (n: number) => `Add ${n} to cart`,
     selected: (n: number, t: number) => `${n} of ${t} selected`,
     noMatches: "No vendor carries this piece yet.",
+    closest: "Closest match",
     allFurniture: "All furniture",
     countLabel: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
     search: "Search furniture",
@@ -92,6 +93,7 @@ const COPY = {
     addSelected: (n: number) => `أضف ${n} إلى السلة`,
     selected: (n: number, t: number) => `${n} من ${t} محدد`,
     noMatches: "لا يوجد مورد لهذه القطعة بعد.",
+    closest: "أقرب بديل",
     allFurniture: "كل الأثاث",
     countLabel: (n: number) => `${n} منتج`,
     search: "ابحث عن أثاث",
@@ -264,8 +266,26 @@ function MarketplaceInner() {
           groups.map(async g => {
             if (!g.sample.modelId) return { group: g, match: null };
             try {
-              const candidates = await getCanvasMatches(g.sample.modelId);
-              const ranked = rankProducts(g, candidates);
+              // Exact model first — someone selling this very piece.
+              const exact = await getCanvasMatches(g.sample.modelId);
+              if (exact.length) {
+                const ranked = rankProducts(g, exact);
+                if (ranked[0]) return { group: g, match: ranked[0] };
+              }
+
+              // Then anything of the same type. A shopper who placed a king bed
+              // is better served by a queen from a real vendor than by "no
+              // vendor carries this piece yet" — and the fit warning on the
+              // card tells them where it differs. This is what type_id is for.
+              const typeId = g.cat?.typeId;
+              if (!typeId) return { group: g, match: null };
+
+              const similar = await getProducts({
+                typeId,
+                excludeModel: g.sample.modelId,
+                limit: 12,
+              });
+              const ranked = rankProducts(g, similar.products);
               return { group: g, match: ranked[0] ?? null };
             } catch {
               return { group: g, match: null };
@@ -376,12 +396,14 @@ function MarketplaceInner() {
     <div className="min-h-screen bg-white" dir={isArabic ? "rtl" : "ltr"}>
       <Navbar />
 
-      <main className="max-w-[1180px] mx-auto px-5 pb-20">
+      {/* Navbar is fixed at top-6 with h-[72px], so content starts below
+          24 + 72 + breathing room or it renders underneath the bar. */}
+      <main className="max-w-[1180px] mx-auto px-5 pt-[120px] pb-20">
         {/* ─── Shop this room ─────────────────────────────────────────────── */}
         {projectId && (
           <section
             aria-label="Shop your design"
-            className="mt-6 grid md:grid-cols-[minmax(0,380px)_1fr] gap-6 p-5 rounded-2xl border border-[#E6EBEA] bg-[#FBFCFC]"
+            className="grid md:grid-cols-[minmax(0,380px)_1fr] gap-6 p-5 rounded-2xl border border-[#E6EBEA] bg-[#FBFCFC]"
           >
             <div className="rounded-xl overflow-hidden bg-[#F1F4F4] aspect-[4/3]">
               {roomThumb ? (
@@ -463,7 +485,7 @@ function MarketplaceInner() {
                         </span>
                         <span className="block text-[11px] text-[#8E9493] truncate">
                           {match
-                            ? `${match.product.retailer?.name ?? ""} · ${match.product.lead_time_days} ${t.days}`
+                            ? `${match.exact ? "" : t.closest + " · "}${match.product.retailer?.name ?? ""} · ${match.product.lead_time_days} ${t.days}`
                             : t.noMatches}
                         </span>
                       </span>
@@ -474,7 +496,7 @@ function MarketplaceInner() {
                         </span>
                       )}
 
-                      <span className="shrink-0 text-[12.5px] font-semibold text-[#004643] tabular-nums">
+                      <span className="shrink-0 text-[12.5px] font-semibold text-[#004643]">
                         {match ? formatPrice(match.product.from_price * g.qty) : "—"}
                       </span>
                     </div>
