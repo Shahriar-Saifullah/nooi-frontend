@@ -30,10 +30,10 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Search, SlidersHorizontal, Check, X, ArrowLeft, Box, Loader2,
+  SlidersHorizontal, Check, X, ArrowLeft, Box, Loader2,
 } from "lucide-react";
 
-import Navbar from "@/components/Navbar";
+import ShopHeader from "@/components/marketplace/ShopHeader";
 import ProductCard from "@/components/marketplace/ProductCard";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
@@ -141,6 +141,9 @@ function MarketplaceInner() {
   const router = useRouter();
   const params = useSearchParams();
   const projectId = params.get("project");
+  // Search is owned by ShopHeader and lives in the URL, so it survives a
+  // refresh and can be shared. The page only reads it.
+  const search = params.get("q") ?? "";
 
   const { language } = useLanguage();
   const t = COPY[language === "ar" ? "ar" : "en"];
@@ -157,7 +160,6 @@ function MarketplaceInner() {
   const [priceBand, setPriceBand] = useState("All");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [threeDOnly, setThreeDOnly] = useState(false);
-  const [search, setSearch] = useState("");
   const [sort, setSort] = useState<ProductQuery["sort"]>("newest");
   const [page, setPage] = useState(1);
 
@@ -372,7 +374,12 @@ function MarketplaceInner() {
 
   const clearAll = () => {
     setGroup("All"); setRetailerId("All"); setPriceBand("All");
-    setInStockOnly(false); setThreeDOnly(false); setSearch(""); setSort("newest");
+    setInStockOnly(false); setThreeDOnly(false); setSort("newest");
+    if (search) {
+      const next = new URLSearchParams(params.toString());
+      next.delete("q");
+      router.replace(`/marketplace?${next.toString()}`, { scroll: false });
+    }
   };
 
   const priceBands = useMemo(() => {
@@ -394,7 +401,7 @@ function MarketplaceInner() {
 
   return (
     <div className="min-h-screen bg-white" dir={isArabic ? "rtl" : "ltr"}>
-      <Navbar />
+      <ShopHeader />
 
       {/* Navbar is fixed at top-6 with h-[72px], so content starts below
           24 + 72 + breathing room or it renders underneath the bar. */}
@@ -557,16 +564,6 @@ function MarketplaceInner() {
 
           {/* Filter bar */}
           <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <span className="relative">
-              <Search size={13} className="absolute start-3 top-1/2 -translate-y-1/2 text-[#8E9493]" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder={t.search}
-                className="ps-8 pe-3 py-1.5 w-[190px] rounded-full border border-[#D5DBDA] bg-white text-[12.5px] text-[#101212] placeholder:text-[#B3B9B9] focus:outline-none focus:border-[#87DDD7]"
-              />
-            </span>
-
             <select
               value={priceBand}
               onChange={e => setPriceBand(e.target.value)}
