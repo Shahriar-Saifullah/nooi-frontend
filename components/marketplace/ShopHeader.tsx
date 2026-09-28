@@ -21,6 +21,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ShoppingCart, X } from "lucide-react";
 
@@ -115,8 +116,16 @@ export default function ShopHeader() {
         <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center gap-4 ps-[16px] md:ps-[24px] pe-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)]">
 
           <Link href="/" aria-label="NOOI home" className="flex items-center gap-[9px] shrink-0">
-            <span className="w-[30px] h-[30px] rounded-[9px] bg-gradient-to-br from-[#004643] to-[#87DDD7]" />
-            <span className="font-instrument text-[21px] text-[#101212] tracking-tight">NOOI</span>
+            <Image
+              width={100}
+              height={100}
+              src="/assets/logo.png"
+              alt="NOOI"
+              className="w-[32px] md:w-[40px] h-auto object-contain"
+            />
+            <span className="font-inter font-bold text-[18px] md:text-[20px] text-[#111d27] tracking-tight">
+              NOOI
+            </span>
           </Link>
 
           <nav aria-label="Shop" className="hidden md:flex items-center gap-1 shrink-0">
@@ -163,6 +172,10 @@ export default function ShopHeader() {
             )}
           </div>
 
+          {/* ms-auto: the search is flex-1 but capped, so without this the
+              leftover width collects to the right of the avatar instead of
+              between the search and the controls. */}
+          <div className="ms-auto flex items-center gap-2 shrink-0">
           <button
             onClick={toggleLanguage}
             className="hidden md:flex items-center justify-center h-[40px] px-3 rounded-[12px] border border-[#e6e6e8] bg-white text-[13px] text-[#4B4F4F] hover:bg-neutral-50 shrink-0"
@@ -205,6 +218,7 @@ export default function ShopHeader() {
               {t.signIn}
             </Link>
           )}
+          </div>
         </div>
       </header>
     </>
