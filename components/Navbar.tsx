@@ -44,6 +44,15 @@ export default function Navbar() {
     }, []);
 
     return (
+        <>
+        {/* The bar floats at top-6, which leaves 24px of live page showing above
+            it. On a long scrolling page (marketplace, dashboard) that reads as
+            content leaking over the header. This fades it out instead.
+            pointer-events-none so it never swallows a click. */}
+        <div
+            aria-hidden
+            className="fixed top-0 left-0 right-0 h-[118px] z-40 pointer-events-none bg-gradient-to-b from-white via-white/90 to-transparent"
+        />
         <nav className="fixed top-6 left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[1240px] h-[72px] z-50">
             <div className="w-full h-full backdrop-blur-[100px] bg-[#f7fbfc]/90 border border-[#e2eaf0] rounded-[22px] flex items-center justify-between pl-[16px] md:pl-[24px] pr-[12px] py-[12px] shadow-[0_4px_30px_rgba(0,0,0,0.03)] gap-4">
 
@@ -242,5 +251,6 @@ export default function Navbar() {
                 )}
             </AnimatePresence>
         </nav>
+        </>
     );
 }

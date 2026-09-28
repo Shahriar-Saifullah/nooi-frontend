@@ -71,6 +71,16 @@ export interface MarketplaceProduct {
   in_stock: boolean;
   retailer: RetailerSummary | null;
   variants: ProductVariant[];
+  /** Only populated by getProductById — the grid doesn't fetch reviews. */
+  reviews?: ProductReview[];
+}
+
+export interface ProductReview {
+  id: string;
+  user_name: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
 }
 
 export interface FacetGroup {
@@ -168,6 +178,7 @@ function normaliseRaw(row: any): MarketplaceProduct {
     in_stock: variants.some((v: ProductVariant) => v.stock_quantity > 0),
     retailer: row.retailer ?? row.retailers ?? null,
     variants,
+    reviews: row.product_reviews ?? undefined,
   };
 }
 
