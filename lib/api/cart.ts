@@ -31,6 +31,78 @@ export interface ServerCartItem {
   quantity: number;
 }
 
+// ─── Quote ───────────────────────────────────────────────────────────────────
+// Every figure below is computed server-side from cart_items. The client sends
+// a promo code at most; it never sends a price. The same shipping, tax and
+// promotion services run at checkout, so what the cart shows is what the card
+// gets charged.
+
+export interface QuoteItem {
+  cart_item_id: string;
+  variant_id: string;
+  product_id: string;
+  title: string;
+  color: string | null;
+  sku: string;
+  image: string | null;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+  in_stock: boolean;
+  stock_quantity: number;
+}
+
+export interface QuoteGroup {
+  retailer_id: string;
+  retailer_name: string;
+  logo_url: string | null;
+  city: string | null;
+  country: string | null;
+  lead_time_days: number;
+  items: QuoteItem[];
+  subtotal: number;
+  shipping_amount: number;
+  shipping_note: string;
+  estimated_delivery: string;
+  tax_amount: number;
+}
+
+export interface CartQuote {
+  groups: QuoteGroup[];
+  item_count: number;
+  subtotal: number;
+  shipping_total: number;
+  tax_total: number;
+  tax_provider: string;
+  discount_amount: number;
+  promotion: { code: string; description: string | null; discount_amount: number } | null;
+  promo_error: string | null;
+  grand_total: number;
+  currency: string;
+}
+
+/** Price the server cart. Call after pushLocalCart, or the quote is of an
+ *  older cart than the one on screen. */
+export async function quoteCart(promoCode?: string | null): Promise<CartQuote> {
+  const json = await call<{ success: boolean } & CartQuote>("/cart/quote", {
+    method: "POST",
+    body: JSON.stringify(promoCode ? { promo_code: promoCode } : {}),
+  });
+  return {
+    groups: json.groups ?? [],
+    item_count: json.item_count ?? 0,
+    subtotal: json.subtotal ?? 0,
+    shipping_total: json.shipping_total ?? 0,
+    tax_total: json.tax_total ?? 0,
+    tax_provider: json.tax_provider ?? "unconfigured",
+    discount_amount: json.discount_amount ?? 0,
+    promotion: json.promotion ?? null,
+    promo_error: json.promo_error ?? null,
+    grand_total: json.grand_total ?? 0,
+    currency: json.currency ?? "USD",
+  };
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const supabase = createClient();
   const { data: { session } } = await supabase.auth.getSession();
