@@ -34,7 +34,7 @@ import {
   ChevronRight, ShoppingCart, Plus, Minus, Box, Loader2, Truck, ArrowRight, Rotate3d,
 } from "lucide-react";
 
-import Navbar from "@/components/Navbar";
+import ShopHeader from "@/components/marketplace/ShopHeader";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
 import { catalogById } from "@/lib/furniture/catalog";
@@ -213,7 +213,7 @@ function ProductDetailInner() {
   if (loading) {
     return (
       <div className="min-h-screen bg-white" dir={isArabic ? "rtl" : "ltr"}>
-        <Navbar />
+        <ShopHeader />
         <main className="max-w-[1180px] mx-auto px-5 pt-[120px]">
           <div className="grid md:grid-cols-2 gap-10">
             <div className="aspect-square rounded-2xl bg-[#F1F4F4] animate-pulse" />
@@ -231,7 +231,7 @@ function ProductDetailInner() {
   if (!product) {
     return (
       <div className="min-h-screen bg-white" dir={isArabic ? "rtl" : "ltr"}>
-        <Navbar />
+        <ShopHeader />
         <main className="max-w-[1180px] mx-auto px-5 pt-[160px] text-center">
           <h1 className="text-[20px] font-medium text-[#101212]">{t.notFound}</h1>
           <p className="mt-2 text-[13px] text-[#646968]">{t.notFoundBody}</p>
@@ -250,7 +250,7 @@ function ProductDetailInner() {
 
   return (
     <div className="min-h-screen bg-white" dir={isArabic ? "rtl" : "ltr"}>
-      <Navbar />
+      <ShopHeader />
 
       <main className="max-w-[1180px] mx-auto px-5 pt-[120px] pb-20">
         {/* Breadcrumb */}
