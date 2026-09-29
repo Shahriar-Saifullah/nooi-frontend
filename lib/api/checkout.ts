@@ -1,4 +1,23 @@
-import { requestApi, ApiResponse } from './http';
+import { requestJson, ApiError, ApiResponse } from './http';
+
+/**
+ * Checkout API client
+ * ----------------------------------------------------------------------------
+ * These two endpoints return a FLAT body:
+ *
+ *   { success: true, client_secret, checkout_attempt_id, summary }
+ *
+ * requestApi's isApiResponse() sees a boolean `success` and passes the object
+ * straight through as ApiResponse<T> — but ApiSuccess<T> promises the payload
+ * under `.data`, and there is no `data` key. Callers then destructure
+ * `response.data.client_secret` and get "Cannot destructure property
+ * 'client_secret' of 't.data' as it is undefined."
+ *
+ * So these use requestJson (raw body, throws on non-2xx) and wrap the result
+ * into the ApiResponse shape here. Normalising at this seam rather than
+ * changing the backend keeps the contract that /checkout/success and any other
+ * reader already depends on.
+ */
 
 export interface ShippingAddress {
   fullName: string;
@@ -72,6 +91,30 @@ export interface OrderResponse {
   error?: string;
 }
 
+/** Wrap a flat `{ success, ...payload }` body into ApiResponse<T>. */
+function wrap<T extends { success: boolean; error?: string; message?: string }>(
+  body: T | null,
+): ApiResponse<T> {
+  if (!body) {
+    return { success: false, error: 'Empty response from server' };
+  }
+  if (!body.success) {
+    return { success: false, error: body.error ?? body.message ?? 'Request failed' };
+  }
+  return { success: true, data: body };
+}
+
+function toFailure(err: unknown): ApiResponse<never> {
+  if (err instanceof ApiError) {
+    return { success: false, error: err.message };
+  }
+  const message =
+    err && typeof err === 'object' && typeof (err as { message?: unknown }).message === 'string'
+      ? (err as { message: string }).message
+      : 'Network error';
+  return { success: false, error: message };
+}
+
 /**
  * Start a payment.
  *
@@ -79,28 +122,38 @@ export interface OrderResponse {
  * the figure from a subtotal it calculates itself, using the same validator the
  * cart quote uses, so what the shopper was shown and what the card is charged
  * come from one place. An invalid or expired code is not an error: the returned
- * `summary.discount_amount` will simply be 0, which the checkout page should
- * reflect rather than silently keeping the cart's figure on screen.
+ * `summary.discount_amount` is simply 0, and the checkout page says so rather
+ * than quietly keeping the cart's figure on screen.
  */
 export async function createPaymentIntent(
   shippingAddress: ShippingAddress,
-  promoCode?: string | null
+  promoCode?: string | null,
 ): Promise<ApiResponse<CreatePaymentIntentResponse>> {
-  return requestApi<CreatePaymentIntentResponse>({
-    path: '/orders/create-payment-intent',
-    method: 'POST',
-    body: {
-      shipping_address: shippingAddress,
-      promo_code: promoCode ?? null,
-    },
-  });
+  try {
+    const body = await requestJson<CreatePaymentIntentResponse>({
+      path: '/orders/create-payment-intent',
+      method: 'POST',
+      body: {
+        shipping_address: shippingAddress,
+        promo_code: promoCode ?? null,
+      },
+    });
+    return wrap(body);
+  } catch (err) {
+    return toFailure(err);
+  }
 }
 
 export async function getOrderByPaymentIntent(
-  paymentIntentId: string
+  paymentIntentId: string,
 ): Promise<ApiResponse<OrderResponse>> {
-  return requestApi<OrderResponse>({
-    path: `/orders/by-payment-intent/${paymentIntentId}`,
-    method: 'GET',
-  });
+  try {
+    const body = await requestJson<OrderResponse>({
+      path: `/orders/by-payment-intent/${paymentIntentId}`,
+      method: 'GET',
+    });
+    return wrap(body);
+  } catch (err) {
+    return toFailure(err);
+  }
 }
