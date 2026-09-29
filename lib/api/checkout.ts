@@ -46,6 +46,10 @@ export interface CheckoutSummary {
   subtotal: number;
   shipping_total: number;
   tax_total: number;
+  /** Taken off the goods subtotal only. Zero when no code applied. */
+  discount_amount: number;
+  promotion_id: string | null;
+  promotion_code: string | null;
   grand_total: number;
   grand_total_cents: number;
   currency: string;
@@ -68,14 +72,26 @@ export interface OrderResponse {
   error?: string;
 }
 
+/**
+ * Start a payment.
+ *
+ * `promoCode` is the code only — never a discount amount. The server re-derives
+ * the figure from a subtotal it calculates itself, using the same validator the
+ * cart quote uses, so what the shopper was shown and what the card is charged
+ * come from one place. An invalid or expired code is not an error: the returned
+ * `summary.discount_amount` will simply be 0, which the checkout page should
+ * reflect rather than silently keeping the cart's figure on screen.
+ */
 export async function createPaymentIntent(
-  shippingAddress: ShippingAddress
+  shippingAddress: ShippingAddress,
+  promoCode?: string | null
 ): Promise<ApiResponse<CreatePaymentIntentResponse>> {
   return requestApi<CreatePaymentIntentResponse>({
     path: '/orders/create-payment-intent',
     method: 'POST',
     body: {
       shipping_address: shippingAddress,
+      promo_code: promoCode ?? null,
     },
   });
 }
