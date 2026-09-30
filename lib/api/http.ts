@@ -182,7 +182,17 @@ export async function requestApi<TData, TBody = unknown>(
       ? await res.json().catch(() => null)
       : await res.text().catch(() => "");
 
-    if (isApiResponse(data)) return data as ApiResponse<TData>;
+    // if (isApiResponse(data)) return data as ApiResponse<TData>;
+    if (isApiResponse(data)) {
+      // A flat body — { success: true, client_secret, ... } — passes the
+      // isApiResponse check but has no `data` key, so callers reading
+      // response.data.x get undefined with no error. Wrap it rather than
+      // returning a malformed ApiResponse.
+      if (data.success && !("data" in data)) {
+        return { success: true, data: data as TData };
+      }
+      return data as ApiResponse<TData>;
+    }
 
     if (res.ok) {
       return {
