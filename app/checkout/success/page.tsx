@@ -53,6 +53,7 @@ const COPY = {
     confirms: (vendor: string) => `${vendor} confirms within 24 hours`,
     items: (n: number) => `${n} item${n === 1 ? "" : "s"}`,
     arrivesBy: (date: string) => `Arrives by ${date}`,
+    shipsFrom: (city: string) => `from ${city}`,
     arrivalPending: "Arrival date confirmed at dispatch",
     continueShopping: "Continue shopping",
     trackOrder: "Track order",
@@ -81,6 +82,7 @@ const COPY = {
     confirms: (vendor: string) => `${vendor} يؤكد خلال 24 ساعة`,
     items: (n: number) => `${n} منتج`,
     arrivesBy: (date: string) => `يصل بحلول ${date}`,
+    shipsFrom: (city: string) => `من ${city}`,
     arrivalPending: "يُحدَّد تاريخ الوصول عند الشحن",
     continueShopping: "متابعة التسوق",
     trackOrder: "تتبع الطلب",
@@ -295,7 +297,7 @@ function SuccessContent() {
                                 <>
                                   <span className="text-[#D5DBDA]">·</span>
                                   <MapPin className="h-2.5 w-2.5" />
-                                  {s.city}
+                                  {t.shipsFrom(s.city)}
                                 </>
                               )}
                             </span>
