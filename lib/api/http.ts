@@ -55,13 +55,25 @@ function buildUrl(baseUrl: string, path: string): string {
 }
 
 function pickErrorMessage(data: unknown, fallback: string): string {
-  if (typeof data === "string" && data.trim()) return data;
+  if (typeof data === "string" && data.trim()) {
+    if (data.includes("<!DOCTYPE") || data.includes("<html") || data.includes("<pre>")) {
+      return fallback;
+    }
+    return data;
+  }
   if (data && typeof data === "object") {
     const maybeMessage = (data as { message?: unknown }).message;
-    if (typeof maybeMessage === "string" && maybeMessage.trim())
-      return maybeMessage;
+    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
+      if (!maybeMessage.includes("<!DOCTYPE") && !maybeMessage.includes("<html")) {
+        return maybeMessage;
+      }
+    }
     const maybeError = (data as { error?: unknown }).error;
-    if (typeof maybeError === "string" && maybeError.trim()) return maybeError;
+    if (typeof maybeError === "string" && maybeError.trim()) {
+      if (!maybeError.includes("<!DOCTYPE") && !maybeError.includes("<html")) {
+        return maybeError;
+      }
+    }
   }
   return fallback;
 }

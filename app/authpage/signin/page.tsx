@@ -42,6 +42,7 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
 function SigninPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [role, setRole] = useState<"user" | "vendor">("user");
   const [resetSuccess, setResetSuccess] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -53,33 +54,38 @@ function SigninPageInner() {
   }>({});
 
   useEffect(() => {
-  // Check if this is a password recovery redirect
-  const hash = window.location.hash;
-  if (hash && hash.includes("type=recovery")) {
-    const params = new URLSearchParams(hash.substring(1));
-    const access_token = params.get("access_token");
-    const refresh_token = params.get("refresh_token");
-    if (access_token && refresh_token) {
-      router.replace(
-        `/authpage/reset-password?access_token=${access_token}&refresh_token=${refresh_token}`
-      );
-      return;
+    // Check if this is a password recovery redirect
+    const hash = window.location.hash;
+    if (hash && hash.includes("type=recovery")) {
+      const params = new URLSearchParams(hash.substring(1));
+      const access_token = params.get("access_token");
+      const refresh_token = params.get("refresh_token");
+      if (access_token && refresh_token) {
+        router.replace(
+          `/authpage/reset-password?access_token=${access_token}&refresh_token=${refresh_token}`
+        );
+        return;
+      }
     }
-  }
 
-  const errorCode = searchParams.get("error");
-  if (errorCode) {
-    setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
-  }
-  const reset = searchParams.get("reset");
-  if (reset === "success") {
-    setResetSuccess(true);
-  }
-}, [searchParams, router]);
+    const roleParam = searchParams.get("role");
+    if (roleParam === "vendor") {
+      setRole("vendor");
+    }
+
+    const errorCode = searchParams.get("error");
+    if (errorCode) {
+      setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
+    }
+    const reset = searchParams.get("reset");
+    if (reset === "success") {
+      setResetSuccess(true);
+    }
+  }, [searchParams, router]);
 
   const validate = () => {
     const next: typeof errors = {};
-    if (!email) next.email = "Email is required";
+    if (!email) next.email = role === "vendor" ? "Work email is required" : "Email is required";
     else if (!EMAIL_REGEX.test(email))
       next.email = "Please enter a valid email";
     if (!password) next.password = "Password is required";
@@ -117,13 +123,66 @@ function SigninPageInner() {
     router.push(onboardingCompleted ? "/dashboard" : "/onboarding");
   };
 
+  const handleVendorSignIn = async () => {
+    const fieldErrors = validate();
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors(fieldErrors);
+      return;
+    }
+
+    setSubmitting(true);
+    setErrors({});
+
+    try {
+      // 1. Check database if that account is registered as a vendor
+      const response = await fetch("/api/vendor/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        setSubmitting(false);
+        setErrors({ auth: result.error || "Vendor verification failed. Account not found in database." });
+        return;
+      }
+
+      // 2. Establish client-side Supabase session
+      const { createClient } = await import("@/utils/supabase/client");
+      const supabase = createClient();
+      await supabase.auth.signInWithPassword({ email, password });
+
+      // 3. Hydrate vendor store with verified account data
+      const { useVendorStore } = await import("@/lib/store");
+      const vUser = result.user;
+      if (vUser) {
+        useVendorStore.getState().setAccountData({
+          fullName: vUser.full_name || "Vendor Owner",
+          workEmail: vUser.email || email,
+          businessName: vUser.business_name || "Atelier Rawda",
+        });
+        useVendorStore.getState().setStoreProfile({
+          storeName: vUser.business_name || "Atelier Rawda",
+        });
+        useVendorStore.getState().setEmailVerified(true);
+      }
+
+      setSubmitting(false);
+      router.push("/sell/dashboard");
+    } catch (err: any) {
+      setSubmitting(false);
+      setErrors({ auth: err?.message || "Failed to authenticate with vendor database service." });
+    }
+  };
+
   const handleGoogleAuth = async () => {
-  try {
-    await signInWithGoogle();
-  } catch (error) {
-    setErrors({ auth: "Google sign in failed. Please try again." });
-  }
-};
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      setErrors({ auth: "Google sign in failed. Please try again." });
+    }
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-white">
@@ -151,6 +210,38 @@ function SigninPageInner() {
       {/* Right panel */}
       <div className="flex-1 flex flex-col justify-center px-6 md:px-16 py-10 overflow-y-auto">
         <div className="max-w-md mx-auto w-full">
+          {/* Role Selection Switch */}
+          <div className="flex bg-[#F1F4F4] p-1 rounded-xl mb-6">
+            <button
+              type="button"
+              onClick={() => {
+                setRole("user");
+                setErrors({});
+              }}
+              className={`flex-1 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all cursor-pointer ${
+                role === "user"
+                  ? "bg-white text-[#101212] shadow-xs"
+                  : "text-[#646968] hover:text-[#101212]"
+              }`}
+            >
+              Customer / User
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRole("vendor");
+                setErrors({});
+              }}
+              className={`flex-1 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all cursor-pointer ${
+                role === "vendor"
+                  ? "bg-white text-[#004643] shadow-xs"
+                  : "text-[#646968] hover:text-[#101212]"
+              }`}
+            >
+              Vendor
+            </button>
+          </div>
+
           <div
             className={`transition-transform duration-200 ${errors.auth ? "translate-y-1" : "translate-y-0"
               }`}
@@ -162,9 +253,13 @@ function SigninPageInner() {
               </div>
             )}
             <div className="mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Sign in</h1>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                {role === "vendor" ? "Vendor Sign in" : "Sign in"}
+              </h1>
               <p className="text-gray-600 text-sm">
-                Welcome back. Enter your details to continue.
+                {role === "vendor"
+                  ? "Enter your vendor account credentials to access your store dashboard."
+                  : "Welcome back. Enter your details to continue."}
               </p>
             </div>
 
@@ -180,7 +275,7 @@ function SigninPageInner() {
                 </span>
                 <div>
                   <p className="text-red-700 font-semibold text-sm ">
-                    Sign in failed
+                    {role === "vendor" ? "Vendor verification failed" : "Sign in failed"}
                   </p>
                   <p className="text-red-600 text-xs mt-0.5">
                     {errors.auth ?? " "}
@@ -191,15 +286,19 @@ function SigninPageInner() {
           </div>
 
           {/* Form */}
-          <form className="space-y-3">
+          <form className="space-y-3" onSubmit={(e) => {
+            e.preventDefault();
+            if (role === "vendor") handleVendorSignIn();
+            else handleSignIn();
+          }}>
             {/* Email */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Email
+                {role === "vendor" ? "Work email" : "Email"}
               </label>
               <input
                 type="email"
-                placeholder="you@company.com"
+                placeholder={role === "vendor" ? "rawda@atelierrauda.sa" : "you@company.com"}
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
@@ -265,45 +364,105 @@ function SigninPageInner() {
             {/* Sign in Button */}
             <Button
               type="button"
-              onClick={handleSignIn}
+              onClick={role === "vendor" ? handleVendorSignIn : handleSignIn}
               fullWidth
               disabled={submitting}
             >
-              {submitting ? "Signing in..." : "Sign in"}
+              {submitting
+                ? role === "vendor"
+                  ? "Verifying vendor..."
+                  : "Signing in..."
+                : role === "vendor"
+                ? "Sign in as Vendor"
+                : "Sign in"}
             </Button>
           </form>
 
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 border-t border-gray-300"></div>
-            <span className="text-gray-500 text-sm">or</span>
-            <div className="flex-1 border-t border-gray-300"></div>
-          </div>
+          {role === "user" ? (
+            <>
+              {/* Divider */}
+              <div className="flex items-center gap-3 my-6">
+                <div className="flex-1 border-t border-gray-300"></div>
+                <span className="text-gray-500 text-sm">or</span>
+                <div className="flex-1 border-t border-gray-300"></div>
+              </div>
 
-          {/* Google Button */}
-          <Button
-            type="button"
-            variant="social"
-            fullWidth
-            onClick={handleGoogleAuth}
-          >
-            <GoogleIcon />
-            <span>Continue with Google</span>
-          </Button>
-
-          {/* Sign up link */}
-          <div className="text-center mt-6">
-            <span className="text-gray-600 text-sm">
-              Don&apos;t have an account?{" "}
+              {/* Google Button */}
               <Button
                 type="button"
-                variant="text"
-                onClick={() => router.push("/authpage/signup")}
+                variant="social"
+                fullWidth
+                onClick={handleGoogleAuth}
               >
-                Create one
+                <GoogleIcon />
+                <span>Continue with Google</span>
               </Button>
-            </span>
-          </div>
+
+              {/* Sign up link */}
+              <div className="text-center mt-6 space-y-2">
+                <div>
+                  <span className="text-gray-600 text-sm">
+                    Don&apos;t have an account?{" "}
+                    <Button
+                      type="button"
+                      variant="text"
+                      onClick={() => router.push("/authpage/signup")}
+                    >
+                      Create one
+                    </Button>
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600 text-sm">
+                    Selling furniture?{" "}
+                    <Button
+                      type="button"
+                      variant="text"
+                      className="font-semibold text-[#044E43] hover:underline"
+                      onClick={() => setRole("vendor")}
+                    >
+                      Sign in as a vendor
+                    </Button>
+                  </span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Vendor footer links */}
+              <div className="text-center mt-8 space-y-3">
+                <div>
+                  <span className="text-gray-600 text-sm">
+                    Don&apos;t have a vendor account?{" "}
+                    <Button
+                      type="button"
+                      variant="text"
+                      className="font-semibold text-[#044E43] hover:underline"
+                      onClick={() => router.push("/sell")}
+                    >
+                      Register your store
+                    </Button>
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-600 text-sm">
+                    Looking to browse or shop?{" "}
+                    <Button
+                      type="button"
+                      variant="text"
+                      className="font-semibold text-gray-700 hover:underline"
+                      onClick={() => {
+                        setRole("user");
+                        setErrors({});
+                      }}
+                    >
+                      Switch to customer sign in
+                    </Button>
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
