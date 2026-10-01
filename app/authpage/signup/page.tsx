@@ -73,8 +73,8 @@ export default function SignupPage() {
   }>({});
 
   useEffect(() => {
-    useAuthStore.persist.rehydrate();
-  }, []);
+    resetSignupData();
+  }, [resetSignupData]);
 
   const strength = getStrength(password);
 
@@ -372,22 +372,37 @@ export default function SignupPage() {
           </Button>
 
           {/* Sign in link */}
-          <div className="text-center mt-6">
-            <span className="text-gray-600 text-sm">
-              Already have an account?{" "}
-              <Button
-                type="button"
-                variant="text"
-                onClick={() => router.push("/authpage/signin")}
-              >
-                Sign in
-              </Button>
-            </span>
+          <div className="text-center mt-6 space-y-2">
+            <div>
+              <span className="text-gray-600 text-sm">
+                Already have an account?{" "}
+                <Button
+                  type="button"
+                  variant="text"
+                  onClick={() => router.push("/authpage/signin")}
+                >
+                  Sign in
+                </Button>
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600 text-sm">
+                Selling furniture?{" "}
+                <Button
+                  type="button"
+                  variant="text"
+                  className="font-semibold text-[#044E43] hover:underline"
+                  onClick={() => router.push("/sell")}
+                >
+                  Join as a vendor
+                </Button>
+              </span>
+            </div>
           </div>
 
           {/* Terms and Privacy */}
           <div className="text-center mt-4 text-xs text-gray-500">
-            By continuing you agree to NOOI&apos;s
+            By continuing you agree to NOOI&apos;s{" "}
             <a href="#" className="text-teal-600 hover:text-teal-700">
               Terms of Service
             </a>{" "}

@@ -6,7 +6,6 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const error = searchParams.get("error");
   const status = searchParams.get("status");
-  const type = searchParams.get("type");
 
   if (error) {
     return NextResponse.redirect(
@@ -16,13 +15,25 @@ export async function GET(request: Request) {
 
   if (status === "success") {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.redirect(`${origin}/authpage/signin`);
     }
 
-    // Check onboarding from profiles table
+    // Route based on role stored in user_metadata
+    const role = user.user_metadata?.role;
+    if (role === "vendor") {
+      return NextResponse.redirect(`${origin}/sell/dashboard`);
+    }
+    if (role === "admin") {
+      return NextResponse.redirect(`${origin}/admin`);
+    }
+
+    // Regular user — check onboarding completion in user_profiles
+    // (still accessible as "profiles" via the view alias)
     const { data: profile } = await supabase
       .from("profiles")
       .select("onboarding_completed")
@@ -38,13 +49,23 @@ export async function GET(request: Request) {
     const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!exchangeError && data.session) {
-      // Check if this is a password recovery session
+      // Password recovery session — redirect to reset page
       if (data.user?.recovery_sent_at) {
         return NextResponse.redirect(
           `${origin}/authpage/reset-password?access_token=${data.session.access_token}&refresh_token=${data.session.refresh_token}`
         );
       }
 
+      // Route based on role
+      const role = data.user?.user_metadata?.role;
+      if (role === "vendor") {
+        return NextResponse.redirect(`${origin}/sell/dashboard`);
+      }
+      if (role === "admin") {
+        return NextResponse.redirect(`${origin}/admin`);
+      }
+
+      // Regular user — check onboarding
       const { data: profile } = await supabase
         .from("profiles")
         .select("onboarding_completed")
