@@ -53,29 +53,29 @@ function SigninPageInner() {
   }>({});
 
   useEffect(() => {
-  // Check if this is a password recovery redirect
-  const hash = window.location.hash;
-  if (hash && hash.includes("type=recovery")) {
-    const params = new URLSearchParams(hash.substring(1));
-    const access_token = params.get("access_token");
-    const refresh_token = params.get("refresh_token");
-    if (access_token && refresh_token) {
-      router.replace(
-        `/authpage/reset-password?access_token=${access_token}&refresh_token=${refresh_token}`
-      );
-      return;
+    // Check if this is a password recovery redirect
+    const hash = window.location.hash;
+    if (hash && hash.includes("type=recovery")) {
+      const params = new URLSearchParams(hash.substring(1));
+      const access_token = params.get("access_token");
+      const refresh_token = params.get("refresh_token");
+      if (access_token && refresh_token) {
+        router.replace(
+          `/authpage/reset-password?access_token=${access_token}&refresh_token=${refresh_token}`
+        );
+        return;
+      }
     }
-  }
 
-  const errorCode = searchParams.get("error");
-  if (errorCode) {
-    setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
-  }
-  const reset = searchParams.get("reset");
-  if (reset === "success") {
-    setResetSuccess(true);
-  }
-}, [searchParams, router]);
+    const errorCode = searchParams.get("error");
+    if (errorCode) {
+      setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
+    }
+    const reset = searchParams.get("reset");
+    if (reset === "success") {
+      setResetSuccess(true);
+    }
+  }, [searchParams, router]);
 
   const validate = () => {
     const next: typeof errors = {};
@@ -113,17 +113,41 @@ function SigninPageInner() {
       return;
     }
 
+    // An explicit destination wins — this is how AdminShell sends someone back
+    // to where they were trying to go. Only relative paths, so a crafted
+    // ?next=https://evil.example can't turn sign-in into an open redirect.
+    const next = searchParams.get("next");
+    if (next && next.startsWith("/") && !next.startsWith("//")) {
+      router.push(next);
+      return;
+    }
+
+    // Otherwise route by role. Onboarding is a customer flow — walking an
+    // admin or a vendor through "let's set up your profile" is wrong, and
+    // neither has a profile of that kind to set up.
+    const role = res.data.user.role;
+    if (role === "admin" || role === "super_admin") {
+      router.push("/admin");
+      return;
+    }
+    if (role === "vendor") {
+      // TODO: point at the vendor portal once it exists. Until then the
+      // customer dashboard is the only page they can reach.
+      router.push("/dashboard");
+      return;
+    }
+
     const onboardingCompleted = !!res.data.user.onboarding_completed;
     router.push(onboardingCompleted ? "/dashboard" : "/onboarding");
   };
 
   const handleGoogleAuth = async () => {
-  try {
-    await signInWithGoogle();
-  } catch (error) {
-    setErrors({ auth: "Google sign in failed. Please try again." });
-  }
-};
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      setErrors({ auth: "Google sign in failed. Please try again." });
+    }
+  };
 
   return (
     <div className="flex h-screen overflow-hidden bg-white">
