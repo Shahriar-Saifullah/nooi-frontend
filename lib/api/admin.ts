@@ -101,6 +101,51 @@ export interface ClaimResponse {
   is_me: boolean;
 }
 
+export interface QueueSummary {
+  key: string;
+  label: string;
+  href: string;
+  count: number;
+  /** ISO timestamp of the oldest waiting item. */
+  oldest: string | null;
+  /** False means there is no backend for this queue — render "not built",
+   *  never zero. Zero is a claim that nothing is waiting. */
+  available: boolean;
+}
+
+export interface OldestItem {
+  queue: string;
+  title: string;
+  ref: string;
+  href: string;
+  since: string | null;
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  summary: string | null;
+  actor_email: string | null;
+  actor_name: string;
+  created_at: string;
+}
+
+export interface AdminOverview {
+  queues: QueueSummary[];
+  total_waiting: number;
+  oldest: OldestItem[];
+  interventions: AuditEntry[];
+  kpis: {
+    total_users: number;
+    total_vendors: number;
+    approved_vendors: number;
+    total_orders: number;
+  };
+  generated_at: string;
+}
+
 export interface AdminStats {
   total_users: number;
   total_vendors: number;
@@ -110,6 +155,15 @@ export interface AdminStats {
 }
 
 // ─── Endpoints ───────────────────────────────────────────────────────────────
+
+/**
+ * The dashboard's data. Separate from getAdminStats because the questions
+ * differ: stats answers "how are we doing", this answers "what is waiting on
+ * me and for how long".
+ */
+export async function getAdminOverview(): Promise<ApiResponse<AdminOverview>> {
+  return requestApi<AdminOverview>({ path: "/admin/overview", method: "GET" });
+}
 
 export async function getAdminStats(): Promise<ApiResponse<{ stats: AdminStats }>> {
   return requestApi<{ stats: AdminStats }>({ path: "/admin/stats", method: "GET" });
