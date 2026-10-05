@@ -114,7 +114,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     {
       heading: "Console",
       items: [
-        { label: "Team", href: "/admin/team", icon: <UsersRound size={17} />, ready: false },
+        { label: "Team", href: "/admin/team", icon: <UsersRound size={17} />, ready: true },
         { label: "Audit log", href: "/admin/audit", icon: <ScrollText size={17} />, ready: false },
         { label: "Settings", href: "/admin/settings", icon: <Settings size={17} />, ready: false },
       ],
