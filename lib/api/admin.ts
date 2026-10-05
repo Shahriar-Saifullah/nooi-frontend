@@ -146,6 +146,38 @@ export interface AdminOverview {
   generated_at: string;
 }
 
+// ─── Team ────────────────────────────────────────────────────────────────────
+
+export type ConsoleRole = "admin" | "super_admin";
+
+export interface TeamMember {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string;
+  avatar_url: string | null;
+  created_at: string;
+  last_sign_in_at: string | null;
+  /** active | invited | never signed in — an admin account nobody has ever
+   *  used is worth noticing. */
+  status: string;
+}
+
+export interface PermissionRow {
+  label: string;
+  admin: boolean;
+  super_admin: boolean;
+  /** The guard this row describes, so the table can be checked against code. */
+  note?: string;
+}
+
+export interface TeamResponse {
+  members: TeamMember[];
+  permissions: PermissionRow[];
+  roles: ConsoleRole[];
+  viewer_role: string;
+}
+
 export interface AdminStats {
   total_users: number;
   total_vendors: number;
@@ -163,6 +195,53 @@ export interface AdminStats {
  */
 export async function getAdminOverview(): Promise<ApiResponse<AdminOverview>> {
   return requestApi<AdminOverview>({ path: "/admin/overview", method: "GET" });
+}
+
+/**
+ * Ask for one document and get a short-lived signed URL.
+ *
+ * The path is never sent — the backend reads it from the vendor's own record.
+ * A client that could name the object could sign a URL for any file in the
+ * bucket, including another vendor's bank letter.
+ */
+export async function getVendorDocumentUrl(
+  vendorId: string,
+  kind: string,
+): Promise<ApiResponse<{ url: string; label: string; expires_in: number }>> {
+  return requestApi<{ url: string; label: string; expires_in: number }>({
+    path: `/admin/vendors/${encodeURIComponent(vendorId)}/documents/${encodeURIComponent(kind)}`,
+    method: "GET",
+  });
+}
+
+export async function getTeam(): Promise<ApiResponse<TeamResponse>> {
+  return requestApi<TeamResponse>({ path: "/admin/team", method: "GET" });
+}
+
+/**
+ * Invite rather than create: the invitee sets their own password from a
+ * one-time link, so an admin credential never travels through chat or email.
+ */
+export async function inviteTeamMember(
+  email: string,
+  role: ConsoleRole,
+): Promise<ApiResponse<{ email: string; role: ConsoleRole; id: string | null }>> {
+  return requestApi<{ email: string; role: ConsoleRole; id: string | null }>({
+    path: "/admin/team/invite",
+    method: "POST",
+    body: { email, role },
+  });
+}
+
+export async function updateUserRole(
+  id: string,
+  role: ConsoleRole | "user" | "vendor",
+): Promise<ApiResponse<{ profile: any }>> {
+  return requestApi<{ profile: any }>({
+    path: `/admin/users/${encodeURIComponent(id)}/role`,
+    method: "PATCH",
+    body: { role },
+  });
 }
 
 export async function getAdminStats(): Promise<ApiResponse<{ stats: AdminStats }>> {

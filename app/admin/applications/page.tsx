@@ -43,7 +43,7 @@ import {
 import AdminShell from "@/components/admin/AdminShell";
 import {
   getVendorQueue, getVendorForReview, claimVendorReview, decideVendorApplication,
-  waitingDays, waitingBand,
+  getVendorDocumentUrl, waitingDays, waitingBand,
   type QueueVendor, type QueueCounts, type QueueTab, type QueueSort,
   type ReviewVendor, type DuplicateVendor, type ClaimResponse,
 } from "@/lib/api/admin";
@@ -287,6 +287,8 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<{ status: string; who: string | null; at: string | null } | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [openingDoc, setOpeningDoc] = useState<string | null>(null);
+  const [docError, setDocError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -314,6 +316,35 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /**
+   * Documents open in a new tab via a signed URL valid for five minutes.
+   *
+   * window.open is called BEFORE the await, with the tab filled in afterwards.
+   * Opening it in the promise callback loses the user-gesture context and
+   * Safari blocks it as a popup — which reads to an admin as "the View button
+   * does nothing".
+   */
+  const openDocument = useCallback(async (kind: string, label: string) => {
+    setOpeningDoc(kind);
+    setDocError(null);
+    const tab = window.open("", "_blank");
+    try {
+      const res = await getVendorDocumentUrl(id, kind);
+      if (!res.success) {
+        tab?.close();
+        setDocError(typeof res.error === "string" ? res.error : `Could not open ${label}.`);
+        return;
+      }
+      if (tab) tab.location.href = res.data.url;
+      else window.location.href = res.data.url;
+    } catch {
+      tab?.close();
+      setDocError(`Could not open ${label}.`);
+    } finally {
+      setOpeningDoc(null);
+    }
+  }, [id]);
 
   const takeOver = useCallback(async () => {
     const c = await claimVendorReview(id, true);
@@ -513,16 +544,25 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
                       </span>
                     </span>
                     <button
-                      disabled
-                      title="Document viewing needs the private storage bucket"
-                      className="flex shrink-0 cursor-not-allowed items-center gap-1 rounded-full border border-[#D5DBDA] px-2.5 py-1 text-[11.5px] text-[#B3B9B9]"
+                      onClick={() => openDocument(doc.kind, doc.label)}
+                      disabled={openingDoc === doc.kind}
+                      className="flex shrink-0 items-center gap-1 rounded-full border border-[#D5DBDA] bg-white px-2.5 py-1 text-[11.5px] text-[#004643] transition-colors hover:bg-[#F1F4F4] disabled:opacity-50"
                     >
-                      <ExternalLink size={11} />
+                      {openingDoc === doc.kind
+                        ? <Loader2 size={11} className="animate-spin" />
+                        : <ExternalLink size={11} />}
                       View
                     </button>
                   </li>
                 ))}
               </ul>
+            )}
+
+            {docError && (
+              <p className="mt-3 flex items-start gap-1.5 text-[11.5px] text-[#812F28]">
+                <AlertTriangle size={12} className="mt-px shrink-0" />
+                {docError}
+              </p>
             )}
           </section>
 
