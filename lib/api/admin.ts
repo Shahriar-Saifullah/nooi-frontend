@@ -10,6 +10,7 @@
  */
 
 import { requestApi, type ApiResponse } from "./http";
+import { createClient } from "@/utils/supabase/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -146,6 +147,51 @@ export interface AdminOverview {
   generated_at: string;
 }
 
+// ─── Vendor directory ────────────────────────────────────────────────────────
+
+export type DirectoryTab = "all" | "attention" | "approved" | "suspended";
+
+export interface DirectoryVendor {
+  id: string;
+  business_name: string;
+  store_name: string | null;
+  business_email: string | null;
+  city: string | null;
+  country: string | null;
+  category: string | null;
+  fulfillment_type: string | null;
+  status: string;
+  payout_connected: boolean;
+  document_count: number;
+  storefronts: { id: string; name: string }[];
+  commission_rate: number | null;
+  /** Gross, before commission. The rate is shown beside it so the two are
+   *  never conflated — netting here would answer the payouts screen's
+   *  question instead of this one's. */
+  gmv_90d: number;
+  /** Items not yet delivered, by item_status — goods outstanding, not parcels. */
+  open_items: number;
+  last_sign_in_at: string | null;
+  verified_at: string | null;
+  /** Why this vendor needs attention, in words. A bare flag just moves the
+   *  question along. */
+  issues: string[];
+  needs_attention: boolean;
+}
+
+export interface DirectoryCounts {
+  all: number;
+  attention: number;
+  approved: number;
+  suspended: number;
+}
+
+export interface DirectoryResponse {
+  vendors: DirectoryVendor[];
+  counts: DirectoryCounts;
+  gmv_window_days: number;
+}
+
 // ─── Audit log ───────────────────────────────────────────────────────────────
 
 export interface AuditLogEntry {
@@ -236,6 +282,19 @@ export async function getVendorDocumentUrl(
   });
 }
 
+export async function getVendorDirectory(params: {
+  tab?: DirectoryTab;
+  search?: string;
+} = {}): Promise<ApiResponse<DirectoryResponse>> {
+  const q = new URLSearchParams();
+  if (params.tab) q.set("tab", params.tab);
+  if (params.search) q.set("search", params.search);
+  return requestApi<DirectoryResponse>({
+    path: `/admin/vendors/directory?${q.toString()}`,
+    method: "GET",
+  });
+}
+
 export async function getAuditLog(params: {
   search?: string;
   actor?: string;
@@ -257,21 +316,62 @@ export async function getAuditLog(params: {
 }
 
 /**
- * The CSV export is a plain link rather than a fetch, so the browser handles
- * the download. That means no Authorization header — the request carries the
- * session cookie instead, which requireAuth also accepts.
+ * Download the audit CSV.
+ *
+ * Was a plain <a href>, which 401s: the browser sends no Authorization header
+ * on a normal navigation, and the Supabase session cookie does not travel to
+ * the backend's own domain. So fetch it with the token like every other call,
+ * then hand the browser a blob to save.
+ *
+ * Returns an error string rather than throwing, so the caller can show it
+ * inline — a download that fails silently leaves someone waiting for a file
+ * that is never coming.
  */
-export function auditExportUrl(params: {
+export async function downloadAuditCsv(params: {
   search?: string;
   actor?: string;
   action?: string;
-} = {}): string {
+} = {}): Promise<string | null> {
   const q = new URLSearchParams();
   if (params.search) q.set("search", params.search);
   if (params.actor && params.actor !== "all") q.set("actor", params.actor);
   if (params.action && params.action !== "all") q.set("action", params.action);
+
   const base = process.env.NEXT_PUBLIC_API_URL ?? "";
-  return `${base}/admin/audit/export?${q.toString()}`;
+  const url = `${base}/admin/audit/export?${q.toString()}`;
+
+  try {
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        return "Your session has expired. Sign in again to export.";
+      }
+      return "Could not generate the export.";
+    }
+
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `nooi-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Freeing it immediately can cancel the download in Safari.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    return null;
+  } catch {
+    return "Could not generate the export.";
+  }
 }
 
 export async function getTeam(): Promise<ApiResponse<TeamResponse>> {

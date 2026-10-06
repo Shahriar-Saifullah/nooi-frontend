@@ -20,7 +20,7 @@ import {
 
 import AdminShell from "@/components/admin/AdminShell";
 import {
-  getAuditLog, auditExportUrl,
+  getAuditLog, downloadAuditCsv,
   type AuditLogEntry, type AuditLogResponse,
 } from "@/lib/api/admin";
 
@@ -57,6 +57,8 @@ function AuditInner() {
   const [actor, setActor] = useState("all");
   const [action, setAction] = useState("all");
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,13 +101,22 @@ function AuditInner() {
           </p>
         </div>
 
-        <a
-          href={auditExportUrl({ search: search.trim() || undefined, actor, action })}
-          className="flex items-center gap-1.5 rounded-full border border-[#D5DBDA] bg-white px-4 py-2 text-[12.5px] font-medium text-[#004643] transition-colors hover:bg-[#F1F4F4]"
+        <button
+          onClick={async () => {
+            setExporting(true);
+            setExportError(null);
+            const err = await downloadAuditCsv({
+              search: search.trim() || undefined, actor, action,
+            });
+            if (err) setExportError(err);
+            setExporting(false);
+          }}
+          disabled={exporting}
+          className="flex items-center gap-1.5 rounded-full border border-[#D5DBDA] bg-white px-4 py-2 text-[12.5px] font-medium text-[#004643] transition-colors hover:bg-[#F1F4F4] disabled:opacity-50"
         >
-          <Download size={13} />
-          Export CSV
-        </a>
+          {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {exporting ? "Preparing" : "Export CSV"}
+        </button>
       </div>
 
       {/* Filters */}
@@ -156,10 +167,10 @@ function AuditInner() {
         )}
       </div>
 
-      {error && (
+      {(error || exportError) && (
         <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-[#812F28]/25 bg-[#FFFAF9] p-3.5 text-[12.5px] text-[#812F28]">
           <AlertCircle size={15} className="mt-px shrink-0" />
-          {error}
+          {error ?? exportError}
         </div>
       )}
 

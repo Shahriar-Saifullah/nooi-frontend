@@ -107,7 +107,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     {
       heading: "Directory",
       items: [
-        { label: "Vendor directory", href: "/admin/vendors", icon: <Users size={17} />, ready: false },
+        { label: "Vendor directory", href: "/admin/vendors", icon: <Users size={17} />, ready: true },
         { label: "Payouts", href: "/admin/payouts", icon: <Wallet size={17} />, ready: false },
       ],
     },
