@@ -146,6 +146,28 @@ export interface AdminOverview {
   generated_at: string;
 }
 
+// ─── Audit log ───────────────────────────────────────────────────────────────
+
+export interface AuditLogEntry {
+  id: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  summary: string | null;
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+export interface AuditLogResponse {
+  entries: AuditLogEntry[];
+  /** Filter options derived from the data, not a hardcoded list. */
+  actors: string[];
+  action_groups: string[];
+  pagination: { total: number; page: number; limit: number; totalPages: number };
+}
+
 // ─── Team ────────────────────────────────────────────────────────────────────
 
 export type ConsoleRole = "admin" | "super_admin";
@@ -212,6 +234,44 @@ export async function getVendorDocumentUrl(
     path: `/admin/vendors/${encodeURIComponent(vendorId)}/documents/${encodeURIComponent(kind)}`,
     method: "GET",
   });
+}
+
+export async function getAuditLog(params: {
+  search?: string;
+  actor?: string;
+  action?: string;
+  page?: number;
+  limit?: number;
+} = {}): Promise<ApiResponse<AuditLogResponse>> {
+  const q = new URLSearchParams();
+  if (params.search) q.set("search", params.search);
+  if (params.actor && params.actor !== "all") q.set("actor", params.actor);
+  if (params.action && params.action !== "all") q.set("action", params.action);
+  q.set("page", String(params.page ?? 1));
+  q.set("limit", String(params.limit ?? 50));
+
+  return requestApi<AuditLogResponse>({
+    path: `/admin/audit?${q.toString()}`,
+    method: "GET",
+  });
+}
+
+/**
+ * The CSV export is a plain link rather than a fetch, so the browser handles
+ * the download. That means no Authorization header — the request carries the
+ * session cookie instead, which requireAuth also accepts.
+ */
+export function auditExportUrl(params: {
+  search?: string;
+  actor?: string;
+  action?: string;
+} = {}): string {
+  const q = new URLSearchParams();
+  if (params.search) q.set("search", params.search);
+  if (params.actor && params.actor !== "all") q.set("actor", params.actor);
+  if (params.action && params.action !== "all") q.set("action", params.action);
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "";
+  return `${base}/admin/audit/export?${q.toString()}`;
 }
 
 export async function getTeam(): Promise<ApiResponse<TeamResponse>> {

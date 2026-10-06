@@ -60,7 +60,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; };
   }, []);
 
-  const role = user?.role;
+  const role = (user as any)?.role;
   const isAdmin = role === "admin" || role === "super_admin";
 
   // The pending badge is the one number an admin wants without clicking.
@@ -79,7 +79,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     {
       heading: "Overview",
       items: [
-        { label: "Dashboard", href: "/admin", icon: <LayoutDashboard size={17} />, ready: false },
+        { label: "Dashboard", href: "/admin", icon: <LayoutDashboard size={17} />, ready: true },
       ],
     },
     {
@@ -115,7 +115,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       heading: "Console",
       items: [
         { label: "Team", href: "/admin/team", icon: <UsersRound size={17} />, ready: true },
-        { label: "Audit log", href: "/admin/audit", icon: <ScrollText size={17} />, ready: false },
+        { label: "Audit log", href: "/admin/audit", icon: <ScrollText size={17} />, ready: true },
         { label: "Settings", href: "/admin/settings", icon: <Settings size={17} />, ready: false },
       ],
     },
