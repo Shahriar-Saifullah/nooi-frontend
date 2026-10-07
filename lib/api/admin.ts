@@ -147,6 +147,39 @@ export interface AdminOverview {
   generated_at: string;
 }
 
+// ─── Order intervention ──────────────────────────────────────────────────────
+
+export interface OrderSearchRow {
+  id: string;
+  order_number: string;
+  status: string;
+  total_amount: number;
+  created_at: string;
+  customer_name: string | null;
+  vendors: string[];
+  payment_intent_id: string | null;
+  /** Set when someone has already acted on this order. */
+  intervened_at: string | null;
+}
+
+export interface OrderIntervention {
+  order: any;
+  /** Everything already done to this order, newest first. */
+  interventions: {
+    id: string;
+    action: string;
+    summary: string | null;
+    actor_email: string | null;
+    created_at: string;
+    metadata: Record<string, any>;
+  }[];
+  returns: { id: string; status: string; reason: string; order_item_id: string; created_at: string }[];
+  already_refunded_count: number;
+  /** Cancelling refunds the customer, so it is super_admin only. The backend
+   *  enforces this; the flag just keeps the UI honest about it. */
+  viewer_can_cancel: boolean;
+}
+
 // ─── Returns and refunds ─────────────────────────────────────────────────────
 
 export interface ReturnRow {
@@ -322,6 +355,54 @@ export async function getVendorDocumentUrl(
   return requestApi<{ url: string; label: string; expires_in: number }>({
     path: `/admin/vendors/${encodeURIComponent(vendorId)}/documents/${encodeURIComponent(kind)}`,
     method: "GET",
+  });
+}
+
+export async function searchOrders(
+  q?: string,
+): Promise<ApiResponse<{ orders: OrderSearchRow[] }>> {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  return requestApi<{ orders: OrderSearchRow[] }>({
+    path: `/admin/orders?${params.toString()}`,
+    method: "GET",
+  });
+}
+
+export async function getOrderForIntervention(
+  id: string,
+): Promise<ApiResponse<OrderIntervention>> {
+  return requestApi<OrderIntervention>({
+    path: `/admin/orders/${encodeURIComponent(id)}`,
+    method: "GET",
+  });
+}
+
+export async function overrideOrderStatus(
+  id: string,
+  status: string,
+  note: string,
+): Promise<ApiResponse<{ status: string }>> {
+  return requestApi<{ status: string }>({
+    path: `/admin/orders/${encodeURIComponent(id)}/override`,
+    method: "POST",
+    body: { status, note },
+  });
+}
+
+/**
+ * Cancel and refund. Super admin only — the backend returns 403 otherwise.
+ * `refunded` is what actually went back, which is the order total minus
+ * anything already refunded through a return.
+ */
+export async function cancelOrderAsAdmin(
+  id: string,
+  note: string,
+): Promise<ApiResponse<{ status: string; refund_id: string | null; refunded: number }>> {
+  return requestApi<{ status: string; refund_id: string | null; refunded: number }>({
+    path: `/admin/orders/${encodeURIComponent(id)}/cancel`,
+    method: "POST",
+    body: { note },
   });
 }
 
