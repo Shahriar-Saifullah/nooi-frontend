@@ -213,6 +213,9 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const [data, setData] = useState<ReturnDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Separate from `error` because every action reloads afterwards, and a
+   *  successful reload would clear the message explaining the failure. */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [confirming, setConfirming] = useState(false);
   const [declining, setDeclining] = useState(false);
@@ -237,12 +240,12 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
 
   const doRefund = useCallback(async () => {
     setWorking(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await refundReturn(id);
       if (!res.success) {
         const e: any = res.error;
-        setError(
+        setActionError(
           String(e).includes("already_handled")
             ? "Someone else handled this while you were reading. The outcome below is the one that stands."
             : typeof e === "string" ? e : "The refund did not go through.",
@@ -254,7 +257,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       setConfirming(false);
       await load();
     } catch {
-      setError("The refund did not go through.");
+      setActionError("The refund did not go through.");
     } finally {
       setWorking(false);
     }
@@ -263,12 +266,12 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const doDecline = useCallback(async () => {
     if (!note.trim()) return;
     setWorking(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await declineReturn(id, note.trim());
       if (!res.success) {
         const e: any = res.error;
-        setError(
+        setActionError(
           String(e).includes("already_handled")
             ? "Someone else handled this while you were reading."
             : typeof e === "string" ? e : "Could not decline this return.",
@@ -280,7 +283,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       setDeclining(false);
       await load();
     } catch {
-      setError("Could not decline this return.");
+      setActionError("Could not decline this return.");
     } finally {
       setWorking(false);
     }
@@ -342,9 +345,9 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         )}
 
-        {error && (
+        {(error || actionError) && (
           <div className="flex items-start gap-2.5 rounded-xl border border-[#812F28]/25 bg-[#FFFAF9] p-3.5 text-[12.5px] text-[#812F28]">
-            <AlertCircle size={15} className="mt-px shrink-0" />{error}
+            <AlertCircle size={15} className="mt-px shrink-0" />{actionError ?? error}
           </div>
         )}
 
