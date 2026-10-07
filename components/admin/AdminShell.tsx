@@ -98,7 +98,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     {
       heading: "Operations",
       items: [
-        { label: "Refunds", href: "/admin/refunds", icon: <RotateCcw size={17} />, ready: false },
+        { label: "Refunds", href: "/admin/refunds", icon: <RotateCcw size={17} />, ready: true },
         { label: "Orders", href: "/admin/orders", icon: <ShoppingBag size={17} />, ready: false },
         { label: "Cancellations", href: "/admin/cancellations", icon: <XCircle size={17} />, ready: false },
         { label: "Support", href: "/admin/support", icon: <LifeBuoy size={17} />, ready: false },

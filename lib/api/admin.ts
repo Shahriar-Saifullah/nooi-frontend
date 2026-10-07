@@ -147,6 +147,49 @@ export interface AdminOverview {
   generated_at: string;
 }
 
+// ─── Returns and refunds ─────────────────────────────────────────────────────
+
+export interface ReturnRow {
+  id: string;
+  order_id: string;
+  order_item_id: string;
+  user_id: string;
+  reason: string;
+  photo_urls: string[];
+  status: "requested" | "refunding" | "refunded" | "declined";
+  created_at: string;
+  item_title: string;
+  item_variant: string | null;
+  item_image: string | null;
+  item_quantity: number;
+  /** Full-item refunds in v1, so this is the item's total. Server-derived —
+   *  the client never sends an amount. */
+  amount: number;
+  vendor_name: string | null;
+  order_number: string | null;
+  customer_name: string | null;
+}
+
+export interface ReturnCounts {
+  requested: number;
+  done: number;
+  all: number;
+}
+
+export interface ReturnDetail {
+  return: ReturnRow & {
+    decided_by_name: string | null;
+    decided_at: string | null;
+    decision_note: string | null;
+    stripe_refund_id: string | null;
+  };
+  item: any;
+  order: any;
+  other_returns_on_order: { id: string; status: string; reason: string; created_at: string }[];
+  /** False when the order has no payment_intent_id — nothing to refund against. */
+  refundable: boolean;
+}
+
 // ─── Vendor directory ────────────────────────────────────────────────────────
 
 export type DirectoryTab = "all" | "attention" | "approved" | "suspended";
@@ -279,6 +322,54 @@ export async function getVendorDocumentUrl(
   return requestApi<{ url: string; label: string; expires_in: number }>({
     path: `/admin/vendors/${encodeURIComponent(vendorId)}/documents/${encodeURIComponent(kind)}`,
     method: "GET",
+  });
+}
+
+export async function getReturnsQueue(params: {
+  tab?: string;
+  search?: string;
+  sort?: string;
+} = {}): Promise<ApiResponse<{ returns: ReturnRow[]; counts: ReturnCounts }>> {
+  const q = new URLSearchParams();
+  if (params.tab) q.set("tab", params.tab);
+  if (params.search) q.set("search", params.search);
+  if (params.sort) q.set("sort", params.sort);
+  return requestApi<{ returns: ReturnRow[]; counts: ReturnCounts }>({
+    path: `/admin/returns?${q.toString()}`,
+    method: "GET",
+  });
+}
+
+export async function getReturnForReview(id: string): Promise<ApiResponse<ReturnDetail>> {
+  return requestApi<ReturnDetail>({
+    path: `/admin/returns/${encodeURIComponent(id)}`,
+    method: "GET",
+  });
+}
+
+/**
+ * Issue the refund. No amount parameter, deliberately: the backend reads it
+ * from the order item. Returns 409 with "already_handled" if someone else
+ * decided first — which is information, not failure.
+ */
+export async function refundReturn(
+  id: string,
+): Promise<ApiResponse<{ status: string; refund_id: string; amount: number }>> {
+  return requestApi<{ status: string; refund_id: string; amount: number }>({
+    path: `/admin/returns/${encodeURIComponent(id)}/refund`,
+    method: "POST",
+    body: {},
+  });
+}
+
+export async function declineReturn(
+  id: string,
+  note: string,
+): Promise<ApiResponse<{ status: string }>> {
+  return requestApi<{ status: string }>({
+    path: `/admin/returns/${encodeURIComponent(id)}/decline`,
+    method: "POST",
+    body: { note },
   });
 }
 
