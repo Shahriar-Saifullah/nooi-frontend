@@ -188,7 +188,15 @@ function OrderSearch({ onOpen }: { onOpen: (id: string) => void }) {
 function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const [data, setData] = useState<OrderIntervention | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Why the page could not load. Cleared by a successful load. */
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Why an action failed. Deliberately separate: every action reloads the
+   * order afterwards, and a successful reload would otherwise clear the very
+   * message explaining why the action didn't work — leaving the admin looking
+   * at an unchanged screen with no idea what happened.
+   */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"none" | "override" | "cancel">("none");
   const [newStatus, setNewStatus] = useState("processing");
@@ -216,11 +224,11 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const doOverride = useCallback(async () => {
     if (!note.trim()) return;
     setWorking(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await overrideOrderStatus(id, newStatus, note.trim());
       if (!res.success) {
-        setError(typeof res.error === "string" ? res.error : "Could not change the status.");
+        setActionError(typeof res.error === "string" ? res.error : "Could not change the status.");
         await load();
         return;
       }
@@ -228,7 +236,7 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
       reset();
       await load();
     } catch {
-      setError("Could not change the status.");
+      setActionError("Could not change the status.");
     } finally {
       setWorking(false);
     }
@@ -237,12 +245,12 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const doCancel = useCallback(async () => {
     if (!note.trim()) return;
     setWorking(true);
-    setError(null);
+    setActionError(null);
     try {
       const res = await cancelOrderAsAdmin(id, note.trim());
       if (!res.success) {
         const e: any = res.error;
-        setError(
+        setActionError(
           String(e).includes("already_handled")
             ? "Someone else handled this while you were reading."
             : typeof e === "string" ? e : "Could not cancel this order.",
@@ -258,7 +266,7 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
       reset();
       await load();
     } catch {
-      setError("Could not cancel this order.");
+      setActionError("Could not cancel this order.");
     } finally {
       setWorking(false);
     }
@@ -315,9 +323,9 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         )}
 
-        {error && (
+        {(error || actionError) && (
           <div className="flex items-start gap-2.5 rounded-xl border border-[#812F28]/25 bg-[#FFFAF9] p-3.5 text-[12.5px] text-[#812F28]">
-            <AlertCircle size={15} className="mt-px shrink-0" />{error}
+            <AlertCircle size={15} className="mt-px shrink-0" />{actionError ?? error}
           </div>
         )}
 
