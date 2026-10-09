@@ -43,6 +43,7 @@ export async function POST(req: Request) {
           id: user.id,
           business_name: user.user_metadata?.business_name || user.email || "",
           category: "general",
+          phone: "",
           submitted_at: nowIso,
           updated_at: nowIso,
         },

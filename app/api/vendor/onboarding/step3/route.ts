@@ -78,7 +78,7 @@ export async function POST(req: Request) {
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
     // Update vendor_profiles table (cr_number, vat_number, legal_documents)
-    // business_name and category guard against NOT NULL violations on upsert-as-insert
+    // business_name, category, phone guard against NOT NULL violations on upsert-as-insert
     const { error: vpError } = await adminClient
       .from("vendor_profiles")
       .upsert(
@@ -86,6 +86,7 @@ export async function POST(req: Request) {
           id: user.id,
           business_name: user.user_metadata?.business_name || user.email || "",
           category: "general",
+          phone: "",
           cr_number: commercialRegistrationNumber.trim(),
           vat_number: vatNumber.trim(),
           legal_documents: legalDocumentsArray,
