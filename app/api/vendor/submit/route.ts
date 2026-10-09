@@ -35,11 +35,14 @@ export async function POST(req: Request) {
     const nowIso = new Date().toISOString();
 
     // Set submitted_at timestamp (and ensure status is 'pending')
+    // business_name and category guard against NOT NULL violations on upsert-as-insert
     const { error: vpError } = await adminClient
       .from("vendor_profiles")
       .upsert(
         {
           id: user.id,
+          business_name: user.user_metadata?.business_name || user.email || "",
+          category: "general",
           submitted_at: nowIso,
           updated_at: nowIso,
         },

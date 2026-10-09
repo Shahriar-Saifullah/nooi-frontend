@@ -14,7 +14,7 @@ function normalizeFulfillmentType(val: string): string {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { storeName, fulfillmentType, city, phone, description } = body;
+    const { storeName, businessName, fulfillmentType, city, phone, description } = body;
 
     if (!storeName || !fulfillmentType) {
       return NextResponse.json(
@@ -52,12 +52,16 @@ export async function POST(req: Request) {
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
     // Update vendor_profiles table (DO NOT include status or revoked columns)
+    // business_name and category are included to satisfy NOT NULL constraints
+    // in case the row doesn't exist yet (upsert would INSERT, not UPDATE)
     const { error: vpError } = await adminClient
       .from("vendor_profiles")
       .upsert(
         {
           id: user.id,
           store_name: storeName.trim(),
+          business_name: (businessName || storeName).trim(),
+          category: "general",
           fulfillment_type: dbFulfillmentType,
           city: city?.trim() || "",
           description: description?.trim() || "",
