@@ -72,7 +72,6 @@ function SigninPageInner() {
     if (roleParam === "vendor") {
       setRole("vendor");
     }
-
     const errorCode = searchParams.get("error");
     if (errorCode) {
       setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
@@ -116,6 +115,30 @@ function SigninPageInner() {
       const authMessage =
         typeof res.error === "string" ? res.error : "Sign in failed";
       setErrors({ ...nextFieldErrors, auth: authMessage });
+      return;
+    }
+
+    // An explicit destination wins — this is how AdminShell sends someone back
+    // to where they were trying to go. Only relative paths, so a crafted
+    // ?next=https://evil.example can't turn sign-in into an open redirect.
+    const next = searchParams.get("next");
+    if (next && next.startsWith("/") && !next.startsWith("//")) {
+      router.push(next);
+      return;
+    }
+
+    // Otherwise route by role. Onboarding is a customer flow — walking an
+    // admin or a vendor through "let's set up your profile" is wrong, and
+    // neither has a profile of that kind to set up.
+    const role = res.data.user.role;
+    if (role === "admin" || role === "super_admin") {
+      router.push("/admin");
+      return;
+    }
+    if (role === "vendor") {
+      // TODO: point at the vendor portal once it exists. Until then the
+      // customer dashboard is the only page they can reach.
+      router.push("/dashboard");
       return;
     }
 
