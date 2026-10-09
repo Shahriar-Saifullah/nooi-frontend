@@ -23,49 +23,92 @@ export async function POST(req: Request) {
       );
     }
 
-    // Persist legal doc data to vendor_profiles table
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (supabaseUrl && serviceRoleKey) {
-      try {
-        const supabase = await createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        { success: false, error: "Supabase service role credentials not configured." },
+        { status: 500 }
+      );
+    }
 
-        if (user?.id) {
-          const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
-          const { error: vpError } = await adminClient
-            .from("vendor_profiles")
-            .upsert(
-              {
-                id: user.id,
-                cr_number: commercialRegistrationNumber,
-                vat_number: vatNumber,
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "id" }
-            );
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-          if (vpError) {
-            console.warn("[Vendor Step3 API] vendor_profiles update warning:", vpError.message);
-          }
-        }
-      } catch (dbErr) {
-        console.warn("[Vendor Step3 API] DB update warning:", dbErr);
-      }
+    if (!user?.id) {
+      return NextResponse.json(
+        { success: false, error: "Not authenticated. Please sign in." },
+        { status: 401 }
+      );
+    }
+
+    // Build legal_documents JSONB array with expected structure: [{ kind, label, path, uploaded_at }]
+    const legalDocumentsArray: Array<{ kind: string; label: string; path: string; uploaded_at: string }> = [];
+
+    if (commercialRegistrationCertificate?.path) {
+      legalDocumentsArray.push({
+        kind: "trade_licence",
+        label: commercialRegistrationCertificate.name || "Commercial Registration Certificate",
+        path: commercialRegistrationCertificate.path,
+        uploaded_at: commercialRegistrationCertificate.uploaded_at || new Date().toISOString(),
+      });
+    }
+
+    if (vatRegistrationCertificate?.path) {
+      legalDocumentsArray.push({
+        kind: "vat_certificate",
+        label: vatRegistrationCertificate.name || "VAT Registration Certificate",
+        path: vatRegistrationCertificate.path,
+        uploaded_at: vatRegistrationCertificate.uploaded_at || new Date().toISOString(),
+      });
+    }
+
+    if (authorisedSignatoryId?.path) {
+      legalDocumentsArray.push({
+        kind: "bank_letter",
+        label: authorisedSignatoryId.name || "Authorised Signatory ID",
+        path: authorisedSignatoryId.path,
+        uploaded_at: authorisedSignatoryId.uploaded_at || new Date().toISOString(),
+      });
+    }
+
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+
+    // Update vendor_profiles table (cr_number, vat_number, legal_documents)
+    const { error: vpError } = await adminClient
+      .from("vendor_profiles")
+      .upsert(
+        {
+          id: user.id,
+          cr_number: commercialRegistrationNumber.trim(),
+          vat_number: vatNumber.trim(),
+          legal_documents: legalDocumentsArray,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+
+    if (vpError) {
+      console.error("[Vendor Step3 API] DB error:", vpError.message);
+      return NextResponse.json(
+        { success: false, error: `Failed to save legal documents: ${vpError.message}` },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
       message: "Legal documents submitted successfully.",
       data: {
-        commercialRegistrationNumber,
-        vatNumber,
+        commercialRegistrationNumber: commercialRegistrationNumber.trim(),
+        vatNumber: vatNumber.trim(),
         commercialRegistrationCertificate: commercialRegistrationCertificate || null,
         vatRegistrationCertificate: vatRegistrationCertificate || null,
         authorisedSignatoryId: authorisedSignatoryId || null,
+        legalDocuments: legalDocumentsArray,
         step: 3,
         updatedAt: new Date().toISOString(),
       },
@@ -81,3 +124,4 @@ export async function POST(req: Request) {
     );
   }
 }
+

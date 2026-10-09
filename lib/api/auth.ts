@@ -18,6 +18,7 @@ export type AuthUser = {
   email: string;
   full_name: string;
   role?: "user" | "vendor" | "admin" | "super_admin";
+  vendor_status?: "draft" | "pending" | "approved" | "rejected" | "suspended" | "action_needed";
   avatar_url?: string | null;
   plan?: string;
   onboarding_completed?: boolean;
@@ -67,18 +68,18 @@ function mapSupabaseUser(user: any): AuthUser {
 
 /**
  * Sign in with email and password.
- * Uses Supabase client directly, then tries to enrich with backend profile data.
+ * Authenticates with Supabase, then queries profiles.role and vendor_profiles.status.
  */
 export async function signIn(
   payload: SignInPayload,
 ): Promise<ApiResponse<AuthUserResponse>> {
-  const { data, error } = await getSupabase().auth.signInWithPassword({
+  const supabase = getSupabase();
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: payload.email,
     password: payload.password,
   });
 
   if (error) {
-    // Handle specific Supabase error messages
     if (error.message.toLowerCase().includes("email not confirmed")) {
       return {
         success: false,
@@ -101,7 +102,7 @@ export async function signIn(
     };
   }
 
-  // Try to get enriched profile from backend, fall back to Supabase data
+  // 1. Check backend session endpoint if available
   try {
     const backendRes = await requestApi<AuthUserResponse>({
       baseUrl: getAuthBaseUrl(),
@@ -112,14 +113,64 @@ export async function signIn(
       return backendRes;
     }
   } catch {
-    // Backend unavailable or CORS blocked — fall back to Supabase data
+    // Backend unavailable or CORS blocked — fall back to database query
   }
 
-  // Fallback: return user data from Supabase session
+  // 2. Query profiles table for true authoritative role
+  let userRole: "user" | "vendor" | "admin" | "super_admin" =
+    data.user.user_metadata?.role || "user";
+  let fullName = data.user.user_metadata?.full_name || "";
+
+  try {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role, full_name")
+      .eq("id", data.user.id)
+      .maybeSingle();
+
+    if (profile?.role) {
+      userRole = profile.role as any;
+    }
+    if (profile?.full_name) {
+      fullName = profile.full_name;
+    }
+  } catch (err) {
+    console.warn("[Auth API] profiles table query warning:", err);
+  }
+
+  // 3. If user is a vendor, check vendor_profiles.status
+  let vendorStatus: AuthUser["vendor_status"] = undefined;
+  if (userRole === "vendor") {
+    try {
+      const { data: vp } = await supabase
+        .from("vendor_profiles")
+        .select("status, submitted_at")
+        .eq("id", data.user.id)
+        .maybeSingle();
+
+      if (vp) {
+        vendorStatus = vp.status || (vp.submitted_at ? "pending" : "draft");
+      } else {
+        vendorStatus = "draft";
+      }
+    } catch (vpErr) {
+      console.warn("[Auth API] vendor_profiles table query warning:", vpErr);
+      vendorStatus = "pending";
+    }
+  }
+
   return {
     success: true,
     data: {
-      user: mapSupabaseUser(data.user),
+      user: {
+        id: data.user.id,
+        email: data.user.email || payload.email,
+        full_name: fullName,
+        role: userRole,
+        vendor_status: vendorStatus,
+        avatar_url: data.user.user_metadata?.avatar_url || null,
+        onboarding_completed: !!data.user.user_metadata?.onboarding_completed,
+      },
     },
   };
 }

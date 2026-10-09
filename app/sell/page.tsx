@@ -1,10 +1,10 @@
-"useClient";
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useVendorStore } from "@/lib/store";
 import { signUpVendor } from "@/lib/api/vendor";
+import ResumeRegistrationCard from "@/components/vendor/ResumeRegistrationCard";
 
 function getStrength(password: string): {
   score: number;
@@ -27,14 +27,18 @@ function getStrength(password: string): {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function VendorSignupPage() {
+function VendorSignupPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const accountData = useVendorStore((state) => state.accountData);
   const setAccountData = useVendorStore((state) => state.setAccountData);
+  const step = useVendorStore((state) => state.step);
   const setStep = useVendorStore((state) => state.setStep);
   const resetVendorState = useVendorStore((state) => state.resetVendorState);
 
   const [submitting, setSubmitting] = useState(false);
+  const [showResume, setShowResume] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [errors, setErrors] = useState<{
     fullName?: string;
     workEmail?: string;
@@ -44,8 +48,39 @@ export default function VendorSignupPage() {
   }>({});
 
   useEffect(() => {
-    resetVendorState();
-  }, [resetVendorState]);
+    useVendorStore.persist.rehydrate();
+    setMounted(true);
+    const forceNew = searchParams.get("new") === "true";
+    const forceResume = searchParams.get("resume") === "true";
+
+    if (forceNew) {
+      resetVendorState();
+      setShowResume(false);
+    } else if (forceResume || (step > 1 && (accountData.workEmail || accountData.businessName))) {
+      setShowResume(true);
+    }
+  }, [searchParams, step, accountData.workEmail, accountData.businessName, resetVendorState]);
+
+  if (mounted && showResume) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          width: "100%",
+          backgroundColor: "#FFFFFF",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "24px 16px",
+          boxSizing: "border-box",
+        }}
+      >
+        <ResumeRegistrationCard />
+      </div>
+    );
+  }
+
+
 
   const strength = getStrength(accountData.password || "");
 
@@ -301,3 +336,12 @@ export default function VendorSignupPage() {
     </div>
   );
 }
+
+export default function VendorSignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <VendorSignupPageContent />
+    </Suspense>
+  );
+}
+

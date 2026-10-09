@@ -2,66 +2,86 @@ import { NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient } from "@/utils/supabase/server";
 
+function normalizeFulfillmentType(val: string): string {
+  const lower = (val || "").toLowerCase();
+  if (lower.includes("factory")) return "factory";
+  if (lower.includes("warehouse") || lower.includes("retailer")) return "warehouse";
+  if (lower.includes("dropship")) return "dropship";
+  if (lower.includes("studio") || lower.includes("hybrid")) return "studio";
+  return "factory"; // fallback
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { storeName, fulfillmentType, city, description } = body;
+    const { storeName, fulfillmentType, city, phone, description } = body;
 
-    if (!storeName || !fulfillmentType || !city) {
+    if (!storeName || !fulfillmentType) {
       return NextResponse.json(
         {
           success: false,
-          error: "Store name, fulfillment type, and city are required.",
+          error: "Store name and fulfillment type are required.",
         },
         { status: 400 }
       );
     }
 
-    // Persist store profile data to vendor_profiles table
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (supabaseUrl && serviceRoleKey) {
-      try {
-        // Get current authenticated user from session
-        const supabase = await createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json(
+        { success: false, error: "Supabase service role credentials not configured." },
+        { status: 500 }
+      );
+    }
 
-        if (user?.id) {
-          const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
-          const { error: vpError } = await adminClient
-            .from("vendor_profiles")
-            .upsert(
-              {
-                id: user.id,
-                store_name: storeName,
-                fulfillment_type: fulfillmentType,
-                city,
-                description: description || "",
-                updated_at: new Date().toISOString(),
-              },
-              { onConflict: "id" }
-            );
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-          if (vpError) {
-            // vendor_profiles table may not be migrated yet — log but don't fail
-            console.warn("[Vendor Step2 API] vendor_profiles update warning:", vpError.message);
-          }
-        }
-      } catch (dbErr) {
-        console.warn("[Vendor Step2 API] DB update warning:", dbErr);
-      }
+    if (!user?.id) {
+      return NextResponse.json(
+        { success: false, error: "Not authenticated. Please sign in." },
+        { status: 401 }
+      );
+    }
+
+    const dbFulfillmentType = normalizeFulfillmentType(fulfillmentType);
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+
+    // Update vendor_profiles table (DO NOT include status or revoked columns)
+    const { error: vpError } = await adminClient
+      .from("vendor_profiles")
+      .upsert(
+        {
+          id: user.id,
+          store_name: storeName.trim(),
+          fulfillment_type: dbFulfillmentType,
+          city: city?.trim() || "",
+          description: description?.trim() || "",
+          ...(phone ? { phone: phone.trim() } : {}),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+
+    if (vpError) {
+      console.error("[Vendor Step2 API] DB error:", vpError.message);
+      return NextResponse.json(
+        { success: false, error: `Failed to save store profile: ${vpError.message}` },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
       message: "Store profile updated successfully.",
       data: {
-        storeName,
-        fulfillmentType,
-        city,
+        storeName: storeName.trim(),
+        fulfillmentType: dbFulfillmentType,
+        city: city || "",
         description: description || "",
         step: 2,
         updatedAt: new Date().toISOString(),
@@ -78,3 +98,4 @@ export async function POST(req: Request) {
     );
   }
 }
+

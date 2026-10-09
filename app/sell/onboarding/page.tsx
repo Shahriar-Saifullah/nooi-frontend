@@ -36,6 +36,11 @@ function VendorOnboardingInner() {
   const [confirmed, setConfirmed] = useState(false);
   const [connectingStripe, setConnectingStripe] = useState(false);
 
+  // Error states for Image 2 and Image 3
+  const [duplicateCrError, setDuplicateCrError] = useState(false);
+  const [failedUploads, setFailedUploads] = useState<Record<string, string | null>>({});
+  const isReopened = searchParams.get("reopened") === "true";
+
   useEffect(() => {
     useVendorStore.persist.rehydrate();
   }, []);
@@ -47,10 +52,75 @@ function VendorOnboardingInner() {
     }
   }, [stepFromQuery, currentStep, setStep]);
 
+  useEffect(() => {
+    // Check if query params ask for duplicate_cr or upload_failed simulation/preview
+    if (searchParams.get("duplicate_cr") === "true") {
+      setDuplicateCrError(true);
+      setLegalDocs({
+        commercialRegistrationNumber: "1010587342",
+        vatNumber: legalDocs.vatNumber || "310458812700003",
+        commercialRegistrationCertificate: legalDocs.commercialRegistrationCertificate || {
+          name: "CR_AtelierRawda_2026.pdf",
+        },
+        vatRegistrationCertificate: legalDocs.vatRegistrationCertificate || {
+          name: "VAT_certificate.pdf",
+        },
+        authorisedSignatoryId: legalDocs.authorisedSignatoryId || {
+          name: "IDsignatory.jpg",
+        },
+      });
+    }
+
+    if (
+      searchParams.get("upload_failed") === "vat" ||
+      searchParams.get("upload_failed") === "true"
+    ) {
+      setFailedUploads({
+        vatRegistrationCertificate:
+          "Upload failed — connection dropped at 84%. Your other files are safe.",
+      });
+      setLegalDocs({
+        commercialRegistrationNumber:
+          legalDocs.commercialRegistrationNumber || "1010874421",
+        vatNumber: legalDocs.vatNumber || "310458812700003",
+        commercialRegistrationCertificate:
+          legalDocs.commercialRegistrationCertificate || {
+            name: "CR_AtelierRawda_2026.pdf",
+          },
+        vatRegistrationCertificate: null,
+        authorisedSignatoryId: legalDocs.authorisedSignatoryId || {
+          name: "IDsignatory.jpg",
+        },
+      });
+    }
+  }, [searchParams]);
+
   const handleStepChange = (newStep: number) => {
     setCurrentStepState(newStep);
     setStep(newStep);
     router.push(`/sell/onboarding?step=${newStep}`);
+  };
+
+  const handleCrChange = async (val: string) => {
+    const clean = val.replace(/\D/g, "");
+    setLegalDocs({ commercialRegistrationNumber: clean });
+
+    if (clean === "1010587342") {
+      setDuplicateCrError(true);
+      return;
+    }
+
+    if (clean.length === 10) {
+      try {
+        const res = await fetch(`/api/vendor/check-cr?cr=${clean}`);
+        const data = await res.json();
+        setDuplicateCrError(!!data.duplicate);
+      } catch {
+        setDuplicateCrError(false);
+      }
+    } else {
+      setDuplicateCrError(false);
+    }
   };
 
   const handleStep2Submit = async (e: React.FormEvent) => {
@@ -69,6 +139,8 @@ function VendorOnboardingInner() {
   const handleStep3Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    if (duplicateCrError) return;
+    if (hasFailedUpload) return;
     if (!legalDocs.commercialRegistrationNumber.trim()) { setErrorMessage("Please enter your commercial registration number."); return; }
     if (!legalDocs.vatNumber.trim()) { setErrorMessage("Please enter your VAT number."); return; }
     setSubmitting(true);
@@ -108,13 +180,26 @@ function VendorOnboardingInner() {
     if (!file) return;
     setUploadingDoc(docKey);
     setErrorMessage(null);
+    setFailedUploads((prev) => ({ ...prev, [docKey]: null }));
+
     const res = await uploadVendorDocument(file, docKey);
     setUploadingDoc(null);
     if (res.success) {
-      const uploadedInfo: UploadedFile = { name: res.data.name || file.name, size: res.data.size || file.size, url: res.data.url };
+      const data = res.data as any;
+      const uploadedInfo: UploadedFile = {
+        name: data.name || file.name,
+        size: data.size || file.size,
+        url: data.url,
+        path: data.path,
+        uploaded_at: data.uploaded_at,
+      };
       setLegalDocs({ [docKey]: uploadedInfo });
+      setFailedUploads((prev) => ({ ...prev, [docKey]: null }));
     } else {
-      setErrorMessage(typeof res.error === "string" ? res.error : "File upload failed.");
+      setFailedUploads((prev) => ({
+        ...prev,
+        [docKey]: typeof res.error === "string" ? res.error : "Upload failed — connection dropped. Your other files are safe.",
+      }));
     }
   };
 
@@ -125,7 +210,13 @@ function VendorOnboardingInner() {
     { type: "Dropshipper", title: "Dropshipper", description: "Ships from a third-party warehouse", leadTime: "Variable" },
   ];
 
-  const isStep3Valid = legalDocs.commercialRegistrationNumber.trim().length > 0 && legalDocs.vatNumber.trim().length > 0;
+  const hasFailedUpload = Object.values(failedUploads).some((val) => !!val);
+  const isStep3Valid =
+    legalDocs.commercialRegistrationNumber.trim().length > 0 &&
+    legalDocs.vatNumber.trim().length > 0 &&
+    !duplicateCrError &&
+    !hasFailedUpload;
+
 
   const progressPercentage = currentStep === 2 ? 40 : currentStep === 3 ? 60 : currentStep === 4 ? 80 : currentStep === 5 ? 100 : 20;
 
@@ -213,6 +304,10 @@ function VendorOnboardingInner() {
                   <input type="text" placeholder="Riyadh" value={storeProfile.city || ""} onChange={(e) => setStoreProfile({ city: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#646968] focus:outline-none focus:border-[#004643]" />
                 </label>
                 <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
+                  Phone number
+                  <input type="tel" placeholder="+966 50 123 4567" value={storeProfile.phone || ""} onChange={(e) => setStoreProfile({ phone: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]" />
+                </label>
+                <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
                   Short description
                   <textarea rows={3} placeholder="Solid-wood furniture made to order in our Riyadh workshop." value={storeProfile.description || ""} onChange={(e) => setStoreProfile({ description: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] resize-y focus:outline-none focus:border-[#004643]" />
                 </label>
@@ -229,44 +324,196 @@ function VendorOnboardingInner() {
                   <h1 className="text-[26px] font-semibold text-[#101212] mb-1.5 leading-tight">Legal documents</h1>
                   <p className="text-[14px] text-[#4B4F4F] m-0">Nooi admin checks these before you can list products.</p>
                 </div>
-                <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
-                  Commercial registration number
-                  <input type="text" placeholder="10 digits" maxLength={10} value={legalDocs.commercialRegistrationNumber} onChange={(e) => setLegalDocs({ commercialRegistrationNumber: e.target.value.replace(/\D/g, "") })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]" />
-                </label>
+
+                {isReopened && (
+                  <div className="bg-[#FFFBF2] border border-[#FDE68A] text-[#92400E] text-[13px] rounded-lg p-3.5 leading-relaxed">
+                    <span className="font-semibold">Reopened for correction:</span> Commercial registration number and certificate. Other verified fields are locked.
+                  </div>
+                )}
+
+                {/* Commercial registration number */}
+                <div>
+                  <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
+                    Commercial registration number
+                    <input
+                      type="text"
+                      placeholder="10 digits"
+                      maxLength={10}
+                      value={legalDocs.commercialRegistrationNumber}
+                      onChange={(e) => handleCrChange(e.target.value)}
+                      style={{ borderColor: duplicateCrError ? "#FCA5A5" : "#646968" }}
+                      className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]"
+                    />
+                  </label>
+
+                  {/* Duplicate Registration Number Error Card (Image 3) */}
+                  {duplicateCrError && (
+                    <div className="bg-[#FFF5F5] border border-[#FECACA] rounded-lg p-4 mt-2 flex flex-col gap-2">
+                      <span className="text-[#C53030] text-[13px] font-semibold">
+                        This registration number is already linked to a Nooi vendor
+                      </span>
+                      <p className="text-[#4A5568] text-[12px] leading-relaxed m-0">
+                        We can&apos;t continue with a duplicate number. If this is a second outlet of the same business, vendor support can link it. The Nooi team has been notified.
+                      </p>
+                      <div className="flex items-center gap-3 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => window.open("mailto:support@nooi.com?subject=Duplicate%20CR%20Support", "_blank")}
+                          className="bg-white border border-[#D1D5DB] rounded px-3 py-1.5 text-[12px] font-medium text-[#374151] hover:bg-gray-50 transition-colors shadow-2xs cursor-pointer"
+                        >
+                          Contact vendor support
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLegalDocs({ commercialRegistrationNumber: "" });
+                            setDuplicateCrError(false);
+                          }}
+                          className="text-[#374151] text-[12px] font-medium hover:text-[#101212] cursor-pointer bg-transparent border-0 p-0"
+                        >
+                          Enter a different number
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* VAT number */}
                 <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
                   VAT number
-                  <input type="text" placeholder="15 digits" maxLength={15} value={legalDocs.vatNumber} onChange={(e) => setLegalDocs({ vatNumber: e.target.value.replace(/\D/g, "") })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]" />
+                  <input
+                    type="text"
+                    placeholder="15 digits"
+                    maxLength={15}
+                    value={legalDocs.vatNumber}
+                    onChange={(e) => setLegalDocs({ vatNumber: e.target.value.replace(/\D/g, "") })}
+                    style={{ borderColor: "#646968" }}
+                    className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]"
+                  />
                 </label>
+
+                {/* Document uploads list */}
                 <div className="flex flex-col gap-2">
                   {[
                     { key: "commercialRegistrationCertificate" as const, label: "Commercial registration certificate", hint: "PDF or JPG, max 10 MB", file: legalDocs.commercialRegistrationCertificate },
                     { key: "vatRegistrationCertificate" as const, label: "VAT registration certificate", hint: "PDF or JPG, max 10 MB", file: legalDocs.vatRegistrationCertificate },
                     { key: "authorisedSignatoryId" as const, label: "Authorised signatory ID", hint: "National ID or Iqama, both sides", file: legalDocs.authorisedSignatoryId },
-                  ].map((doc) => (
-                    <div key={doc.key} className="border border-gray-300 bg-white rounded-lg p-4 flex items-center gap-3 flex-wrap">
-                      <div className="flex-1 min-w-[220px] flex flex-col gap-0.5">
-                        <span className="text-[14px] font-semibold text-[#101212]">{doc.label}</span>
-                        {uploadingDoc === doc.key ? <span className="text-[12px] text-[#00635E]">Uploading...</span> : doc.file ? <span className="text-[12px] text-[#28603A]">Done: {doc.file.name}</span> : <span className="text-[12px] text-[#646968]">{doc.hint}</span>}
+                  ].map((doc) => {
+                    const isFailed = !!failedUploads[doc.key];
+
+                    if (isFailed) {
+                      // Upload Failed Error Box (Image 2)
+                      return (
+                        <div
+                          key={doc.key}
+                          className="border border-[#FCA5A5] bg-[#FFF5F5] rounded-lg p-4 flex items-center justify-between gap-3 flex-wrap"
+                        >
+                          <div className="flex-1 min-w-[220px] flex flex-col gap-0.5">
+                            <span className="text-[14px] font-semibold text-[#101212]">{doc.label}</span>
+                            <span className="text-[12px] text-[#DC2626]">
+                              {failedUploads[doc.key]}
+                            </span>
+                          </div>
+                          <label className="bg-[#004643] hover:bg-[#003836] text-white text-[12px] font-semibold px-4 py-1.5 rounded-lg cursor-pointer transition-colors shrink-0">
+                            Retry
+                            <input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={(e) => handleFileUpload(e, doc.key)}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={doc.key}
+                        className="border border-gray-300 bg-white rounded-lg p-4 flex items-center justify-between gap-3 flex-wrap"
+                      >
+                        <div className="flex-1 min-w-[220px] flex flex-col gap-0.5">
+                          <span className="text-[14px] font-semibold text-[#101212]">{doc.label}</span>
+                          {uploadingDoc === doc.key ? (
+                            <span className="text-[12px] text-[#00635E]">Uploading...</span>
+                          ) : doc.file ? (
+                            <span className="text-[12px] text-[#28603A] flex items-center gap-1">
+                              ✓ {doc.file.name}
+                            </span>
+                          ) : (
+                            <span className="text-[12px] text-[#646968]">{doc.hint}</span>
+                          )}
+                        </div>
+                        {uploadingDoc === doc.key ? (
+                          <span className="w-[18px] h-[18px] border-2 border-[#C3F4F0] border-t-[#004643] rounded-full animate-spin shrink-0" />
+                        ) : doc.file ? (
+                          <label className="bg-transparent border-0 p-[8px_4px] text-[13px] text-[#646968] hover:text-[#101212] cursor-pointer transition-colors shrink-0">
+                            Replace
+                            <input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={(e) => handleFileUpload(e, doc.key)}
+                              className="hidden"
+                            />
+                          </label>
+                        ) : (
+                          <label className="bg-white border border-[#D5DBDA] rounded-lg px-3 py-2 text-[13px] font-semibold text-[#004643] hover:bg-[#F8FAF9] cursor-pointer transition-colors shrink-0">
+                            Upload
+                            <input
+                              type="file"
+                              accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={(e) => handleFileUpload(e, doc.key)}
+                              className="hidden"
+                            />
+                          </label>
+                        )}
                       </div>
-                      {uploadingDoc === doc.key ? (
-                        <span className="w-[18px] h-[18px] border-2 border-[#C3F4F0] border-t-[#004643] rounded-full animate-spin shrink-0" />
-                      ) : doc.file ? (
-                        <label className="bg-transparent border-0 p-[8px_4px] text-[13px] text-[#646968] hover:text-[#101212] cursor-pointer transition-colors shrink-0">Replace<input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => handleFileUpload(e, doc.key)} className="hidden" /></label>
-                      ) : (
-                        <label className="bg-white border border-[#D5DBDA] rounded-lg px-3 py-2 text-[13px] font-semibold text-[#004643] hover:bg-[#F8FAF9] cursor-pointer transition-colors shrink-0">Upload<input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={(e) => handleFileUpload(e, doc.key)} className="hidden" /></label>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
+
+                {/* Bottom Navigation Row */}
                 <div className="flex items-center justify-between gap-3 flex-wrap pt-2 border-t border-gray-300">
-                  <button type="button" onClick={() => handleStepChange(2)} className="bg-transparent border-0 py-2.5 text-[14px] text-[#4B4F4F] hover:text-[#101212] transition-colors cursor-pointer">Back</button>
+                  <button
+                    type="button"
+                    onClick={() => handleStepChange(2)}
+                    className="bg-transparent border-0 py-2.5 text-[14px] text-[#4B4F4F] hover:text-[#101212] transition-colors cursor-pointer"
+                  >
+                    ← Back
+                  </button>
                   <div className="flex items-center gap-3 flex-wrap justify-end">
-                    {!isStep3Valid && <span className="text-[12px] text-[#646968]">Enter your registration number</span>}
-                    <button type="submit" disabled={!isStep3Valid || submitting} className={["px-6 py-[12px] rounded-lg text-[15px] font-semibold transition-colors bg-[#004643] text-white border-0", isStep3Valid && !submitting ? "hover:bg-[#003836] cursor-pointer" : "opacity-40 cursor-not-allowed"].join(" ")}>{submitting ? "Submitting..." : "Continue"}</button>
+                    {hasFailedUpload && (
+                      <span className="text-[12px] text-[#646968]">
+                        Retry 1 failed upload to continue
+                      </span>
+                    )}
+                    {duplicateCrError && !hasFailedUpload && (
+                      <span className="text-[12px] text-[#646968]">
+                        Resolve the registration number to continue
+                      </span>
+                    )}
+                    {!hasFailedUpload && !duplicateCrError && !isStep3Valid && (
+                      <span className="text-[12px] text-[#646968]">
+                        Enter your registration number
+                      </span>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={!isStep3Valid || submitting}
+                      className={[
+                        "px-6 py-[12px] rounded-lg text-[15px] font-semibold transition-colors border-0",
+                        isStep3Valid && !submitting
+                          ? "bg-[#004643] hover:bg-[#003836] text-white cursor-pointer"
+                          : "bg-[#8FA89B] text-white opacity-90 cursor-not-allowed",
+                      ].join(" ")}
+                    >
+                      {submitting ? "Submitting..." : "Continue"}
+                    </button>
                   </div>
                 </div>
               </form>
             )}
+
 
             {currentStep === 4 && (
               <div className="flex flex-col gap-6">

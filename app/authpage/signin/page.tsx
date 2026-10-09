@@ -42,7 +42,6 @@ const OAUTH_ERROR_MESSAGES: Record<string, string> = {
 function SigninPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [role, setRole] = useState<"user" | "vendor">("user");
   const [resetSuccess, setResetSuccess] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -68,10 +67,6 @@ function SigninPageInner() {
       }
     }
 
-    const roleParam = searchParams.get("role");
-    if (roleParam === "vendor") {
-      setRole("vendor");
-    }
     const errorCode = searchParams.get("error");
     if (errorCode) {
       setErrors({ auth: OAUTH_ERROR_MESSAGES[errorCode] ?? "Sign in failed. Please try again." });
@@ -84,69 +79,17 @@ function SigninPageInner() {
 
   const validate = () => {
     const next: typeof errors = {};
-    if (!email) next.email = role === "vendor" ? "Work email is required" : "Email is required";
-    else if (!EMAIL_REGEX.test(email))
-      next.email = "Please enter a valid email";
+    if (!email.trim()) next.email = "Email is required";
+    else if (!EMAIL_REGEX.test(email.trim()))
+      next.email = "Please enter a valid email address";
     if (!password) next.password = "Password is required";
     else if (password.length < 6)
       next.password = "Password must be at least 6 characters";
     return next;
   };
 
-  const handleSignIn = async () => {
-    const fieldErrors = validate();
-    if (Object.keys(fieldErrors).length > 0) {
-      setErrors(fieldErrors);
-      return;
-    }
-
-    setSubmitting(true);
-    const res = await signIn({ email, password });
-    setSubmitting(false);
-
-    if (!res.success) {
-      if ((res.error as any)?.code === "EMAIL_NOT_VERIFIED") {
-        router.push(
-          `/authpage/verify-email?email=${encodeURIComponent(email)}`
-        );
-        return;
-      }
-      const nextFieldErrors = extractFieldErrors(res.error);
-      const authMessage =
-        typeof res.error === "string" ? res.error : "Sign in failed";
-      setErrors({ ...nextFieldErrors, auth: authMessage });
-      return;
-    }
-
-    // An explicit destination wins — this is how AdminShell sends someone back
-    // to where they were trying to go. Only relative paths, so a crafted
-    // ?next=https://evil.example can't turn sign-in into an open redirect.
-    const next = searchParams.get("next");
-    if (next && next.startsWith("/") && !next.startsWith("//")) {
-      router.push(next);
-      return;
-    }
-
-    // Otherwise route by role. Onboarding is a customer flow — walking an
-    // admin or a vendor through "let's set up your profile" is wrong, and
-    // neither has a profile of that kind to set up.
-    const role = res.data.user.role;
-    if (role === "admin" || role === "super_admin") {
-      router.push("/admin");
-      return;
-    }
-    if (role === "vendor") {
-      // TODO: point at the vendor portal once it exists. Until then the
-      // customer dashboard is the only page they can reach.
-      router.push("/dashboard");
-      return;
-    }
-
-    const onboardingCompleted = !!res.data.user.onboarding_completed;
-    router.push(onboardingCompleted ? "/dashboard" : "/onboarding");
-  };
-
-  const handleVendorSignIn = async () => {
+  const handleSignIn = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const fieldErrors = validate();
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);
@@ -155,48 +98,60 @@ function SigninPageInner() {
 
     setSubmitting(true);
     setErrors({});
+    const res = await signIn({ email: email.trim(), password });
+    setSubmitting(false);
 
-    try {
-      // 1. Check database if that account is registered as a vendor
-      const response = await fetch("/api/vendor/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const result = await response.json();
-
-      if (!result.success) {
-        setSubmitting(false);
-        setErrors({ auth: result.error || "Vendor verification failed. Account not found in database." });
+    if (!res.success) {
+      if ((res.error as any)?.code === "EMAIL_NOT_VERIFIED") {
+        router.push(
+          `/authpage/verify-email?email=${encodeURIComponent(email.trim())}`
+        );
         return;
       }
-
-      // 2. Establish client-side Supabase session
-      const { createClient } = await import("@/utils/supabase/client");
-      const supabase = createClient();
-      await supabase.auth.signInWithPassword({ email, password });
-
-      // 3. Hydrate vendor store with verified account data
-      const { useVendorStore } = await import("@/lib/store");
-      const vUser = result.user;
-      if (vUser) {
-        useVendorStore.getState().setAccountData({
-          fullName: vUser.full_name || "Vendor Owner",
-          workEmail: vUser.email || email,
-          businessName: vUser.business_name || "Atelier Rawda",
-        });
-        useVendorStore.getState().setStoreProfile({
-          storeName: vUser.business_name || "Atelier Rawda",
-        });
-        useVendorStore.getState().setEmailVerified(true);
-      }
-
-      setSubmitting(false);
-      router.push("/sell/dashboard");
-    } catch (err: any) {
-      setSubmitting(false);
-      setErrors({ auth: err?.message || "Failed to authenticate with vendor database service." });
+      const nextFieldErrors = extractFieldErrors(res.error);
+      const authMessage =
+        typeof res.error === "string" ? res.error : "Sign in failed. Invalid credentials.";
+      setErrors({ ...nextFieldErrors, auth: authMessage });
+      return;
     }
+
+    // 1. Explicit destination param overrides default routing
+    const next = searchParams.get("next");
+    if (next && next.startsWith("/") && !next.startsWith("//")) {
+      router.push(next);
+      return;
+    }
+
+    // 2. Unified Role-Based Routing
+    const user = res.data.user;
+    const role = user.role;
+
+    if (role === "admin" || role === "super_admin") {
+      router.push("/admin");
+      return;
+    }
+
+    if (role === "vendor") {
+      const status = user.vendor_status;
+      if (status === "approved") {
+        router.push("/sell/dashboard");
+      } else if (status === "action_needed") {
+        router.push("/sell/action-needed");
+      } else if (status === "rejected") {
+        router.push("/sell/not-approved");
+      } else if (status === "pending") {
+        router.push("/sell/submitted");
+      } else if (status === "draft") {
+        router.push("/sell/onboarding");
+      } else {
+        router.push("/sell/dashboard");
+      }
+      return;
+    }
+
+    // Default Customer / User role
+    const onboardingCompleted = !!user.onboarding_completed;
+    router.push(onboardingCompleted ? "/dashboard" : "/onboarding");
   };
 
   const handleGoogleAuth = async () => {
@@ -210,15 +165,15 @@ function SigninPageInner() {
   return (
     <div className="flex h-screen overflow-hidden bg-white">
       {/* Left panel */}
-      <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto">
+      <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto border-r border-gray-100">
         <div className="w-24 h-8">
           <a href="/">
-            <img src="/Logo/Logo.svg" alt="Logo" />
+            <img src="/Logo/Logo.svg" alt="Nooi" />
           </a>
         </div>
 
         <div className="mb-20">
-          <h2 className="text-4xl italic font-light text-gray-800 mb-6 leading-tight">
+          <h2 className="text-4xl italic font-serif text-gray-900 mb-6 leading-tight font-instrument">
             Calm your
             <br />
             workflow.
@@ -233,38 +188,6 @@ function SigninPageInner() {
       {/* Right panel */}
       <div className="flex-1 flex flex-col justify-center px-6 md:px-16 py-10 overflow-y-auto">
         <div className="max-w-md mx-auto w-full">
-          {/* Role Selection Switch */}
-          <div className="flex bg-[#F1F4F4] p-1 rounded-xl mb-6">
-            <button
-              type="button"
-              onClick={() => {
-                setRole("user");
-                setErrors({});
-              }}
-              className={`flex-1 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all cursor-pointer ${
-                role === "user"
-                  ? "bg-white text-[#101212] shadow-xs"
-                  : "text-[#646968] hover:text-[#101212]"
-              }`}
-            >
-              Customer / User
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setRole("vendor");
-                setErrors({});
-              }}
-              className={`flex-1 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all cursor-pointer ${
-                role === "vendor"
-                  ? "bg-white text-[#004643] shadow-xs"
-                  : "text-[#646968] hover:text-[#101212]"
-              }`}
-            >
-              Vendor
-            </button>
-          </div>
-
           <div
             className={`transition-transform duration-200 ${errors.auth ? "translate-y-1" : "translate-y-0"
               }`}
@@ -276,29 +199,27 @@ function SigninPageInner() {
               </div>
             )}
             <div className="mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                {role === "vendor" ? "Vendor Sign in" : "Sign in"}
+              <h1 className="text-3xl font-bold text-gray-900 mb-2 tracking-tight">
+                Sign in
               </h1>
               <p className="text-gray-600 text-sm">
-                {role === "vendor"
-                  ? "Enter your vendor account credentials to access your store dashboard."
-                  : "Welcome back. Enter your details to continue."}
+                Welcome back. Enter your credentials to access your account.
               </p>
             </div>
 
             <div
-              className={`overflow-hidden transition-all duration-700 ease-out ${errors.auth
+              className={`overflow-hidden transition-all duration-500 ease-out ${errors.auth
                 ? "max-h-28 opacity-100 translate-y-0 mb-6"
                 : "max-h-0 opacity-0 -translate-y-1 mb-0"
                 }`}
             >
-              <div className="flex bg-red-50 border border-red-200 rounded-lg px-4 py-3  gap-2">
+              <div className="flex bg-red-50 border border-red-200 rounded-lg px-4 py-3 gap-2">
                 <span className="text-red-500 text-base leading-none mt-0.5 shrink-0 ">
                   ●
                 </span>
                 <div>
-                  <p className="text-red-700 font-semibold text-sm ">
-                    {role === "vendor" ? "Vendor verification failed" : "Sign in failed"}
+                  <p className="text-red-700 font-semibold text-sm">
+                    Sign in failed
                   </p>
                   <p className="text-red-600 text-xs mt-0.5">
                     {errors.auth ?? " "}
@@ -308,20 +229,16 @@ function SigninPageInner() {
             </div>
           </div>
 
-          {/* Form */}
-          <form className="space-y-3" onSubmit={(e) => {
-            e.preventDefault();
-            if (role === "vendor") handleVendorSignIn();
-            else handleSignIn();
-          }}>
+          {/* Single Unified Form */}
+          <form className="space-y-4" onSubmit={handleSignIn}>
             {/* Email */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                {role === "vendor" ? "Work email" : "Email"}
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Email address
               </label>
               <input
                 type="email"
-                placeholder={role === "vendor" ? "rawda@atelierrauda.sa" : "you@company.com"}
+                placeholder="you@company.com"
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
@@ -332,27 +249,24 @@ function SigninPageInner() {
                       auth: undefined,
                     }));
                 }}
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.email
+                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 text-black ${errors.email
                   ? "border-red-400 focus:ring-red-300"
-                  : "border-gray-300 focus:ring-teal-600"
+                  : "border-gray-300 focus:border-[#004643] focus:ring-[#004643]/20"
                   }`}
               />
-              <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${errors.email ? "visible" : "invisible"
-                  }`}
-              >
-                {errors.email ?? " "}
-              </p>
+              {errors.email && (
+                <p className="text-red-500 text-xs mt-1">{errors.email}</p>
+              )}
             </div>
 
             {/* Password */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Password
               </label>
               <input
                 type="password"
-                placeholder="••••••••"
+                placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
@@ -363,21 +277,18 @@ function SigninPageInner() {
                       auth: undefined,
                     }));
                 }}
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.password
+                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 text-black ${errors.password
                   ? "border-red-400 focus:ring-red-300"
-                  : "border-gray-300 focus:ring-teal-600"
+                  : "border-gray-300 focus:border-[#004643] focus:ring-[#004643]/20"
                   }`}
               />
-              <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${errors.password ? "visible" : "invisible"
-                  }`}
-              >
-                {errors.password ?? " "}
-              </p>
-              <div className="text-right">
+              {errors.password && (
+                <p className="text-red-500 text-xs mt-1">{errors.password}</p>
+              )}
+              <div className="text-right mt-1.5">
                 <a
                   href="/authpage/forgot-password"
-                  className="text-sm text-teal-600 hover:text-teal-700 font-medium"
+                  className="text-xs text-teal-700 hover:text-teal-800 font-medium"
                 >
                   Forgot password?
                 </a>
@@ -386,106 +297,61 @@ function SigninPageInner() {
 
             {/* Sign in Button */}
             <Button
-              type="button"
-              onClick={role === "vendor" ? handleVendorSignIn : handleSignIn}
+              type="submit"
               fullWidth
               disabled={submitting}
             >
-              {submitting
-                ? role === "vendor"
-                  ? "Verifying vendor..."
-                  : "Signing in..."
-                : role === "vendor"
-                ? "Sign in as Vendor"
-                : "Sign in"}
+              {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
 
-          {role === "user" ? (
-            <>
-              {/* Divider */}
-              <div className="flex items-center gap-3 my-6">
-                <div className="flex-1 border-t border-gray-300"></div>
-                <span className="text-gray-500 text-sm">or</span>
-                <div className="flex-1 border-t border-gray-300"></div>
-              </div>
+          {/* Divider */}
+          <div className="flex items-center gap-3 my-6">
+            <div className="flex-1 border-t border-gray-200"></div>
+            <span className="text-gray-400 text-xs uppercase tracking-wider font-medium">or</span>
+            <div className="flex-1 border-t border-gray-200"></div>
+          </div>
 
-              {/* Google Button */}
-              <Button
-                type="button"
-                variant="social"
-                fullWidth
-                onClick={handleGoogleAuth}
-              >
-                <GoogleIcon />
-                <span>Continue with Google</span>
-              </Button>
+          {/* Google Button */}
+          <Button
+            type="button"
+            variant="social"
+            fullWidth
+            onClick={handleGoogleAuth}
+          >
+            <GoogleIcon />
+            <span>Continue with Google</span>
+          </Button>
 
-              {/* Sign up link */}
-              <div className="text-center mt-6 space-y-2">
-                <div>
-                  <span className="text-gray-600 text-sm">
-                    Don&apos;t have an account?{" "}
-                    <Button
-                      type="button"
-                      variant="text"
-                      onClick={() => router.push("/authpage/signup")}
-                    >
-                      Create one
-                    </Button>
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-600 text-sm">
-                    Selling furniture?{" "}
-                    <Button
-                      type="button"
-                      variant="text"
-                      className="font-semibold text-[#044E43] hover:underline"
-                      onClick={() => setRole("vendor")}
-                    >
-                      Sign in as a vendor
-                    </Button>
-                  </span>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Vendor footer links */}
-              <div className="text-center mt-8 space-y-3">
-                <div>
-                  <span className="text-gray-600 text-sm">
-                    Don&apos;t have a vendor account?{" "}
-                    <Button
-                      type="button"
-                      variant="text"
-                      className="font-semibold text-[#044E43] hover:underline"
-                      onClick={() => router.push("/sell")}
-                    >
-                      Register your store
-                    </Button>
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-600 text-sm">
-                    Looking to browse or shop?{" "}
-                    <Button
-                      type="button"
-                      variant="text"
-                      className="font-semibold text-gray-700 hover:underline"
-                      onClick={() => {
-                        setRole("user");
-                        setErrors({});
-                      }}
-                    >
-                      Switch to customer sign in
-                    </Button>
-                  </span>
-                </div>
-              </div>
-            </>
-          )}
+          {/* Sign up links */}
+          <div className="text-center mt-6 space-y-2.5">
+            <div>
+              <span className="text-xs text-gray-600">
+                Don&apos;t have an account?{" "}
+                <Button
+                  type="button"
+                  variant="text"
+                  className="font-semibold text-[#004643] hover:underline text-xs"
+                  onClick={() => router.push("/authpage/signup")}
+                >
+                  Create one
+                </Button>
+              </span>
+            </div>
+            <div>
+              <span className="text-xs text-gray-600">
+                Want to sell furniture on Nooi?{" "}
+                <Button
+                  type="button"
+                  variant="text"
+                  className="font-semibold text-[#004643] hover:underline text-xs"
+                  onClick={() => router.push("/sell")}
+                >
+                  Register your store
+                </Button>
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

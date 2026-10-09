@@ -5,7 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 /**
  * POST /api/vendor/submit
  * Called when vendor completes the onboarding flow and clicks "Submit application".
- * Marks their vendor_profiles row as submitted with a timestamp and pending status.
+ * Sets submitted_at timestamp on their vendor_profiles row so admin queue sorts and ages it properly.
  */
 export async function POST(req: Request) {
   try {
@@ -13,8 +13,10 @@ export async function POST(req: Request) {
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceRoleKey) {
-      // If env not configured, return success anyway (graceful degradation)
-      return NextResponse.json({ success: true, message: "Application submitted." });
+      return NextResponse.json(
+        { success: false, error: "Supabase service role credentials not configured." },
+        { status: 500 }
+      );
     }
 
     const supabase = await createClient();
@@ -24,39 +26,45 @@ export async function POST(req: Request) {
 
     if (!user?.id) {
       return NextResponse.json(
-        { success: false, error: "Not authenticated." },
+        { success: false, error: "Not authenticated. Please sign in." },
         { status: 401 }
       );
     }
 
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+    const nowIso = new Date().toISOString();
+
+    // Set submitted_at timestamp (and ensure status is 'pending')
     const { error: vpError } = await adminClient
       .from("vendor_profiles")
       .upsert(
         {
           id: user.id,
-          application_status: "pending",
-          submitted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          submitted_at: nowIso,
+          updated_at: nowIso,
         },
         { onConflict: "id" }
       );
 
     if (vpError) {
-      console.warn("[Vendor Submit API] vendor_profiles update warning:", vpError.message);
-      // Don't fail — vendor_profiles table may not be migrated yet
+      console.error("[Vendor Submit API] vendor_profiles update error:", vpError.message);
+      return NextResponse.json(
+        { success: false, error: `Failed to submit application: ${vpError.message}` },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
       message: "Application submitted successfully. You will receive a decision within 2 business days.",
-      submittedAt: new Date().toISOString(),
+      submittedAt: nowIso,
     });
   } catch (error: any) {
-    console.error("[Vendor Submit API] Error:", error);
+    console.error("[Vendor Submit API] Exception:", error);
     return NextResponse.json(
       { success: false, error: error?.message || "Failed to submit application." },
       { status: 500 }
     );
   }
 }
+
