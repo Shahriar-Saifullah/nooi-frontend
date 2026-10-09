@@ -155,7 +155,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen bg-[#E9EDEC]">
-      <aside className="fixed inset-y-0 start-0 hidden w-[232px] flex-col border-e border-[#D5DBDA] bg-white md:flex">
+      <aside className="fixed inset-y-0 left-0 hidden w-[232px] flex-col border-r border-[#D5DBDA] bg-white md:flex">
         <div className="flex items-center gap-2.5 px-5 py-5">
           <Image
             width={100}
@@ -235,7 +235,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         </div>
       </aside>
 
-      <main className="md:ms-[232px]">{children}</main>
+      <main className="md:ml-[232px]">{children}</main>
     </div>
   );
 }
