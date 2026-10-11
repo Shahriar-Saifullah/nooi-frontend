@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { createClient } from "@/utils/supabase/server";
+import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 
 function normalizeFulfillmentType(val: string): string {
   const lower = (val || "").toLowerCase();
@@ -14,7 +14,17 @@ function normalizeFulfillmentType(val: string): string {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { storeName, businessName, fulfillmentType, city, phone, description } = body;
+    const {
+      storeName,
+      businessName,
+      fulfillmentType,
+      category,
+      city,
+      country,
+      phone,
+      website,
+      description,
+    } = body;
 
     if (!storeName || !fulfillmentType) {
       return NextResponse.json(
@@ -36,12 +46,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
-    if (!user?.id) {
+    const { userId } = await resolveVendorUser(req, {
+      workEmail: body.workEmail || body.email,
+      storeName: storeName || businessName,
+      businessName: businessName || storeName,
+    });
+
+    if (!userId) {
       return NextResponse.json(
         { success: false, error: "Not authenticated. Please sign in." },
         { status: 401 }
@@ -49,34 +62,73 @@ export async function POST(req: Request) {
     }
 
     const dbFulfillmentType = normalizeFulfillmentType(fulfillmentType);
-    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
-    // Update vendor_profiles table (DO NOT include status or revoked columns)
-    // business_name and category are included to satisfy NOT NULL constraints
-    // in case the row doesn't exist yet (upsert would INSERT, not UPDATE)
-    const { error: vpError } = await adminClient
+    const updatePayload: Record<string, any> = {
+      id: userId,
+      store_name: storeName.trim(),
+      business_name: (businessName || storeName).trim(),
+      fulfillment_type: dbFulfillmentType,
+      city: city?.trim() || "",
+      description: description?.trim() || "",
+      updated_at: new Date().toISOString(),
+    };
+
+    if (category && typeof category === "string" && category.trim()) {
+      updatePayload.category = category.trim();
+    } else {
+      updatePayload.category = "Furniture";
+    }
+
+    if (country && typeof country === "string" && country.trim()) {
+      updatePayload.country = country.trim();
+    }
+
+    if (phone && typeof phone === "string" && phone.trim()) {
+      updatePayload.phone = phone.trim();
+    }
+
+    if (website && typeof website === "string" && website.trim()) {
+      updatePayload.website = website.trim();
+    }
+
+    delete updatePayload.id;
+
+    // 1. First attempt UPDATE on existing row
+    const { data: updatedRows, error: updateError } = await adminClient
       .from("vendor_profiles")
-      .upsert(
-        {
-          id: user.id,
-          store_name: storeName.trim(),
-          business_name: (businessName || storeName).trim(),
-          category: "general",
-          fulfillment_type: dbFulfillmentType,
-          city: city?.trim() || "",
-          description: description?.trim() || "",
-          ...(phone ? { phone: phone.trim() } : {}),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
+      .update(updatePayload)
+      .eq("id", userId)
+      .select("id");
 
-    if (vpError) {
-      console.error("[Vendor Step2 API] DB error:", vpError.message);
+    if (updateError) {
+      console.error("[Vendor Step2 API] DB update error:", updateError.message);
       return NextResponse.json(
-        { success: false, error: `Failed to save store profile: ${vpError.message}` },
+        { success: false, error: `Failed to save store profile: ${updateError.message}` },
         { status: 500 }
       );
+    }
+
+    // 2. Fallback to upsert if row did not exist yet
+    if (!updatedRows || updatedRows.length === 0) {
+      const { error: upsertError } = await adminClient
+        .from("vendor_profiles")
+        .upsert(
+          {
+            id: userId,
+            business_name: (businessName || storeName).trim(),
+            phone: phone?.trim() || "",
+            ...updatePayload,
+          },
+          { onConflict: "id" }
+        );
+
+      if (upsertError) {
+        console.error("[Vendor Step2 API] DB upsert error:", upsertError.message);
+        return NextResponse.json(
+          { success: false, error: `Failed to save store profile: ${upsertError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({
@@ -85,8 +137,12 @@ export async function POST(req: Request) {
       data: {
         storeName: storeName.trim(),
         fulfillmentType: dbFulfillmentType,
-        city: city || "",
-        description: description || "",
+        category: updatePayload.category,
+        city: updatePayload.city,
+        country: updatePayload.country || "",
+        phone: updatePayload.phone || "",
+        website: updatePayload.website || "",
+        description: updatePayload.description,
         step: 2,
         updatedAt: new Date().toISOString(),
       },
@@ -102,4 +158,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

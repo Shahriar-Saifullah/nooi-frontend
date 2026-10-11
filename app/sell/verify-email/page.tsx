@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useVendorStore } from "@/lib/store";
 import { resendVerification } from "@/lib/api/auth";
+import { createClient } from "@/utils/supabase/client";
 
 function VerifyEmailInner() {
   const router = useRouter();
@@ -18,7 +19,18 @@ function VerifyEmailInner() {
   const [resending, setResending] = useState(false);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
 
-  const handleVerifiedClick = () => {
+  const handleVerifiedClick = async () => {
+    if (accountData.workEmail && accountData.password) {
+      try {
+        const supabase = createClient();
+        await supabase.auth.signInWithPassword({
+          email: accountData.workEmail,
+          password: accountData.password,
+        });
+      } catch (err) {
+        console.warn("Auto-login error on verify:", err);
+      }
+    }
     setEmailVerified(true);
     setStep(2);
     router.push("/sell/onboarding?step=2");

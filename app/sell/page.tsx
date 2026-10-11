@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useVendorStore } from "@/lib/store";
 import { signUpVendor } from "@/lib/api/vendor";
+import { createClient } from "@/utils/supabase/client";
 import ResumeRegistrationCard from "@/components/vendor/ResumeRegistrationCard";
 
 function getStrength(password: string): {
@@ -121,6 +122,19 @@ function VendorSignupPageContent() {
     if (!res.success) {
       setErrors({ form: typeof res.error === "string" ? res.error : "Vendor signup failed." });
       return;
+    }
+
+    // Auto-login into Supabase client to establish session cookies and tokens
+    if (accountData.password) {
+      try {
+        const supabase = createClient();
+        await supabase.auth.signInWithPassword({
+          email: accountData.workEmail,
+          password: accountData.password,
+        });
+      } catch (e) {
+        console.warn("Auto-login error after signup:", e);
+      }
     }
 
     setStep(1.5);

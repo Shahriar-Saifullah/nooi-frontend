@@ -58,11 +58,16 @@ export default function ShopHeader() {
 
   const totalItems = useCartStore(s => s.totalItems());
 
+  // Prevent hydration mismatch: cart count is stored in localStorage (Zustand persist)
+  // and is always 0 on the server. We only show it after the client has mounted.
+  const [mounted, setMounted] = useState(false);
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [q, setQ] = useState(params.get("q") ?? "");
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    setMounted(true);
     let cancelled = false;
     getCurrentUser()
       .then(res => { if (!cancelled) setUser(res.success ? res.data.user : null); })
@@ -185,12 +190,12 @@ export default function ShopHeader() {
 
           <Link
             href="/cart"
-            aria-label={`${t.cart}${totalItems ? ` (${totalItems})` : ""}`}
+            aria-label={`${t.cart}${mounted && totalItems ? ` (${totalItems})` : ""}`}
             className="relative flex items-center gap-2 h-[40px] md:h-[46px] px-3.5 rounded-[12px] border border-[#e6e6e8] bg-white text-[13px] font-medium text-[#004643] hover:bg-[#F3FEFD] hover:border-[#87DDD7] transition-colors shrink-0"
           >
             <ShoppingCart size={15} />
             <span className="hidden md:inline">{t.cart}</span>
-            {totalItems > 0 && (
+            {mounted && totalItems > 0 && (
               <span className="min-w-[19px] h-[19px] px-1 flex items-center justify-center rounded-full bg-[#004643] text-white text-[10.5px] font-semibold">
                 {totalItems}
               </span>

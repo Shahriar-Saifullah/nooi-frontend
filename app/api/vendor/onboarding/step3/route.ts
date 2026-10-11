@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { createClient } from "@/utils/supabase/server";
+import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 
 export async function POST(req: Request) {
   try {
@@ -8,8 +8,11 @@ export async function POST(req: Request) {
     const {
       commercialRegistrationNumber,
       vatNumber,
+      taxId,
+      registeredAddress,
       commercialRegistrationCertificate,
       vatRegistrationCertificate,
+      bankLetter,
       authorisedSignatoryId,
     } = body;
 
@@ -33,12 +36,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
-    if (!user?.id) {
+    const { userId, businessName: resolvedBusiness } = await resolveVendorUser(req, {
+      workEmail: body.workEmail || body.email,
+      businessName: body.businessName,
+      crNumber: commercialRegistrationNumber,
+    });
+
+    if (!userId) {
       return NextResponse.json(
         { success: false, error: "Not authenticated. Please sign in." },
         { status: 401 }
@@ -48,59 +54,97 @@ export async function POST(req: Request) {
     // Build legal_documents JSONB array with expected structure: [{ kind, label, path, uploaded_at }]
     const legalDocumentsArray: Array<{ kind: string; label: string; path: string; uploaded_at: string }> = [];
 
-    if (commercialRegistrationCertificate?.path) {
+    const tradeDoc = commercialRegistrationCertificate || body.tradeLicence;
+    if (tradeDoc?.path) {
       legalDocumentsArray.push({
         kind: "trade_licence",
-        label: commercialRegistrationCertificate.name || "Commercial Registration Certificate",
-        path: commercialRegistrationCertificate.path,
-        uploaded_at: commercialRegistrationCertificate.uploaded_at || new Date().toISOString(),
+        label: "Trade licence",
+        path: tradeDoc.path,
+        uploaded_at: tradeDoc.uploaded_at || new Date().toISOString(),
       });
     }
 
-    if (vatRegistrationCertificate?.path) {
+    const vatDoc = vatRegistrationCertificate || body.vatCertificate;
+    if (vatDoc?.path) {
       legalDocumentsArray.push({
         kind: "vat_certificate",
-        label: vatRegistrationCertificate.name || "VAT Registration Certificate",
-        path: vatRegistrationCertificate.path,
-        uploaded_at: vatRegistrationCertificate.uploaded_at || new Date().toISOString(),
+        label: "VAT certificate",
+        path: vatDoc.path,
+        uploaded_at: vatDoc.uploaded_at || new Date().toISOString(),
       });
     }
 
-    if (authorisedSignatoryId?.path) {
+    const bankDoc = bankLetter || authorisedSignatoryId;
+    if (bankDoc?.path) {
       legalDocumentsArray.push({
         kind: "bank_letter",
-        label: authorisedSignatoryId.name || "Authorised Signatory ID",
-        path: authorisedSignatoryId.path,
-        uploaded_at: authorisedSignatoryId.uploaded_at || new Date().toISOString(),
+        label: "Bank letter",
+        path: bankDoc.path,
+        uploaded_at: bankDoc.uploaded_at || new Date().toISOString(),
       });
     }
 
-    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+    const updatePayload: Record<string, any> = {
+      cr_number: commercialRegistrationNumber.trim(),
+      vat_number: vatNumber.trim(),
+      legal_documents: legalDocumentsArray,
+      updated_at: new Date().toISOString(),
+    };
 
-    // Update vendor_profiles table (cr_number, vat_number, legal_documents)
-    // business_name, category, phone guard against NOT NULL violations on upsert-as-insert
-    const { error: vpError } = await adminClient
+    if (taxId && typeof taxId === "string" && taxId.trim()) {
+      updatePayload.tax_id = taxId.trim();
+    }
+
+    if (registeredAddress && typeof registeredAddress === "string" && registeredAddress.trim()) {
+      updatePayload.address = registeredAddress.trim();
+    }
+
+    // 1. First, attempt an UPDATE on the existing vendor_profiles row
+    // UPDATE only touches the specified fields and never violates NOT NULL constraints on other columns
+    const { data: updatedRows, error: updateError } = await adminClient
       .from("vendor_profiles")
-      .upsert(
-        {
-          id: user.id,
-          business_name: user.user_metadata?.business_name || user.email || "",
-          category: "general",
-          phone: "",
-          cr_number: commercialRegistrationNumber.trim(),
-          vat_number: vatNumber.trim(),
-          legal_documents: legalDocumentsArray,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
+      .update(updatePayload)
+      .eq("id", userId)
+      .select("id");
 
-    if (vpError) {
-      console.error("[Vendor Step3 API] DB error:", vpError.message);
+    if (updateError) {
+      console.error("[Vendor Step3 API] Update error:", updateError.message);
       return NextResponse.json(
-        { success: false, error: `Failed to save legal documents: ${vpError.message}` },
+        { success: false, error: `Failed to save legal documents: ${updateError.message}` },
         { status: 500 }
       );
+    }
+
+    // 2. If row did not exist yet (update matched 0 rows), perform UPSERT with all NOT NULL defaults
+    if (!updatedRows || updatedRows.length === 0) {
+      const fallbackBusiness =
+        body.businessName ||
+        resolvedBusiness ||
+        body.storeName ||
+        "Vendor Business";
+
+      const { error: upsertError } = await adminClient
+        .from("vendor_profiles")
+        .upsert(
+          {
+            id: userId,
+            business_name: fallbackBusiness,
+            store_name: body.storeName || fallbackBusiness,
+            phone: body.phone || "",
+            category: body.category || "Furniture",
+            status: "pending",
+            ...updatePayload,
+          },
+          { onConflict: "id" }
+        );
+
+      if (upsertError) {
+        console.error("[Vendor Step3 API] Upsert error:", upsertError.message);
+        return NextResponse.json(
+          { success: false, error: `Failed to save legal documents: ${upsertError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({
@@ -109,9 +153,8 @@ export async function POST(req: Request) {
       data: {
         commercialRegistrationNumber: commercialRegistrationNumber.trim(),
         vatNumber: vatNumber.trim(),
-        commercialRegistrationCertificate: commercialRegistrationCertificate || null,
-        vatRegistrationCertificate: vatRegistrationCertificate || null,
-        authorisedSignatoryId: authorisedSignatoryId || null,
+        taxId: updatePayload.tax_id || null,
+        registeredAddress: updatePayload.address || null,
         legalDocuments: legalDocumentsArray,
         step: 3,
         updatedAt: new Date().toISOString(),
@@ -122,10 +165,9 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         success: false,
-        error: error?.message || "Failed to save legal documents.",
+        error: error?.message || "Failed to submit legal documents.",
       },
       { status: 500 }
     );
   }
 }
-

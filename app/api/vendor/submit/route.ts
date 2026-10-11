@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { createClient } from "@/utils/supabase/server";
+import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 
 /**
  * POST /api/vendor/submit
- * Called when vendor completes the onboarding flow and clicks "Submit application".
- * Sets submitted_at timestamp on their vendor_profiles row so admin queue sorts and ages it properly.
+ * Called when vendor completes onboarding and clicks "Submit application".
+ * Sets submitted_at timestamp and pending status on their vendor_profiles row.
  */
 export async function POST(req: Request) {
   try {
@@ -19,12 +19,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    let payload: Record<string, any> = {};
+    try {
+      payload = await req.json();
+    } catch {}
 
-    if (!user?.id) {
+    const { userId } = await resolveVendorUser(req, payload);
+
+    if (!userId) {
       return NextResponse.json(
         { success: false, error: "Not authenticated. Please sign in." },
         { status: 401 }
@@ -34,28 +36,100 @@ export async function POST(req: Request) {
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
     const nowIso = new Date().toISOString();
 
-    // Set submitted_at timestamp (and ensure status is 'pending')
-    // business_name and category guard against NOT NULL violations on upsert-as-insert
-    const { error: vpError } = await adminClient
-      .from("vendor_profiles")
-      .upsert(
-        {
-          id: user.id,
-          business_name: user.user_metadata?.business_name || user.email || "",
-          category: "general",
-          phone: "",
-          submitted_at: nowIso,
-          updated_at: nowIso,
-        },
-        { onConflict: "id" }
-      );
+    const updatePayload: Record<string, any> = {
+      id: userId,
+      submitted_at: nowIso,
+      status: "pending",
+      updated_at: nowIso,
+    };
 
-    if (vpError) {
-      console.error("[Vendor Submit API] vendor_profiles update error:", vpError.message);
+    if (payload.payoutConnected !== undefined) {
+      updatePayload.payout_connected = Boolean(payload.payoutConnected);
+    }
+
+    if (payload.taxId && typeof payload.taxId === "string" && payload.taxId.trim()) {
+      updatePayload.tax_id = payload.taxId.trim();
+    }
+
+    if (payload.registeredAddress && typeof payload.registeredAddress === "string" && payload.registeredAddress.trim()) {
+      updatePayload.address = payload.registeredAddress.trim();
+    } else if (payload.address && typeof payload.address === "string" && payload.address.trim()) {
+      updatePayload.address = payload.address.trim();
+    }
+
+    if (payload.website && typeof payload.website === "string" && payload.website.trim()) {
+      updatePayload.website = payload.website.trim();
+    }
+
+    if (payload.phone && typeof payload.phone === "string" && payload.phone.trim()) {
+      updatePayload.phone = payload.phone.trim();
+    }
+
+    if (payload.category && typeof payload.category === "string" && payload.category.trim()) {
+      updatePayload.category = payload.category.trim();
+    }
+
+    if (payload.city && typeof payload.city === "string" && payload.city.trim()) {
+      updatePayload.city = payload.city.trim();
+    }
+
+    if (payload.country && typeof payload.country === "string" && payload.country.trim()) {
+      updatePayload.country = payload.country.trim();
+    }
+
+    if (payload.description && typeof payload.description === "string" && payload.description.trim()) {
+      updatePayload.description = payload.description.trim();
+    }
+
+    if (payload.storeName && typeof payload.storeName === "string" && payload.storeName.trim()) {
+      updatePayload.store_name = payload.storeName.trim();
+    }
+
+    delete updatePayload.id;
+
+    // 1. First attempt an UPDATE on existing row
+    const { data: updatedRows, error: updateError } = await adminClient
+      .from("vendor_profiles")
+      .update(updatePayload)
+      .eq("id", userId)
+      .select("id");
+
+    if (updateError) {
+      console.error("[Vendor Submit API] vendor_profiles update error:", updateError.message);
       return NextResponse.json(
-        { success: false, error: `Failed to submit application: ${vpError.message}` },
+        { success: false, error: `Failed to submit application: ${updateError.message}` },
         { status: 500 }
       );
+    }
+
+    // 2. If row did not exist yet, fallback to upsert with required NOT NULL columns
+    if (!updatedRows || updatedRows.length === 0) {
+      const fallbackBusiness =
+        payload.businessName ||
+        payload.storeName ||
+        "Vendor Business";
+
+      const { error: upsertError } = await adminClient
+        .from("vendor_profiles")
+        .upsert(
+          {
+            id: userId,
+            business_name: fallbackBusiness,
+            store_name: payload.storeName || fallbackBusiness,
+            phone: payload.phone || "",
+            category: payload.category || "Furniture",
+            ...updatePayload,
+          },
+          { onConflict: "id" }
+        );
+
+      if (upsertError) {
+        console.error("[Vendor Submit API] vendor_profiles upsert error:", upsertError.message);
+        return NextResponse.json(
+          { success: false, error: `Failed to submit application: ${upsertError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json({
@@ -71,4 +145,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

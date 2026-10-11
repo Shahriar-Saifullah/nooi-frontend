@@ -13,8 +13,11 @@ export type FulfillmentType = "Retailer" | "Factory" | "Hybrid" | "Dropshipper";
 export interface VendorStoreProfile {
   storeName: string;
   fulfillmentType: FulfillmentType | "";
+  category: string;
   city: string;
+  country: string;
   phone: string;
+  website: string;
   description: string;
 }
 
@@ -29,9 +32,12 @@ export interface UploadedFile {
 export interface VendorLegalDocs {
   commercialRegistrationNumber: string;
   vatNumber: string;
+  taxId: string;
+  registeredAddress: string;
   commercialRegistrationCertificate: UploadedFile | null;
   vatRegistrationCertificate: UploadedFile | null;
-  authorisedSignatoryId: UploadedFile | null;
+  bankLetter: UploadedFile | null;
+  authorisedSignatoryId?: UploadedFile | null;
 }
 
 export interface VendorPayoutDetails {
@@ -80,16 +86,22 @@ const initialAccountData: VendorAccountData = {
 const initialStoreProfile: VendorStoreProfile = {
   storeName: "",
   fulfillmentType: "Factory",
+  category: "Furniture",
   city: "",
+  country: "Saudi Arabia",
   phone: "",
+  website: "",
   description: "",
 };
 
 const initialLegalDocs: VendorLegalDocs = {
   commercialRegistrationNumber: "",
   vatNumber: "",
+  taxId: "",
+  registeredAddress: "",
   commercialRegistrationCertificate: null,
   vatRegistrationCertificate: null,
+  bankLetter: null,
   authorisedSignatoryId: null,
 };
 

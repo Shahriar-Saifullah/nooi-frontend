@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
-import { createClient } from "@/utils/supabase/server";
+import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const documentType = (formData.get("documentType") as string | null) || "trade_licence";
+    const workEmail = (formData.get("workEmail") as string | null) || undefined;
 
     if (!file) {
       return NextResponse.json(
@@ -25,12 +26,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { userId } = await resolveVendorUser(req, { workEmail });
 
-    if (!user?.id) {
+    if (!userId) {
       return NextResponse.json(
         { success: false, error: "Not authenticated. Please sign in." },
         { status: 401 }
@@ -39,20 +37,38 @@ export async function POST(req: Request) {
 
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
-    // Map UI doc types to backend kinds
+    // Map UI doc types to backend kinds and labels
     let kind = "trade_licence";
-    if (documentType === "vatRegistrationCertificate" || documentType === "vat_certificate") {
+    let defaultLabel = "Trade licence";
+
+    if (
+      documentType === "vatRegistrationCertificate" ||
+      documentType === "vat_certificate" ||
+      documentType === "vatCertificate"
+    ) {
       kind = "vat_certificate";
-    } else if (documentType === "authorisedSignatoryId" || documentType === "bank_letter") {
+      defaultLabel = "VAT certificate";
+    } else if (
+      documentType === "authorisedSignatoryId" ||
+      documentType === "bank_letter" ||
+      documentType === "bankLetter"
+    ) {
       kind = "bank_letter";
-    } else if (documentType === "commercialRegistrationCertificate") {
+      defaultLabel = "Bank letter";
+    } else if (
+      documentType === "commercialRegistrationCertificate" ||
+      documentType === "trade_licence" ||
+      documentType === "tradeLicence"
+    ) {
       kind = "trade_licence";
+      defaultLabel = "Trade licence";
     } else {
       kind = documentType;
+      defaultLabel = documentType;
     }
 
     const extension = file.name.split(".").pop() || "pdf";
-    const storagePath = `vendor-documents/${user.id}/${kind}.${extension}`;
+    const storagePath = `vendor-documents/${userId}/${kind}.${extension}`;
 
     // ArrayBuffer for Supabase upload
     const bytes = await file.arrayBuffer();
@@ -79,7 +95,7 @@ export async function POST(req: Request) {
       message: "File uploaded successfully to vendor-documents bucket.",
       data: {
         kind,
-        label: file.name,
+        label: defaultLabel,
         path: storagePath,
         uploaded_at: new Date().toISOString(),
         name: file.name,
@@ -94,4 +110,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

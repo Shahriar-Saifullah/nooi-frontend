@@ -12,6 +12,7 @@ import {
   saveVendorLegalDocs,
   uploadVendorDocument,
 } from "@/lib/api/vendor";
+import { createClient } from "@/utils/supabase/client";
 
 function VendorOnboardingInner() {
   const router = useRouter();
@@ -44,6 +45,27 @@ function VendorOnboardingInner() {
   useEffect(() => {
     useVendorStore.persist.rehydrate();
   }, []);
+
+  // Proactively restore or establish Supabase session
+  useEffect(() => {
+    const restoreAuth = async () => {
+      try {
+        const supabase = createClient();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session && accountData.workEmail && accountData.password) {
+          await supabase.auth.signInWithPassword({
+            email: accountData.workEmail,
+            password: accountData.password,
+          });
+        }
+      } catch (err) {
+        console.warn("Session restore error:", err);
+      }
+    };
+    restoreAuth();
+  }, [accountData.workEmail, accountData.password]);
 
   useEffect(() => {
     if (stepFromQuery && stepFromQuery !== currentStep) {
@@ -130,7 +152,26 @@ function VendorOnboardingInner() {
     if (!storeProfile.fulfillmentType) { setErrorMessage("Please select how you fulfill orders."); return; }
     if (!storeProfile.city.trim()) { setErrorMessage("Please enter your city."); return; }
     setSubmitting(true);
-    const res = await saveVendorStoreProfile(storeProfile);
+
+    // Ensure session is active if credentials exist
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session && accountData.workEmail && accountData.password) {
+        await supabase.auth.signInWithPassword({
+          email: accountData.workEmail,
+          password: accountData.password,
+        });
+      }
+    } catch {}
+
+    const res = await saveVendorStoreProfile({
+      ...storeProfile,
+      category: storeProfile.category || "Furniture",
+      country: storeProfile.country || "Saudi Arabia",
+      workEmail: accountData.workEmail,
+      businessName: accountData.businessName,
+    });
     setSubmitting(false);
     if (!res.success) { setErrorMessage(typeof res.error === "string" ? res.error : "Failed to save store profile."); return; }
     handleStepChange(3);
@@ -144,7 +185,24 @@ function VendorOnboardingInner() {
     if (!legalDocs.commercialRegistrationNumber.trim()) { setErrorMessage("Please enter your commercial registration number."); return; }
     if (!legalDocs.vatNumber.trim()) { setErrorMessage("Please enter your VAT number."); return; }
     setSubmitting(true);
-    const res = await saveVendorLegalDocs(legalDocs);
+
+    // Ensure session is active if credentials exist
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session && accountData.workEmail && accountData.password) {
+        await supabase.auth.signInWithPassword({
+          email: accountData.workEmail,
+          password: accountData.password,
+        });
+      }
+    } catch {}
+
+    const res = await saveVendorLegalDocs({
+      ...legalDocs,
+      workEmail: accountData.workEmail,
+      businessName: accountData.businessName || storeProfile.storeName || "Vendor Business",
+    });
     setSubmitting(false);
     if (!res.success) { setErrorMessage(typeof res.error === "string" ? res.error : "Failed to save legal documents."); return; }
     handleStepChange(4);
@@ -155,6 +213,30 @@ function VendorOnboardingInner() {
     await new Promise((r) => setTimeout(r, 1400));
     setStripeConnected(true);
     setConnectingStripe(false);
+
+    try {
+      const supabase = createClient();
+      let token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (!token && accountData.workEmail && accountData.password) {
+        await supabase.auth.signInWithPassword({
+          email: accountData.workEmail,
+          password: accountData.password,
+        });
+        token = (await supabase.auth.getSession()).data.session?.access_token;
+      }
+      await fetch("/api/vendor/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          workEmail: accountData.workEmail,
+          businessName: accountData.businessName,
+          payoutConnected: true,
+        }),
+      });
+    } catch {}
   };
 
   const handleFinalSubmit = async (e: React.FormEvent) => {
@@ -164,7 +246,40 @@ function VendorOnboardingInner() {
 
     // Notify the database that this application has been submitted
     try {
-      await fetch("/api/vendor/submit", { method: "POST" });
+      const supabase = createClient();
+      let token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (!token && accountData.workEmail && accountData.password) {
+        await supabase.auth.signInWithPassword({
+          email: accountData.workEmail,
+          password: accountData.password,
+        });
+        token = (await supabase.auth.getSession()).data.session?.access_token;
+      }
+
+      await fetch("/api/vendor/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          workEmail: accountData.workEmail,
+          businessName: accountData.businessName,
+          storeName: storeProfile.storeName,
+          category: storeProfile.category,
+          fulfillmentType: storeProfile.fulfillmentType,
+          city: storeProfile.city,
+          country: storeProfile.country,
+          phone: storeProfile.phone,
+          website: storeProfile.website,
+          description: storeProfile.description,
+          crNumber: legalDocs.commercialRegistrationNumber,
+          vatNumber: legalDocs.vatNumber,
+          taxId: legalDocs.taxId,
+          registeredAddress: legalDocs.registeredAddress,
+          payoutConnected: stripeConnected,
+        }),
+      });
     } catch {
       // Non-critical — proceed regardless
     }
@@ -182,7 +297,18 @@ function VendorOnboardingInner() {
     setErrorMessage(null);
     setFailedUploads((prev) => ({ ...prev, [docKey]: null }));
 
-    const res = await uploadVendorDocument(file, docKey);
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session && accountData.workEmail && accountData.password) {
+        await supabase.auth.signInWithPassword({
+          email: accountData.workEmail,
+          password: accountData.password,
+        });
+      }
+    } catch {}
+
+    const res = await uploadVendorDocument(file, docKey, accountData.workEmail);
     setUploadingDoc(null);
     if (res.success) {
       const data = res.data as any;
@@ -280,6 +406,24 @@ function VendorOnboardingInner() {
                   Store name
                   <input type="text" placeholder="Atelier Rawda" value={storeProfile.storeName || ""} onChange={(e) => setStoreProfile({ storeName: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]" />
                 </label>
+                <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
+                  Primary category
+                  <select
+                    value={storeProfile.category || "Furniture"}
+                    onChange={(e) => setStoreProfile({ category: e.target.value })}
+                    style={{ borderColor: "#646968" }}
+                    className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] bg-white focus:outline-none focus:border-[#004643]"
+                  >
+                    <option value="Furniture">Furniture</option>
+                    <option value="Lighting">Lighting</option>
+                    <option value="Decor">Decor</option>
+                    <option value="Kitchen & Dining">Kitchen & Dining</option>
+                    <option value="Outdoor">Outdoor</option>
+                    <option value="Office">Office</option>
+                    <option value="Textiles">Textiles</option>
+                    <option value="Bedding & Bath">Bedding & Bath</option>
+                  </select>
+                </label>
                 <div className="flex flex-col gap-2">
                   <div className="text-[13px] font-medium text-[#343837]">How do you fulfil orders?</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -299,9 +443,19 @@ function VendorOnboardingInner() {
                   </div>
                   <div className="text-[12px] text-[#646968]">This sets whether shoppers see stock counts or lead times, and how your orders are tracked.</div>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
+                    City
+                    <input type="text" placeholder="Riyadh" value={storeProfile.city || ""} onChange={(e) => setStoreProfile({ city: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#646968] focus:outline-none focus:border-[#004643]" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
+                    Country
+                    <input type="text" placeholder="Saudi Arabia" value={storeProfile.country || ""} onChange={(e) => setStoreProfile({ country: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#646968] focus:outline-none focus:border-[#004643]" />
+                  </label>
+                </div>
                 <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
-                  City
-                  <input type="text" placeholder="Riyadh" value={storeProfile.city || ""} onChange={(e) => setStoreProfile({ city: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#646968] focus:outline-none focus:border-[#004643]" />
+                  Company website
+                  <input type="url" placeholder="https://atelierrawda.com (optional)" value={storeProfile.website || ""} onChange={(e) => setStoreProfile({ website: e.target.value })} style={{ borderColor: "#646968" }} className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]" />
                 </label>
                 <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
                   Phone number
@@ -321,7 +475,7 @@ function VendorOnboardingInner() {
             {currentStep === 3 && (
               <form onSubmit={handleStep3Submit} className="flex flex-col gap-6">
                 <div>
-                  <h1 className="text-[26px] font-semibold text-[#101212] mb-1.5 leading-tight">Legal documents</h1>
+                  <h1 className="text-[26px] font-semibold text-[#101212] mb-1.5 leading-tight">Legal documents & Registration</h1>
                   <p className="text-[14px] text-[#4B4F4F] m-0">Nooi admin checks these before you can list products.</p>
                 </div>
 
@@ -334,7 +488,7 @@ function VendorOnboardingInner() {
                 {/* Commercial registration number */}
                 <div>
                   <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
-                    Commercial registration number
+                    Commercial registration number (CR)
                     <input
                       type="text"
                       placeholder="10 digits"
@@ -346,7 +500,7 @@ function VendorOnboardingInner() {
                     />
                   </label>
 
-                  {/* Duplicate Registration Number Error Card (Image 3) */}
+                  {/* Duplicate Registration Number Error Card */}
                   {duplicateCrError && (
                     <div className="bg-[#FFF5F5] border border-[#FECACA] rounded-lg p-4 mt-2 flex flex-col gap-2">
                       <span className="text-[#C53030] text-[13px] font-semibold">
@@ -392,17 +546,42 @@ function VendorOnboardingInner() {
                   />
                 </label>
 
+                {/* Tax ID */}
+                <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
+                  Tax ID / TIN
+                  <input
+                    type="text"
+                    placeholder="e.g. 10-15 digit tax identification number"
+                    value={legalDocs.taxId || ""}
+                    onChange={(e) => setLegalDocs({ taxId: e.target.value })}
+                    style={{ borderColor: "#646968" }}
+                    className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] focus:outline-none focus:border-[#004643]"
+                  />
+                </label>
+
+                {/* Registered address */}
+                <label className="flex flex-col gap-1 text-[13px] font-medium text-[#343837]">
+                  Registered business address
+                  <textarea
+                    rows={2}
+                    placeholder="Official address as shown on commercial registration / licence"
+                    value={legalDocs.registeredAddress || ""}
+                    onChange={(e) => setLegalDocs({ registeredAddress: e.target.value })}
+                    style={{ borderColor: "#646968" }}
+                    className="w-full px-4 py-[12px] border rounded-lg text-[14px] text-[#101212] placeholder:text-[#8E9493] resize-y focus:outline-none focus:border-[#004643]"
+                  />
+                </label>
+
                 {/* Document uploads list */}
                 <div className="flex flex-col gap-2">
                   {[
-                    { key: "commercialRegistrationCertificate" as const, label: "Commercial registration certificate", hint: "PDF or JPG, max 10 MB", file: legalDocs.commercialRegistrationCertificate },
-                    { key: "vatRegistrationCertificate" as const, label: "VAT registration certificate", hint: "PDF or JPG, max 10 MB", file: legalDocs.vatRegistrationCertificate },
-                    { key: "authorisedSignatoryId" as const, label: "Authorised signatory ID", hint: "National ID or Iqama, both sides", file: legalDocs.authorisedSignatoryId },
+                    { key: "commercialRegistrationCertificate" as const, label: "Trade licence", hint: "Commercial registration or trade licence (PDF or JPG, max 10 MB)", file: legalDocs.commercialRegistrationCertificate },
+                    { key: "vatRegistrationCertificate" as const, label: "VAT certificate", hint: "VAT registration certificate (PDF or JPG, max 10 MB)", file: legalDocs.vatRegistrationCertificate },
+                    { key: "bankLetter" as const, label: "Bank letter", hint: "Bank account letter or authorised signatory ID (PDF or JPG, max 10 MB)", file: legalDocs.bankLetter || legalDocs.authorisedSignatoryId },
                   ].map((doc) => {
                     const isFailed = !!failedUploads[doc.key];
 
                     if (isFailed) {
-                      // Upload Failed Error Box (Image 2)
                       return (
                         <div
                           key={doc.key}
@@ -514,7 +693,6 @@ function VendorOnboardingInner() {
               </form>
             )}
 
-
             {currentStep === 4 && (
               <div className="flex flex-col gap-6">
                 <div>
@@ -561,7 +739,6 @@ function VendorOnboardingInner() {
               </div>
             )}
 
-
             {currentStep === 5 && (
               <form onSubmit={handleFinalSubmit} className="flex flex-col gap-6">
                 <div>
@@ -576,7 +753,13 @@ function VendorOnboardingInner() {
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[14px] font-semibold text-[#101212]">Store profile</span>
                       <span className="text-[13px] text-[#646968]">
-                        {[storeProfile.storeName || "-", storeProfile.fulfillmentType || null, storeProfile.city || null].filter(Boolean).join(" · ")}
+                        {[
+                          storeProfile.storeName || "-",
+                          storeProfile.fulfillmentType || null,
+                          storeProfile.category || null,
+                          storeProfile.city ? `${storeProfile.city}${storeProfile.country ? `, ${storeProfile.country}` : ""}` : null,
+                          storeProfile.website || null,
+                        ].filter(Boolean).join(" · ")}
                       </span>
                     </div>
                     <button type="button" onClick={() => handleStepChange(2)} className="text-[13px] font-medium text-[#004643] hover:underline shrink-0 cursor-pointer bg-transparent border-0">Edit</button>
@@ -585,9 +768,11 @@ function VendorOnboardingInner() {
                   {/* Legal documents */}
                   <div className="border border-gray-300 rounded-lg px-5 py-4 flex items-start justify-between gap-4 bg-white">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[14px] font-semibold text-[#101212]">Legal documents</span>
+                      <span className="text-[14px] font-semibold text-[#101212]">Legal & Registration</span>
                       <span className="text-[13px] text-[#646968]">
-                        CR {legalDocs.commercialRegistrationNumber || "-"} · VAT {legalDocs.vatNumber || "-"} · {[legalDocs.commercialRegistrationCertificate, legalDocs.vatRegistrationCertificate, legalDocs.authorisedSignatoryId].filter(Boolean).length} documents attached
+                        CR {legalDocs.commercialRegistrationNumber || "-"} · VAT {legalDocs.vatNumber || "-"}
+                        {legalDocs.taxId ? ` · Tax ID ${legalDocs.taxId}` : ""}
+                        {legalDocs.registeredAddress ? ` · ${legalDocs.registeredAddress}` : ""} · {[legalDocs.commercialRegistrationCertificate, legalDocs.vatRegistrationCertificate, (legalDocs.bankLetter || legalDocs.authorisedSignatoryId)].filter(Boolean).length} documents attached
                       </span>
                     </div>
                     <button type="button" onClick={() => handleStepChange(3)} className="text-[13px] font-medium text-[#004643] hover:underline shrink-0 cursor-pointer bg-transparent border-0">Edit</button>

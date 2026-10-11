@@ -1,4 +1,5 @@
 import { requestApi, type ApiResponse } from "./http";
+import { createClient } from "@/utils/supabase/client";
 import type {
   VendorAccountData,
   VendorStoreProfile,
@@ -42,6 +43,16 @@ export interface VendorUploadResponse {
   url: string;
 }
 
+export type VendorStoreProfilePayload = VendorStoreProfile & {
+  workEmail?: string;
+  businessName?: string;
+};
+
+export type VendorLegalDocsPayload = VendorLegalDocs & {
+  workEmail?: string;
+  businessName?: string;
+};
+
 /**
  * Submit Step 1 Vendor Signup
  */
@@ -60,9 +71,9 @@ export async function signUpVendor(
  * Submit Step 2 Vendor Store Profile
  */
 export async function saveVendorStoreProfile(
-  payload: VendorStoreProfile
+  payload: VendorStoreProfilePayload
 ): Promise<ApiResponse<VendorStep2Response>> {
-  return requestApi<VendorStep2Response, VendorStoreProfile>({
+  return requestApi<VendorStep2Response, VendorStoreProfilePayload>({
     baseUrl: "",
     path: "/api/vendor/onboarding/step2",
     method: "POST",
@@ -74,9 +85,9 @@ export async function saveVendorStoreProfile(
  * Submit Step 3 Vendor Legal Documents
  */
 export async function saveVendorLegalDocs(
-  payload: VendorLegalDocs
+  payload: VendorLegalDocsPayload
 ): Promise<ApiResponse<VendorStep3Response>> {
-  return requestApi<VendorStep3Response, VendorLegalDocs>({
+  return requestApi<VendorStep3Response, VendorLegalDocsPayload>({
     baseUrl: "",
     path: "/api/vendor/onboarding/step3",
     method: "POST",
@@ -89,15 +100,29 @@ export async function saveVendorLegalDocs(
  */
 export async function uploadVendorDocument(
   file: File,
-  documentType: string
+  documentType: string,
+  workEmail?: string
 ): Promise<ApiResponse<VendorUploadResponse>> {
   try {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("documentType", documentType);
+    if (workEmail) {
+      formData.append("workEmail", workEmail);
+    }
+
+    const headers: Record<string, string> = {};
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+    } catch {}
 
     const res = await fetch("/api/vendor/upload", {
       method: "POST",
+      headers,
       body: formData,
     });
 
@@ -120,3 +145,47 @@ export async function uploadVendorDocument(
     };
   }
 }
+
+export interface VendorProfileStatusResponse {
+  vendor: {
+    id: string;
+    business_name: string;
+    store_name: string | null;
+    business_email: string | null;
+    phone: string | null;
+    category: string | null;
+    city: string | null;
+    country: string | null;
+    fulfillment_type: string | null;
+    status: "pending" | "approved" | "rejected" | "suspended" | "draft";
+    submitted_at: string | null;
+    created_at: string;
+    decided_at: string | null;
+    verified_at: string | null;
+    rejection_reason: string | null;
+    description: string | null;
+    website: string | null;
+    address: string | null;
+    tax_id: string | null;
+    cr_number: string | null;
+    vat_number: string | null;
+    payout_connected: boolean;
+    legal_documents: Array<{ kind: string; label: string; path: string; uploaded_at: string }>;
+  };
+}
+
+/**
+ * Fetch current vendor status from database
+ */
+export async function getVendorStatus(hints?: {
+  workEmail?: string;
+  businessName?: string;
+}): Promise<ApiResponse<VendorProfileStatusResponse>> {
+  return requestApi<VendorProfileStatusResponse, typeof hints>({
+    baseUrl: "",
+    path: "/api/vendor/status",
+    method: "POST",
+    body: hints,
+  });
+}
+
