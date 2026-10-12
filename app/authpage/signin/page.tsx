@@ -79,16 +79,17 @@ function SigninPageInner() {
 
   const validate = () => {
     const next: typeof errors = {};
-    if (!email) next.email = "Email is required";
-    else if (!EMAIL_REGEX.test(email))
-      next.email = "Please enter a valid email";
+    if (!email.trim()) next.email = "Email is required";
+    else if (!EMAIL_REGEX.test(email.trim()))
+      next.email = "Please enter a valid email address";
     if (!password) next.password = "Password is required";
     else if (password.length < 6)
       next.password = "Password must be at least 6 characters";
     return next;
   };
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const fieldErrors = validate();
     if (Object.keys(fieldErrors).length > 0) {
       setErrors(fieldErrors);
@@ -96,48 +97,60 @@ function SigninPageInner() {
     }
 
     setSubmitting(true);
-    const res = await signIn({ email, password });
+    setErrors({});
+    const res = await signIn({ email: email.trim(), password });
     setSubmitting(false);
 
     if (!res.success) {
       if ((res.error as any)?.code === "EMAIL_NOT_VERIFIED") {
         router.push(
-          `/authpage/verify-email?email=${encodeURIComponent(email)}`
+          `/authpage/verify-email?email=${encodeURIComponent(email.trim())}`
         );
         return;
       }
       const nextFieldErrors = extractFieldErrors(res.error);
       const authMessage =
-        typeof res.error === "string" ? res.error : "Sign in failed";
+        typeof res.error === "string" ? res.error : "Sign in failed. Invalid credentials.";
       setErrors({ ...nextFieldErrors, auth: authMessage });
       return;
     }
 
-    // An explicit destination wins — this is how AdminShell sends someone back
-    // to where they were trying to go. Only relative paths, so a crafted
-    // ?next=https://evil.example can't turn sign-in into an open redirect.
+    // 1. Explicit destination param overrides default routing
     const next = searchParams.get("next");
     if (next && next.startsWith("/") && !next.startsWith("//")) {
       router.push(next);
       return;
     }
 
-    // Otherwise route by role. Onboarding is a customer flow — walking an
-    // admin or a vendor through "let's set up your profile" is wrong, and
-    // neither has a profile of that kind to set up.
-    const role = res.data.user.role;
+    // 2. Unified Role-Based Routing
+    const user = res.data.user;
+    const role = user.role;
+
     if (role === "admin" || role === "super_admin") {
       router.push("/admin");
       return;
     }
+
     if (role === "vendor") {
-      // TODO: point at the vendor portal once it exists. Until then the
-      // customer dashboard is the only page they can reach.
-      router.push("/dashboard");
+      const status = user.vendor_status;
+      if (status === "approved") {
+        router.push("/sell/dashboard");
+      } else if (status === "action_needed") {
+        router.push("/sell/action-needed");
+      } else if (status === "rejected") {
+        router.push("/sell/not-approved");
+      } else if (status === "pending") {
+        router.push("/sell/submitted");
+      } else if (status === "draft") {
+        router.push("/sell/onboarding");
+      } else {
+        router.push("/sell/dashboard");
+      }
       return;
     }
 
-    const onboardingCompleted = !!res.data.user.onboarding_completed;
+    // Default Customer / User role
+    const onboardingCompleted = !!user.onboarding_completed;
     router.push(onboardingCompleted ? "/dashboard" : "/onboarding");
   };
 
@@ -152,15 +165,15 @@ function SigninPageInner() {
   return (
     <div className="flex h-screen overflow-hidden bg-white">
       {/* Left panel */}
-      <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto">
+      <div className="hidden md:flex w-115 bg-[#F3FEFD] flex-col justify-between px-12 py-12.75 overflow-y-auto border-r border-gray-100">
         <div className="w-24 h-8">
           <a href="/">
-            <img src="/Logo/Logo.svg" alt="Logo" />
+            <img src="/Logo/Logo.svg" alt="Nooi" />
           </a>
         </div>
 
         <div className="mb-20">
-          <h2 className="text-4xl italic font-light text-gray-800 mb-6 leading-tight">
+          <h2 className="text-4xl italic font-serif text-gray-900 mb-6 leading-tight font-instrument">
             Calm your
             <br />
             workflow.
@@ -186,24 +199,26 @@ function SigninPageInner() {
               </div>
             )}
             <div className="mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">Sign in</h1>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2 tracking-tight">
+                Sign in
+              </h1>
               <p className="text-gray-600 text-sm">
-                Welcome back. Enter your details to continue.
+                Welcome back. Enter your credentials to access your account.
               </p>
             </div>
 
             <div
-              className={`overflow-hidden transition-all duration-700 ease-out ${errors.auth
+              className={`overflow-hidden transition-all duration-500 ease-out ${errors.auth
                 ? "max-h-28 opacity-100 translate-y-0 mb-6"
                 : "max-h-0 opacity-0 -translate-y-1 mb-0"
                 }`}
             >
-              <div className="flex bg-red-50 border border-red-200 rounded-lg px-4 py-3  gap-2">
+              <div className="flex bg-red-50 border border-red-200 rounded-lg px-4 py-3 gap-2">
                 <span className="text-red-500 text-base leading-none mt-0.5 shrink-0 ">
                   ●
                 </span>
                 <div>
-                  <p className="text-red-700 font-semibold text-sm ">
+                  <p className="text-red-700 font-semibold text-sm">
                     Sign in failed
                   </p>
                   <p className="text-red-600 text-xs mt-0.5">
@@ -214,12 +229,12 @@ function SigninPageInner() {
             </div>
           </div>
 
-          {/* Form */}
-          <form className="space-y-3">
+          {/* Single Unified Form */}
+          <form className="space-y-4" onSubmit={handleSignIn}>
             {/* Email */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Email
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Email address
               </label>
               <input
                 type="email"
@@ -234,27 +249,24 @@ function SigninPageInner() {
                       auth: undefined,
                     }));
                 }}
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.email
+                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 text-black ${errors.email
                   ? "border-red-400 focus:ring-red-300"
-                  : "border-gray-300 focus:ring-teal-600"
+                  : "border-gray-300 focus:border-[#004643] focus:ring-[#004643]/20"
                   }`}
               />
-              <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${errors.email ? "visible" : "invisible"
-                  }`}
-              >
-                {errors.email ?? " "}
-              </p>
+              {errors.email && (
+                <p className="text-red-500 text-xs mt-1">{errors.email}</p>
+              )}
             </div>
 
             {/* Password */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
                 Password
               </label>
               <input
                 type="password"
-                placeholder="••••••••"
+                placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => {
                   setPassword(e.target.value);
@@ -265,21 +277,18 @@ function SigninPageInner() {
                       auth: undefined,
                     }));
                 }}
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent text-black ${errors.password
+                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 text-black ${errors.password
                   ? "border-red-400 focus:ring-red-300"
-                  : "border-gray-300 focus:ring-teal-600"
+                  : "border-gray-300 focus:border-[#004643] focus:ring-[#004643]/20"
                   }`}
               />
-              <p
-                className={`text-red-500 text-xs mt-1 min-h-4 ${errors.password ? "visible" : "invisible"
-                  }`}
-              >
-                {errors.password ?? " "}
-              </p>
-              <div className="text-right">
+              {errors.password && (
+                <p className="text-red-500 text-xs mt-1">{errors.password}</p>
+              )}
+              <div className="text-right mt-1.5">
                 <a
                   href="/authpage/forgot-password"
-                  className="text-sm text-teal-600 hover:text-teal-700 font-medium"
+                  className="text-xs text-teal-700 hover:text-teal-800 font-medium"
                 >
                   Forgot password?
                 </a>
@@ -288,8 +297,7 @@ function SigninPageInner() {
 
             {/* Sign in Button */}
             <Button
-              type="button"
-              onClick={handleSignIn}
+              type="submit"
               fullWidth
               disabled={submitting}
             >
@@ -299,9 +307,9 @@ function SigninPageInner() {
 
           {/* Divider */}
           <div className="flex items-center gap-3 my-6">
-            <div className="flex-1 border-t border-gray-300"></div>
-            <span className="text-gray-500 text-sm">or</span>
-            <div className="flex-1 border-t border-gray-300"></div>
+            <div className="flex-1 border-t border-gray-200"></div>
+            <span className="text-gray-400 text-xs uppercase tracking-wider font-medium">or</span>
+            <div className="flex-1 border-t border-gray-200"></div>
           </div>
 
           {/* Google Button */}
@@ -315,18 +323,34 @@ function SigninPageInner() {
             <span>Continue with Google</span>
           </Button>
 
-          {/* Sign up link */}
-          <div className="text-center mt-6">
-            <span className="text-gray-600 text-sm">
-              Don&apos;t have an account?{" "}
-              <Button
-                type="button"
-                variant="text"
-                onClick={() => router.push("/authpage/signup")}
-              >
-                Create one
-              </Button>
-            </span>
+          {/* Sign up links */}
+          <div className="text-center mt-6 space-y-2.5">
+            <div>
+              <span className="text-xs text-gray-600">
+                Don&apos;t have an account?{" "}
+                <Button
+                  type="button"
+                  variant="text"
+                  className="font-semibold text-[#004643] hover:underline text-xs"
+                  onClick={() => router.push("/authpage/signup")}
+                >
+                  Create one
+                </Button>
+              </span>
+            </div>
+            <div>
+              <span className="text-xs text-gray-600">
+                Want to sell furniture on Nooi?{" "}
+                <Button
+                  type="button"
+                  variant="text"
+                  className="font-semibold text-[#004643] hover:underline text-xs"
+                  onClick={() => router.push("/sell")}
+                >
+                  Register your store
+                </Button>
+              </span>
+            </div>
           </div>
         </div>
       </div>

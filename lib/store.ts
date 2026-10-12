@@ -31,7 +31,14 @@ export const useAuthStore = create<AuthState>()(
           signupData: { ...state.signupData, ...data },
         })),
 
-      resetSignupData: () => set({ signupData: initialSignupData }),
+      resetSignupData: () => {
+        if (typeof window !== "undefined" && window.sessionStorage) {
+          try {
+            sessionStorage.removeItem("auth-store");
+          } catch {}
+        }
+        set({ signupData: initialSignupData });
+      },
     }),
     {
       name: "auth-store",
@@ -108,3 +115,15 @@ export const useLanguageStore = create<LanguageState>()(
     },
   ),
 );
+
+// ─── Vendor Store Export ──────────────────────────────────────────────────
+export { useVendorStore } from "./store/vendor.store";
+export type {
+  VendorAccountData,
+  VendorStoreProfile,
+  VendorLegalDocs,
+  VendorPayoutDetails,
+  FulfillmentType,
+  UploadedFile,
+  VendorState,
+} from "./store/vendor.store";

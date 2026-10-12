@@ -209,19 +209,51 @@ export async function getProducts(q: ProductQuery = {}): Promise<ProductPage> {
   p.set("page",  String(q.page  ?? 1));
   p.set("limit", String(q.limit ?? 12));
 
-  const json = await get<{
-    success: boolean;
-    products: MarketplaceProduct[];
-    total: number;
-    page: number;
-    limit: number;
-  }>(`/marketplace/products?${p.toString()}`);
+  let products: MarketplaceProduct[] = [];
+  let total = 0;
+  let page = Number(q.page ?? 1);
+  let limit = Number(q.limit ?? 12);
+
+  try {
+    const json = await get<{
+      success: boolean;
+      products: MarketplaceProduct[];
+      total: number;
+      page: number;
+      limit: number;
+    }>(`/marketplace/products?${p.toString()}`);
+
+    products = json.products ?? [];
+    total = json.total ?? 0;
+  } catch (err) {
+    console.warn("[Marketplace] Backend getProducts:", err);
+  }
+
+  // Also query live vendor listings to guarantee 100% immediate presence
+  try {
+    if (typeof window !== "undefined") {
+      const vRes = await fetch("/api/vendor/listings?public=true");
+      if (vRes.ok) {
+        const vData = await vRes.json();
+        if (vData.success && Array.isArray(vData.products)) {
+          const existingIds = new Set(products.map(p => p.id));
+          for (const vp of vData.products) {
+            if (!existingIds.has(vp.id)) {
+              const shaped = normaliseRaw(vp);
+              products.unshift(shaped);
+              total += 1;
+            }
+          }
+        }
+      }
+    }
+  } catch {}
 
   return {
-    products: json.products ?? [],
-    total: json.total ?? 0,
-    page: json.page ?? 1,
-    limit: json.limit ?? 12,
+    products,
+    total: Math.max(total, products.length),
+    page,
+    limit,
   };
 }
 
@@ -256,11 +288,26 @@ export async function getCanvasMatches(
 export async function getProductById(
   id: string,
 ): Promise<MarketplaceProduct | null> {
-  const json = await get<{ success: boolean; product: any; is_mock?: boolean }>(
-    `/marketplace/products/${encodeURIComponent(id)}`,
-  );
-  if (json.is_mock === true || !json.product) return null;
-  return normaliseRaw(json.product);
+  try {
+    const json = await get<{ success: boolean; product: any; is_mock?: boolean }>(
+      `/marketplace/products/${encodeURIComponent(id)}`,
+    );
+    if (json.product) return normaliseRaw(json.product);
+  } catch {}
+
+  // Fallback: check /api/vendor/listings for this product id
+  try {
+    if (typeof window !== "undefined") {
+      const vRes = await fetch("/api/vendor/listings?public=true");
+      if (vRes.ok) {
+        const vData = await vRes.json();
+        const found = (vData.products || []).find((p: any) => p.id === id);
+        if (found) return normaliseRaw(found);
+      }
+    }
+  } catch {}
+
+  return null;
 }
 
 /**
