@@ -183,183 +183,183 @@ export async function GET(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const {
-      shippingAddress,
-      items,
-      totalAmount,
-      currency,
-      userId: shopperId,
-    } = body;
+// export async function POST(req: Request) {
+//   try {
+//     const body = await req.json();
+//     const {
+//       shippingAddress,
+//       items,
+//       totalAmount,
+//       currency,
+//       userId: shopperId,
+//     } = body;
 
-    if (!Array.isArray(items) || items.length === 0) {
-      return NextResponse.json(
-        { success: false, error: "Items array is required to create an order." },
-        { status: 400 }
-      );
-    }
+//     if (!Array.isArray(items) || items.length === 0) {
+//       return NextResponse.json(
+//         { success: false, error: "Items array is required to create an order." },
+//         { status: 400 }
+//       );
+//     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !serviceRoleKey) {
-      return NextResponse.json(
-        { success: false, error: "Supabase service role credentials not configured." },
-        { status: 500 }
-      );
-    }
+//     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+//     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+//     if (!supabaseUrl || !serviceRoleKey) {
+//       return NextResponse.json(
+//         { success: false, error: "Supabase service role credentials not configured." },
+//         { status: 500 }
+//       );
+//     }
 
-    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+//     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
-    // 1. Generate order number
-    const orderNumber = `NOOI-${Math.floor(100000 + Math.random() * 900000)}`;
-    const calcSubtotal = items.reduce(
-      (sum: number, it: any) => sum + (Number(it.price || it.unit_price) * Number(it.quantity || 1)),
-      0
-    );
-    const finalTotal = Number(totalAmount) || calcSubtotal;
+//     // 1. Generate order number
+//     const orderNumber = `NOOI-${Math.floor(100000 + Math.random() * 900000)}`;
+//     const calcSubtotal = items.reduce(
+//       (sum: number, it: any) => sum + (Number(it.price || it.unit_price) * Number(it.quantity || 1)),
+//       0
+//     );
+//     const finalTotal = Number(totalAmount) || calcSubtotal;
 
-    // Get an auth user if possible or use null/first user
-    let assignedUserId = shopperId || null;
-    if (!assignedUserId) {
-      const { data: users } = await adminClient.auth.admin.listUsers({ perPage: 1 });
-      assignedUserId = users?.users?.[0]?.id || null;
-    }
+//     // Get an auth user if possible or use null/first user
+//     let assignedUserId = shopperId || null;
+//     if (!assignedUserId) {
+//       const { data: users } = await adminClient.auth.admin.listUsers({ perPage: 1 });
+//       assignedUserId = users?.users?.[0]?.id || null;
+//     }
 
-    // 2. Insert order
-    const { data: orderData, error: orderErr } = await adminClient
-      .from("orders")
-      .insert({
-        order_number: orderNumber,
-        user_id: assignedUserId,
-        status: "paid",
-        subtotal: calcSubtotal,
-        tax_amount: 0,
-        shipping_amount: 0,
-        total_amount: finalTotal,
-        currency: currency || "SAR",
-        shipping_address: shippingAddress || {
-          fullName: "Marketplace Shopper",
-          street: "King Fahd Road",
-          city: "Riyadh",
-          state: "Riyadh",
-          zipCode: "11564",
-          country: "SA",
-        },
-      })
-      .select()
-      .single();
+//     // 2. Insert order
+//     const { data: orderData, error: orderErr } = await adminClient
+//       .from("orders")
+//       .insert({
+//         order_number: orderNumber,
+//         user_id: assignedUserId,
+//         status: "paid",
+//         subtotal: calcSubtotal,
+//         tax_amount: 0,
+//         shipping_amount: 0,
+//         total_amount: finalTotal,
+//         currency: currency || "SAR",
+//         shipping_address: shippingAddress || {
+//           fullName: "Marketplace Shopper",
+//           street: "King Fahd Road",
+//           city: "Riyadh",
+//           state: "Riyadh",
+//           zipCode: "11564",
+//           country: "SA",
+//         },
+//       })
+//       .select()
+//       .single();
 
-    if (orderErr) {
-      console.error("[Vendor Orders POST] Order insert error:", orderErr.message);
-      return NextResponse.json(
-        { success: false, error: `Failed to insert order: ${orderErr.message}` },
-        { status: 500 }
-      );
-    }
+//     if (orderErr) {
+//       console.error("[Vendor Orders POST] Order insert error:", orderErr.message);
+//       return NextResponse.json(
+//         { success: false, error: `Failed to insert order: ${orderErr.message}` },
+//         { status: 500 }
+//       );
+//     }
 
-    // 3. For each item, look up or verify retailer_id and product/variant
-    const orderItemRows = [];
-    const retailerSet = new Set<string>();
+//     // 3. For each item, look up or verify retailer_id and product/variant
+//     const orderItemRows = [];
+//     const retailerSet = new Set<string>();
 
-    for (const it of items) {
-      let retailerId = it.retailerId || it.retailer_id || null;
-      let productId = it.productId || it.product_id || null;
+//     for (const it of items) {
+//       let retailerId = it.retailerId || it.retailer_id || null;
+//       let productId = it.productId || it.product_id || null;
 
-      // If only variantId is provided (cart-based order), look up product and retailer
-      if (it.variantId || it.variant_id) {
-        const vid = it.variantId || it.variant_id;
-        const { data: variantRow } = await adminClient
-          .from("product_variants")
-          .select("id, product_id, products(id, retailer_id)")
-          .eq("id", vid)
-          .maybeSingle();
+//       // If only variantId is provided (cart-based order), look up product and retailer
+//       if (it.variantId || it.variant_id) {
+//         const vid = it.variantId || it.variant_id;
+//         const { data: variantRow } = await adminClient
+//           .from("product_variants")
+//           .select("id, product_id, products(id, retailer_id)")
+//           .eq("id", vid)
+//           .maybeSingle();
 
-        if (variantRow) {
-          const productRow = Array.isArray(variantRow.products)
-            ? variantRow.products[0]
-            : variantRow.products;
-          if (!productId) productId = variantRow.product_id || productRow?.id || null;
-          if (!retailerId) retailerId = productRow?.retailer_id || null;
-        }
-      }
+//         if (variantRow) {
+//           const productRow = Array.isArray(variantRow.products)
+//             ? variantRow.products[0]
+//             : variantRow.products;
+//           if (!productId) productId = variantRow.product_id || productRow?.id || null;
+//           if (!retailerId) retailerId = productRow?.retailer_id || null;
+//         }
+//       }
 
-      // Fallback: look up retailer_id from product table
-      if (!retailerId && productId) {
-        const { data: pRow } = await adminClient
-          .from("products")
-          .select("retailer_id")
-          .eq("id", productId)
-          .maybeSingle();
-        retailerId = pRow?.retailer_id || null;
-      }
+//       // Fallback: look up retailer_id from product table
+//       if (!retailerId && productId) {
+//         const { data: pRow } = await adminClient
+//           .from("products")
+//           .select("retailer_id")
+//           .eq("id", productId)
+//           .maybeSingle();
+//         retailerId = pRow?.retailer_id || null;
+//       }
 
-      // Final fallback: use the first available retailer
-      if (!retailerId) {
-        const { data: firstRet } = await adminClient
-          .from("retailers")
-          .select("id")
-          .limit(1)
-          .maybeSingle();
-        retailerId = firstRet?.id || null;
-      }
+//       // Final fallback: use the first available retailer
+//       if (!retailerId) {
+//         const { data: firstRet } = await adminClient
+//           .from("retailers")
+//           .select("id")
+//           .limit(1)
+//           .maybeSingle();
+//         retailerId = firstRet?.id || null;
+//       }
 
-      if (retailerId) retailerSet.add(retailerId);
+//       if (retailerId) retailerSet.add(retailerId);
 
-      const unitPrice = Number(it.price || it.unit_price) || 0;
-      const quantity = parseInt(it.quantity, 10) || 1;
+//       const unitPrice = Number(it.price || it.unit_price) || 0;
+//       const quantity = parseInt(it.quantity, 10) || 1;
 
-      orderItemRows.push({
-        order_id: orderData.id,
-        retailer_id: retailerId,
-        product_id: productId,
-        variant_id: it.variantId || it.variant_id || null,
-        unit_price: unitPrice,
-        quantity,
-        total_price: unitPrice * quantity,
-        item_status: "paid",
-      });
-    }
+//       orderItemRows.push({
+//         order_id: orderData.id,
+//         retailer_id: retailerId,
+//         product_id: productId,
+//         variant_id: it.variantId || it.variant_id || null,
+//         unit_price: unitPrice,
+//         quantity,
+//         total_price: unitPrice * quantity,
+//         item_status: "paid",
+//       });
+//     }
 
-    if (orderItemRows.length > 0) {
-      const { error: itemsInsertErr } = await adminClient
-        .from("order_items")
-        .insert(orderItemRows);
+//     if (orderItemRows.length > 0) {
+//       const { error: itemsInsertErr } = await adminClient
+//         .from("order_items")
+//         .insert(orderItemRows);
 
-      if (itemsInsertErr) {
-        console.warn("[Vendor Orders POST] Order items insert warning:", itemsInsertErr.message);
-      }
-    }
+//       if (itemsInsertErr) {
+//         console.warn("[Vendor Orders POST] Order items insert warning:", itemsInsertErr.message);
+//       }
+//     }
 
-    // 4. Create shipment records for each retailer
-    for (const rId of Array.from(retailerSet)) {
-      await adminClient.from("order_shipments").insert({
-        order_id: orderData.id,
-        retailer_id: rId,
-        carrier_code: "ARAMEX",
-        tracking_number: `NOOI-${Math.floor(10000000 + Math.random() * 90000000)}`,
-        shipment_status: "label_created",
-      });
-    }
+//     // 4. Create shipment records for each retailer
+//     for (const rId of Array.from(retailerSet)) {
+//       await adminClient.from("order_shipments").insert({
+//         order_id: orderData.id,
+//         retailer_id: rId,
+//         carrier_code: "ARAMEX",
+//         tracking_number: `NOOI-${Math.floor(10000000 + Math.random() * 90000000)}`,
+//         shipment_status: "label_created",
+//       });
+//     }
 
-    return NextResponse.json({
-      success: true,
-      message: "Order placed successfully.",
-      order: {
-        id: orderData.id,
-        order_number: orderNumber,
-        total_amount: finalTotal,
-      },
-    });
-  } catch (err: any) {
-    console.error("[Vendor Orders POST Exception]:", err);
-    return NextResponse.json(
-      { success: false, error: err.message || "Failed to create order." },
-      { status: 500 }
-    );
-  }
-}
+//     return NextResponse.json({
+//       success: true,
+//       message: "Order placed successfully.",
+//       order: {
+//         id: orderData.id,
+//         order_number: orderNumber,
+//         total_amount: finalTotal,
+//       },
+//     });
+//   } catch (err: any) {
+//     console.error("[Vendor Orders POST Exception]:", err);
+//     return NextResponse.json(
+//       { success: false, error: err.message || "Failed to create order." },
+//       { status: 500 }
+//     );
+//   }
+// }
 
 function mapStatus(raw: string): string {
   const s = (raw || "").toLowerCase();

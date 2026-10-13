@@ -17,6 +17,12 @@
  *
  *   getCanvasMatches doesn't run through shapeForGrid on the server, so it is
  *   normalised here and callers see one shape everywhere.
+ *
+ * This file talks to /marketplace only. It briefly also merged results from
+ * /api/vendor/listings?public=true "to guarantee 100% immediate presence",
+ * which meant nobody could tell whether the real path worked for vendor
+ * products — a bypass hides the thing it bypasses. If a vendor product does not
+ * appear here, that is a bug to find in the backend query, not to route around.
  */
 
 import { createClient } from "@/utils/supabase/client";
@@ -226,35 +232,14 @@ export async function getProducts(q: ProductQuery = {}): Promise<ProductPage> {
     products = json.products ?? [];
     total = json.total ?? 0;
   } catch (err) {
-    console.warn("[Marketplace] Backend getProducts:", err);
+    // Deliberately rethrown. Swallowing this returns an empty marketplace,
+    // which is indistinguishable from "no products match your filters" — so a
+    // dead backend looks like an ordinary empty result and nobody investigates.
+    console.error("[Marketplace] getProducts failed:", err);
+    throw err;
   }
 
-  // Also query live vendor listings to guarantee 100% immediate presence
-  try {
-    if (typeof window !== "undefined") {
-      const vRes = await fetch("/api/vendor/listings?public=true");
-      if (vRes.ok) {
-        const vData = await vRes.json();
-        if (vData.success && Array.isArray(vData.products)) {
-          const existingIds = new Set(products.map(p => p.id));
-          for (const vp of vData.products) {
-            if (!existingIds.has(vp.id)) {
-              const shaped = normaliseRaw(vp);
-              products.unshift(shaped);
-              total += 1;
-            }
-          }
-        }
-      }
-    }
-  } catch {}
-
-  return {
-    products,
-    total: Math.max(total, products.length),
-    page,
-    limit,
-  };
+  return { products, total, page, limit };
 }
 
 /**
@@ -288,26 +273,14 @@ export async function getCanvasMatches(
 export async function getProductById(
   id: string,
 ): Promise<MarketplaceProduct | null> {
-  try {
-    const json = await get<{ success: boolean; product: any; is_mock?: boolean }>(
-      `/marketplace/products/${encodeURIComponent(id)}`,
-    );
-    if (json.product) return normaliseRaw(json.product);
-  } catch {}
-
-  // Fallback: check /api/vendor/listings for this product id
-  try {
-    if (typeof window !== "undefined") {
-      const vRes = await fetch("/api/vendor/listings?public=true");
-      if (vRes.ok) {
-        const vData = await vRes.json();
-        const found = (vData.products || []).find((p: any) => p.id === id);
-        if (found) return normaliseRaw(found);
-      }
-    }
-  } catch {}
-
-  return null;
+  const json = await get<{ success: boolean; product: any; is_mock?: boolean }>(
+    `/marketplace/products/${encodeURIComponent(id)}`,
+  );
+  // A 404 throws from get(); null here means the endpoint answered without a
+  // product, which the caller renders as "not found". A network failure must
+  // NOT look the same — a dead backend reading as a deleted product is how you
+  // spend an afternoon looking in the wrong place.
+  return json.product ? normaliseRaw(json.product) : null;
 }
 
 /**
