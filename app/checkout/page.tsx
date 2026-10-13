@@ -218,198 +218,6 @@ function CheckoutPaymentForm({
   );
 }
 
-function buildFallbackSummary(address: ShippingAddress, items: any[], sub: number): CheckoutSummary {
-  return {
-    currency: "SAR",
-    items: items.map((i) => ({
-      cart_item_id: i.id,
-      variant_id: i.variant_id,
-      product_id: i.product_id || i.productId || i.id,
-      retailer_id: i.retailer_id || "",
-      title: i.product_data?.title || "Furniture Piece",
-      unit_price: i.product_data?.price || 0,
-      quantity: i.quantity,
-      total_price: (i.product_data?.price || 0) * i.quantity,
-    })),
-    retailers: [
-      {
-        retailer_id: "vendor-1",
-        retailer_name: items[0]?.product_data?.retailer_name || "Vendor",
-        items: items.map((i) => ({
-          cart_item_id: i.id,
-          variant_id: i.variant_id,
-          product_id: i.product_id || i.productId || i.id,
-          retailer_id: i.retailer_id || "",
-          title: i.product_data?.title || "Furniture Piece",
-          unit_price: i.product_data?.price || 0,
-          quantity: i.quantity,
-          total_price: (i.product_data?.price || 0) * i.quantity,
-        })),
-        subtotal: sub,
-        shipping: {
-          shipping_amount: 0,
-          estimated_delivery: "14 Oct",
-          policy_applied: "Standard Shipping",
-        },
-        tax: { tax_amount: 0, provider: "Standard", note: "" },
-      },
-    ],
-    subtotal: sub,
-    discount_amount: 0,
-    shipping_total: 0,
-    tax_total: 0,
-    grand_total: sub,
-    grand_total_cents: Math.round(sub * 100),
-    shipping_address: address,
-    cart_snapshot_hash: "snap-" + Date.now(),
-    user_id: "",
-    promotion_id: null,
-    promotion_code: null,
-  };
-}
-
-function DirectOrderForm({
-  summary,
-  money,
-  t,
-  address,
-  items,
-  onSuccess,
-}: {
-  summary: CheckoutSummary | null;
-  money: (v: number) => string;
-  t: Copy;
-  address: ShippingAddress;
-  items: any[];
-  onSuccess: (orderNumber: string, orderId: string) => void;
-}) {
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [payError, setPayError] = useState<string | null>(null);
-  const [payMethod, setPayMethod] = useState<"card" | "cod">("card");
-
-  const totalVal = summary
-    ? summary.grand_total
-    : items.reduce((s, i) => s + (i.product_data?.price || 0) * i.quantity, 0);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setPayError(null);
-
-    try {
-      const res = await fetch("/api/vendor/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shippingAddress: address,
-          items: items.map((i) => {
-            // Cart items store data in product_variants and product_data
-            const variantData = (i as any).product_variants;
-            const productData = (i as any).product_data;
-            const price =
-              variantData?.price ??
-              productData?.price ??
-              0;
-            const title =
-              variantData?.products?.title ??
-              productData?.title ??
-              "Furniture Piece";
-            return {
-              variantId: i.variant_id,
-              title,
-              price,
-              quantity: i.quantity,
-              color: variantData?.color ?? productData?.color,
-              material: variantData?.material,
-              image: variantData?.images?.[0] ?? productData?.image,
-            };
-          }),
-          totalAmount: totalVal,
-          currency: "SAR",
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success && data.order) {
-        onSuccess(data.order.order_number, data.order.id);
-      } else {
-        setPayError(data.error || "Failed to place order. Please try again.");
-      }
-    } catch (err: any) {
-      setPayError(err.message || "Network error. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="rounded-2xl border border-[#E6EBEA] bg-white p-6">
-        <div className="mb-4 flex items-center justify-between border-b border-[#F1F4F4] pb-3">
-          <div className="flex items-center gap-2">
-            <CreditCard className="h-4 w-4 text-[#004643]" />
-            <h3 className="text-[14px] font-medium text-[#101212]">{t.paymentMethod}</h3>
-          </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-[#8E9493]">
-            <Lock className="h-3 w-3 text-[#28603A]" />
-            <span>{t.encrypted}</span>
-          </div>
-        </div>
-
-        <div className="space-y-3 mb-5">
-          <label className={`flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition ${payMethod === "card" ? "border-[#004643] bg-[#F3FEFD]" : "border-[#D5DBDA] bg-white"}`}>
-            <div className="flex items-center gap-3">
-              <input type="radio" name="payMethod" checked={payMethod === "card"} onChange={() => setPayMethod("card")} className="accent-[#004643]" />
-              <div>
-                <div className="text-[13px] font-medium text-[#101212]">Credit / Debit Card (Mada / Visa / Mastercard)</div>
-                <div className="text-[11px] text-[#646968]">Instant payment confirmation</div>
-              </div>
-            </div>
-            <span className="text-[11px] font-semibold text-[#004643] bg-[#E7FBEB] px-2 py-0.5 rounded-full">Recommended</span>
-          </label>
-
-          <label className={`flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition ${payMethod === "cod" ? "border-[#004643] bg-[#F3FEFD]" : "border-[#D5DBDA] bg-white"}`}>
-            <div className="flex items-center gap-3">
-              <input type="radio" name="payMethod" checked={payMethod === "cod"} onChange={() => setPayMethod("cod")} className="accent-[#004643]" />
-              <div>
-                <div className="text-[13px] font-medium text-[#101212]">Cash on Delivery / Direct Bank Transfer</div>
-                <div className="text-[11px] text-[#646968]">Pay when goods are delivered to your address</div>
-              </div>
-            </div>
-          </label>
-        </div>
-
-        {payError && (
-          <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-[#812F28]/25 bg-[#FFFAF9] p-3.5 text-[12.5px] text-[#812F28]">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{payError}</span>
-          </div>
-        )}
-      </div>
-
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="flex w-full items-center justify-center gap-2 rounded-full bg-[#004643] py-3.5 text-[14px] font-medium text-white transition-colors hover:bg-[#003836] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {isSubmitting ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>{t.authorizing}</span>
-          </>
-        ) : (
-          <>
-            <Lock className="h-3.5 w-3.5" />
-            <span>{t.pay(money(totalVal))}</span>
-          </>
-        )}
-      </button>
-
-      <p className="text-center text-[11px] text-[#8E9493]">{t.terms}</p>
-    </form>
-  );
-}
-
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 function CheckoutInner() {
@@ -469,18 +277,23 @@ function CheckoutInner() {
     setIsLoadingIntent(true);
 
     try {
+      // The code only. The server derives the amount.
       const response = await createPaymentIntent(address, promoCode);
 
-      if (response.success && response.data?.client_secret) {
-        setClientSecret(response.data.client_secret);
-        setCheckoutSummary(response.data.summary);
-      } else {
-        setCheckoutSummary(buildFallbackSummary(address, items, subtotal()));
+      if (!response.success) {
+        setGeneralError(
+          typeof response.error === "string" ? response.error : t.initFailed,
+        );
+        setIsLoadingIntent(false);
+        return;
       }
+
+      const { client_secret, summary } = response.data;
+      setClientSecret(client_secret);
+      setCheckoutSummary(summary);
       setStep("payment");
-    } catch {
-      setCheckoutSummary(buildFallbackSummary(address, items, subtotal()));
-      setStep("payment");
+    } catch (err: any) {
+      setGeneralError(err.message || t.networkError);
     } finally {
       setIsLoadingIntent(false);
     }
@@ -646,7 +459,7 @@ function CheckoutInner() {
                 </button>
               </form>
             ) : (
-              clientSecret && checkoutSummary ? (
+              clientSecret && checkoutSummary && (
                 <Elements
                   stripe={stripePromise}
                   options={{
@@ -659,20 +472,6 @@ function CheckoutInner() {
                 >
                   <CheckoutPaymentForm summary={checkoutSummary} money={money} t={t} />
                 </Elements>
-              ) : (
-                <DirectOrderForm
-                  summary={checkoutSummary}
-                  money={money}
-                  t={t}
-                  address={address}
-                  items={items}
-                  onSuccess={(orderNum, ordId) => {
-                    useCartStore.getState().clearCart();
-                    router.push(
-                      `/checkout/success?order_number=${encodeURIComponent(orderNum)}&order_id=${encodeURIComponent(ordId)}`
-                    );
-                  }}
-                />
               )
             )}
           </div>
