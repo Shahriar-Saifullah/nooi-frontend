@@ -1354,6 +1354,17 @@ function ExportBridge({
 
         scene.overrideMaterial = depthMat;
         scene.background = new THREE.Color(0x000000); // empty space = far
+
+        // Draw to the CANVAS, not to whatever offscreen target was last bound.
+        //
+        // EffectComposer (the AO pass) leaves its own render target bound after
+        // every frame. Without this, gl.render() wrote the depth pass into that
+        // target and toDataURL() read back the stale canvas — which is how the
+        // depth map came out flat and the render silently fell back to the
+        // colour pipeline, losing the geometry conditioning that keeps the
+        // user's actual furniture in the picture.
+        const prevTarget = gl.getRenderTarget();
+        gl.setRenderTarget(null);
         gl.render(scene, cam);
         const raw = gl.domElement.toDataURL("image/png");
 
@@ -1361,14 +1372,28 @@ function ExportBridge({
         scene.background = prevBg;
         depthMat.dispose();
         gl.render(scene, cam); // restore the visible frame immediately
+        gl.setRenderTarget(prevTarget);
 
         return raw;
       },
       capture: () => {
         // force a fresh frame so the buffer is valid without needing
         // preserveDrawingBuffer (which costs perf if always on)
+        //
+        // Same render-target reset as captureDepth above: with the AO pass
+        // mounted, the composer's target is still bound here.
+        //
+        // Note this draws the scene WITHOUT post-processing, so the captured
+        // image has no ambient occlusion. That is right for the AI render,
+        // which relights anyway — but it does mean "Export as image" differs
+        // from what is on screen. Rendering through the composer instead needs
+        // a ref to it, which is the next step if anyone notices.
+        const prevTarget = gl.getRenderTarget();
+        gl.setRenderTarget(null);
         gl.render(scene, camera);
-        return gl.domElement.toDataURL("image/png");
+        const url = gl.domElement.toDataURL("image/png");
+        gl.setRenderTarget(prevTarget);
+        return url;
       },
       exportGlb: () =>
         new Promise<Blob>((resolve, reject) => {
@@ -1737,7 +1762,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   walkthroughActive = false,
   walkthroughPaused = false,
   onWalkthroughProgress,
-  aoEnabled = false,
+  aoEnabled = true,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100),
