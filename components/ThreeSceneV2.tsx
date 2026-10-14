@@ -6,7 +6,9 @@ import React, {
   forwardRef, useImperativeHandle,
 } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, ContactShadows, useGLTF } from "@react-three/drei";
+import {
+  OrbitControls, ContactShadows, useGLTF, Environment, Lightformer,
+} from "@react-three/drei";
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
 import {
@@ -20,6 +22,8 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
+import { EffectComposer } from "@react-three/postprocessing";
+import { N8AO } from "@react-three/postprocessing";
 
 // ─── Canvas Bridge Helper ──────────────────────────────────────────────────────
 // Textures decode asynchronously; nudge a redraw when one lands so a newly
@@ -131,6 +135,8 @@ interface ThreeSceneV2Props {
   walkthroughActive?: boolean;
   walkthroughPaused?: boolean;
   onWalkthroughProgress?: (progress: number, info?: WalkthroughProgressInfo) => void;
+  /** Ambient occlusion. On by default; pass false on weak hardware. */
+  aoEnabled?: boolean;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -1672,6 +1678,41 @@ function SceneContent({
   );
 }
 
+// ─── Ambient occlusion ───────────────────────────────────────────────────────
+// The contact darkening where a wall meets a floor, or a sofa meets the
+// ground. Shadow maps cannot produce it — they only handle light from the
+// directional light's direction — so without AO every object looks like it is
+// hovering slightly, which is most of what makes a three.js interior read as a
+// diagram rather than a room.
+//
+// Progressive: it accumulates over several frames while the camera is still
+// and resets when it moves, so it costs little during interaction and looks
+// its best exactly when the user has stopped to look at something.
+//
+// N8AO rather than the built-in SSAO: it handles large scenes without the
+// halo artefacts SSAO produces at this scale, and it is noticeably cheaper.
+function Postprocessing({ world, enabled }: { world: World; enabled: boolean }) {
+  if (!enabled) return null;
+  return (
+    <EffectComposer enableNormalPass multisampling={0}>
+      <N8AO
+        // In world units. Too small and only the seams darken; too large and
+        // whole rooms go muddy. Roughly a metre reads correctly for interiors
+        // regardless of how big the plan is, which is why this is NOT scaled
+        // by world.maxDim.
+        aoRadius={1.0}
+        distanceFalloff={0.8}
+        intensity={2.2}
+        // Half resolution. AO is a low-frequency effect — the difference is
+        // invisible and it costs half as much.
+        halfRes
+        screenSpaceRadius={false}
+        color="#1a1a1a"
+      />
+    </EffectComposer>
+  );
+}
+
 // ─── Root component ──────────────────────────────────────────────────────────
 
 const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function ThreeSceneV2({
@@ -1696,6 +1737,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   walkthroughActive = false,
   walkthroughPaused = false,
   onWalkthroughProgress,
+  aoEnabled = true,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100),
@@ -1727,26 +1769,86 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
 
   return (
     <Canvas
-      shadows
+      // "soft" selects PCFSoftShadowMap. The default (plain `shadows`) is
+      // PCFShadowMap, whose hard edges are the main reason a three.js interior
+      // reads as a diagram rather than a room.
+      shadows="soft"
       camera={{
         position: [world.totalW * 0.55, world.maxDim * 0.85, world.totalD * 0.95],
         fov: 40,
+      }}
+      gl={{
+        // ACES is R3F's default, but the exposure is not: interiors lit mostly
+        // by bounced light sit too dark at 1.0.
+        toneMapping: THREE.ACESFilmicToneMapping,
+        toneMappingExposure: 1.15,
+        antialias: true,
       }}
       onPointerMissed={() => { onFurnitureSelect?.(null); onWallSelect?.(null); onDoorSelect?.(null); }}
       style={{ width: "100%", height: "100%" }}
     >
       <color attach="background" args={["#12161a"]} />
-      <ambientLight intensity={0.55} />
+
+      {/*
+        Image-based lighting.
+
+        meshStandardMaterial is a PBR material: it expects an environment to
+        reflect. Without one every surface is lit only by the direct lights, so
+        wood has no sheen, glass has nothing to mirror, and metal reads as flat
+        grey — which is most of why this scene looked like a diagram.
+
+        Built from Lightformers rather than `preset="apartment"` because a
+        preset fetches an HDR from a third-party CDN at runtime. These are
+        geometry in the scene, so they work offline and cost nothing to load.
+      */}
+      <Environment resolution={256} frames={1}>
+        {/* broad sky fill from above */}
+        <Lightformer form="rect" intensity={1.6} color="#fdfbf7"
+          position={[0, world.maxDim, 0]} rotation={[-Math.PI / 2, 0, 0]}
+          scale={[world.totalW * 2, world.totalD * 2, 1]} />
+        {/* warm key from the sun side, matching the directional light below */}
+        <Lightformer form="rect" intensity={2.2} color="#fff0d8"
+          position={[world.totalW, world.maxDim * 0.7, world.totalD * 0.4]}
+          rotation={[0, -Math.PI / 2, 0]}
+          scale={[world.totalD, world.maxDim, 1]} />
+        {/* cool bounce from the opposite side so shadowed faces aren't dead */}
+        <Lightformer form="rect" intensity={0.9} color="#dce8f0"
+          position={[-world.totalW, world.maxDim * 0.5, -world.totalD * 0.4]}
+          rotation={[0, Math.PI / 2, 0]}
+          scale={[world.totalD, world.maxDim, 1]} />
+      </Environment>
+
+      {/* Dropped from 0.55 — ambient is flat by definition, and with IBL
+          supplying the fill it was washing out every shadow in the scene. */}
+      <ambientLight intensity={0.22} />
+
       <directionalLight
         position={[world.totalW * 0.8, world.maxDim * 1.4, world.totalD * 0.5]}
-        intensity={1.15}
+        intensity={1.9}
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize={[2048, 2048]}
+        /*
+          THE BUG: without these, three.js uses a ±5 unit shadow camera. This
+          plan is tens of metres across, so shadows rendered only in a 10m
+          square at the centre and the rest of the building had none at all —
+          which is why the scene read flat no matter what else was tuned.
+
+          Sized to the world, so it scales with the plan.
+        */
+        shadow-camera-left={-world.maxDim}
+        shadow-camera-right={world.maxDim}
+        shadow-camera-top={world.maxDim}
+        shadow-camera-bottom={-world.maxDim}
+        shadow-camera-near={0.5}
+        shadow-camera-far={world.maxDim * 5}
+        /* normalBias beats bias for thin geometry: walls here are ~12cm and a
+           plain depth bias makes them self-shadow in stripes. */
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.025}
       />
       <directionalLight
         position={[-world.totalW, world.maxDim, -world.totalD]}
-        intensity={0.3}
+        intensity={0.35}
       />
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }}
                        rooms={rooms} world={world} />
@@ -1794,6 +1896,18 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           onWallSelect={onWallSelect}
         />
       </Suspense>
+      {/*
+        Mounted last so the composer's pass runs after everything is drawn.
+
+        NOTE: captureImage() and captureDepthMap() call gl.render() directly,
+        which draws to the canvas WITHOUT the composer. That is deliberate for
+        depth — the AI needs raw geometry, not an occluded version — but it
+        does mean the PNG export and the AI render source are the un-occluded
+        frame. Fine for the AI path, which relights anyway. If the PNG export
+        should match what the user sees, that is the thing to fix next.
+      */}
+      <Postprocessing world={world} enabled={aoEnabled} />
+
       <OrbitControls ref={controlsRef} makeDefault
         enableDamping
         dampingFactor={0.08}
