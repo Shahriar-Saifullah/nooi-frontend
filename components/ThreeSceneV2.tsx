@@ -1737,7 +1737,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   walkthroughActive = false,
   walkthroughPaused = false,
   onWalkthroughProgress,
-  aoEnabled = true,
+  aoEnabled = false,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100),
