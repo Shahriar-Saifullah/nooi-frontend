@@ -37,7 +37,14 @@ export interface OrderItem {
     color: string | null;
     material?: string | null;
     images: string[];
-    products?: { id: string; title: string; canvas_model_id?: string | null };
+    products?: {
+      id: string;
+      title: string;
+      canvas_model_id?: string | null;
+      /** False for made-to-order and custom pieces. Absent when the endpoint
+       *  does not select it — treat as returnable and let the server decide. */
+      is_returnable?: boolean;
+    };
   } | null;
 }
 
@@ -55,9 +62,22 @@ export interface OrderShipment {
   order_id: string;
   retailer_id: string;
   carrier_code: string | null;
+  /** NULL until the vendor dispatches. Its presence is what makes a shipment
+   *  genuinely in transit — nothing fabricates one at checkout any more. */
   tracking_number: string | null;
+  /** Built server-side at dispatch from the chosen carrier. Never assembled in
+   *  the client, so a carrier we cannot link to has no button rather than a
+   *  guessed URL that 404s. */
+  tracking_url: string | null;
+  service_code: string | null;
   shipment_status: string;
   estimated_delivery: string | null;
+  dispatched_at: string | null;
+  delivered_at: string | null;
+  /** A failed delivery attempt, customs hold or bad address. Separate from
+   *  shipment_status because a held parcel still has a last known position. */
+  exception_code: string | null;
+  exception_note: string | null;
   proof_of_delivery_url: string | null;
   retailers?: {
     id: string;

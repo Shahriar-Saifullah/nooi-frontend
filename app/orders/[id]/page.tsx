@@ -26,7 +26,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useState } from "reac
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft, Package, Truck, Check, Copy, CheckCheck, Info, Loader2,
-  AlertCircle, X, MapPin,
+  AlertCircle, X, MapPin, ExternalLink,
 } from "lucide-react";
 
 import ShopHeader from "@/components/marketplace/ShopHeader";
@@ -52,6 +52,8 @@ const COPY = {
     trackingNumber: "Tracking number",
     copy: "Copy",
     copied: "Copied",
+    trackWith: (carrier: string) => `Track with ${carrier}`,
+    trackOnCarrier: "Track on the carrier's site",
     reportIssue: "Return or report an issue",
     returnRequested: "Return requested",
     returnTitle: "Return or report an issue",
@@ -72,6 +74,8 @@ const COPY = {
     returnSent: "Return requested. The vendor will be in touch within two working days.",
     returnFailed: "We couldn't send that request. Please try again.",
     notDelivered: "Available once this shipment arrives",
+    notReturnable: "Made for your order — not returnable",
+    windowClosed: (days: number) => `Returns closed after ${days} days`,
     loadFailed: "We couldn't load this order.",
     notFound: "Order not found",
     notFoundBody: "This order may belong to another account.",
@@ -97,6 +101,8 @@ const COPY = {
     trackingNumber: "رقم التتبع",
     copy: "نسخ",
     copied: "تم النسخ",
+    trackWith: (carrier: string) => `تتبع عبر ${carrier}`,
+    trackOnCarrier: "تتبع على موقع شركة الشحن",
     reportIssue: "إرجاع أو الإبلاغ عن مشكلة",
     returnRequested: "تم طلب الإرجاع",
     returnTitle: "إرجاع أو الإبلاغ عن مشكلة",
@@ -117,6 +123,8 @@ const COPY = {
     returnSent: "تم طلب الإرجاع. سيتواصل المورد خلال يومي عمل.",
     returnFailed: "تعذّر إرسال الطلب. حاول مرة أخرى.",
     notDelivered: "متاح بعد وصول هذه الشحنة",
+    notReturnable: "مصنوع خصيصًا لطلبك — غير قابل للإرجاع",
+    windowClosed: (days: number) => `انتهت فترة الإرجاع بعد ${days} يومًا`,
     loadFailed: "تعذّر تحميل هذا الطلب.",
     notFound: "الطلب غير موجود",
     notFoundBody: "قد يكون هذا الطلب تابعًا لحساب آخر.",
@@ -131,6 +139,24 @@ const COPY = {
 };
 
 type Copy = typeof COPY["en"] | typeof COPY["ar"];
+
+/**
+ * Display names for the carrier codes the vendor dispatch form writes. A code
+ * the shopper has never heard of is worse than no label, so anything unmapped
+ * falls back to generic wording.
+ */
+/** Mirrors RETURN_WINDOW_DAYS in the backend. The server is the authority —
+ *  this only decides whether to show the link. */
+const RETURN_WINDOW_DAYS = 30;
+
+const CARRIER_NAME: Record<string, string> = {
+  ARAMEX: "Aramex",
+  DHL: "DHL",
+  FEDEX: "FedEx",
+  UPS: "UPS",
+  SMSA: "SMSA",
+  NAQEL: "Naqel",
+};
 
 const STAGE_STYLE: Record<ShipmentStage, string> = {
   label_pending: "bg-[#F1F4F4] text-[#646968]",
@@ -541,6 +567,14 @@ function ShipmentSection({
             const requested = requestedItemIds.has(item.id);
             const title = item.product_variants?.products?.title ?? "Item";
             const image = item.product_variants?.images?.[0];
+            // Undefined means the backend didn't send it — treat as returnable
+            // and let the server refuse, rather than hiding a link a customer
+            // is entitled to.
+            const returnable = item.product_variants?.products?.is_returnable;
+            const windowClosed =
+              shipment.delivered_at != null &&
+              Math.floor((Date.now() - new Date(shipment.delivered_at).getTime()) / 86_400_000)
+                > RETURN_WINDOW_DAYS;
 
             return (
               <div key={item.id} className="flex gap-3">
@@ -567,17 +601,28 @@ function ShipmentSection({
                       <span className="h-1 w-1 rounded-full bg-[#812F28]" />
                       {t.returnRequested}
                     </span>
-                  ) : delivered ? (
+                  ) : !delivered ? (
+                    <span className="mt-1.5 block text-[10.5px] text-[#B3B9B9]">
+                      {t.notDelivered}
+                    </span>
+                  ) : returnable === false ? (
+                    /* Made to order or custom size. Said plainly rather than
+                       hidden — a shopper who cannot find the return link
+                       assumes the page is broken and emails support. */
+                    <span className="mt-1.5 block text-[10.5px] text-[#8E9493]">
+                      {t.notReturnable}
+                    </span>
+                  ) : windowClosed ? (
+                    <span className="mt-1.5 block text-[10.5px] text-[#8E9493]">
+                      {t.windowClosed(RETURN_WINDOW_DAYS)}
+                    </span>
+                  ) : (
                     <button
                       onClick={() => onReturn(item)}
                       className="mt-1.5 text-[11px] text-[#004643] underline-offset-2 hover:underline"
                     >
                       {t.reportIssue}
                     </button>
-                  ) : (
-                    <span className="mt-1.5 block text-[10.5px] text-[#B3B9B9]">
-                      {t.notDelivered}
-                    </span>
                   )}
                 </div>
               </div>
@@ -592,16 +637,38 @@ function ShipmentSection({
                   {shipment.tracking_number}
                 </span>
               </span>
-              <button
-                onClick={() => onCopy(shipment.id, shipment.tracking_number!)}
-                className="flex shrink-0 items-center gap-1 rounded-full border border-[#D5DBDA] bg-white px-2.5 py-1 text-[11px] text-[#004643] hover:bg-[#F1F4F4]"
-              >
-                {copiedId === shipment.id ? (
-                  <><CheckCheck className="h-3 w-3" />{t.copied}</>
-                ) : (
-                  <><Copy className="h-3 w-3" />{t.copy}</>
+              <span className="flex shrink-0 items-center gap-1.5">
+                <button
+                  onClick={() => onCopy(shipment.id, shipment.tracking_number!)}
+                  className="flex items-center gap-1 rounded-full border border-[#D5DBDA] bg-white px-2.5 py-1 text-[11px] text-[#004643] hover:bg-[#F1F4F4]"
+                >
+                  {copiedId === shipment.id ? (
+                    <><CheckCheck className="h-3 w-3" />{t.copied}</>
+                  ) : (
+                    <><Copy className="h-3 w-3" />{t.copy}</>
+                  )}
+                </button>
+
+                {/*
+                  Straight to the carrier's own tracking page. The URL is built
+                  server-side at dispatch from the carrier the vendor chose —
+                  never assembled here, so a carrier Nooi cannot link to simply
+                  has no button rather than a guessed URL that 404s.
+                */}
+                {shipment.tracking_url && (
+                  <a
+                    href={shipment.tracking_url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="flex items-center gap-1 rounded-full bg-[#004643] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#003836]"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    {shipment.carrier_code && CARRIER_NAME[shipment.carrier_code]
+                      ? t.trackWith(CARRIER_NAME[shipment.carrier_code])
+                      : t.trackOnCarrier}
+                  </a>
                 )}
-              </button>
+              </span>
             </div>
           )}
         </div>
