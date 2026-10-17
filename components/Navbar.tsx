@@ -7,6 +7,18 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useHomeTranslations, useLanguage } from "@/lib/i18n/useTranslations";
 import { getCurrentUser, type AuthUser } from "@/lib/api/auth";
 
+function getDashboardHref(user: AuthUser | null): string {
+    if (!user) return "/dashboard";
+    const role = user.role?.toLowerCase();
+    if (role === "admin" || role === "super_admin") {
+        return "/admin";
+    }
+    if (role === "vendor") {
+        return "/sell/dashboard";
+    }
+    return "/dashboard";
+}
+
 export default function Navbar() {
     /* Auth state. The navbar is shared by marketing and signed-in pages, so it
        has to reflect who is looking at it — showing "Log in" to someone who is
@@ -30,6 +42,7 @@ export default function Navbar() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const t = useHomeTranslations();
     const { language, toggleLanguage } = useLanguage();
+    const dashboardHref = getDashboardHref(user);
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -170,7 +183,7 @@ export default function Navbar() {
                     </button>
                     {checked && user ? (
                         <Link
-                            href="/dashboard"
+                            href={dashboardHref}
                             className="flex items-center gap-2 h-[40px] md:h-[46px] ps-[4px] pe-[14px] bg-white border border-[#e6e6e8] rounded-[10px] md:rounded-[12px] shrink-0 hover:bg-neutral-50 transition-colors"
                             title={user.full_name || user.email}
                         >
@@ -240,13 +253,27 @@ export default function Navbar() {
                             {language === "en" ? "العربية" : "English"}
                         </button>
                         <div className="h-px w-full bg-black/5 my-2" />
-                        <Link
-                            href="/authpage/signup"
-                            className="w-full py-3 flex items-center justify-center bg-[#004643] rounded-[10px] text-white text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm"
-                            onClick={() => setIsMenuOpen(false)}
-                        >
-                            {t.nav.startFree}
-                        </Link>
+                        {checked && user ? (
+                            <Link
+                                href={dashboardHref}
+                                className="w-full py-3 flex items-center justify-center bg-[#004643] rounded-[10px] text-white text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm"
+                                onClick={() => setIsMenuOpen(false)}
+                            >
+                                {user.role === "admin" || user.role === "super_admin"
+                                    ? "Admin Dashboard"
+                                    : user.role === "vendor"
+                                    ? "Vendor Dashboard"
+                                    : "Dashboard"}
+                            </Link>
+                        ) : (
+                            <Link
+                                href="/authpage/signup"
+                                className="w-full py-3 flex items-center justify-center bg-[#004643] rounded-[10px] text-white text-[16px] font-schibsted font-medium hover:bg-[#003330] transition-colors shadow-sm"
+                                onClick={() => setIsMenuOpen(false)}
+                            >
+                                {t.nav.startFree}
+                            </Link>
+                        )}
                     </motion.div>
                 )}
             </AnimatePresence>

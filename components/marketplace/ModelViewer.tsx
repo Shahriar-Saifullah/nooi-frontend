@@ -40,16 +40,21 @@ function Model({ modelPath, size }: { modelPath: string; size?: Props["size"] })
   // and a sectional both frame sensibly.
   const cloned = React.useMemo(() => {
     const copy = scene.clone(true);
-    if (!size) return copy;
 
     const box = new THREE.Box3().setFromObject(copy);
     const dims = new THREE.Vector3();
     box.getSize(dims);
-
-    const target = Math.max(size.w, size.d, size.h) / 100; // cm → m
     const current = Math.max(dims.x, dims.y, dims.z);
-    if (current > 0) {
-      const k = target / current;
+
+    if (size) {
+      const target = Math.max(size.w, size.d, size.h) / 100; // cm → m
+      if (current > 0) {
+        const k = target / current;
+        copy.scale.setScalar(k);
+      }
+    } else if (current > 0 && (current > 3 || current < 0.3)) {
+      // Normalise unscaled custom GLBs to ~1m so camera frames them nicely
+      const k = 1.0 / current;
       copy.scale.setScalar(k);
     }
 

@@ -6,7 +6,9 @@ export async function POST(req: Request) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    const documentType = (formData.get("documentType") as string | null) || "trade_licence";
+    const uploadType = (formData.get("type") as string | null) || "";
+    const assetType = (formData.get("assetType") as string | null) || "";
+    const documentType = formData.get("documentType") as string | null;
     const workEmail = (formData.get("workEmail") as string | null) || undefined;
 
     if (!file) {
@@ -26,8 +28,74 @@ export async function POST(req: Request) {
       );
     }
 
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
     const { userId } = await resolveVendorUser(req, { workEmail });
 
+    const fileName = file.name || "upload";
+    const extension = fileName.split(".").pop()?.toLowerCase() || "";
+    const isGlb = extension === "glb" || file.type.includes("gltf") || assetType === "product_model";
+    const isImage = file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "avif", "gif"].includes(extension);
+    const isAsset =
+      uploadType === "asset" ||
+      uploadType === "product_asset" ||
+      assetType === "product_image" ||
+      assetType === "product_model" ||
+      (!documentType && (isGlb || isImage));
+
+    // ArrayBuffer for Supabase upload
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 1. PRODUCT ASSETS (Images & 3D GLB Models) -> public vendor-assets bucket
+    // ──────────────────────────────────────────────────────────────────────────
+    if (isAsset) {
+      const bucket = "vendor-assets";
+      const sanitizedName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const subFolder = isGlb ? "models" : "images";
+      const userPrefix = userId || "public";
+      const storagePath = `products/${userPrefix}/${subFolder}/${Date.now()}-${sanitizedName}`;
+
+      const contentType =
+        file.type || (isGlb ? "model/gltf-binary" : "application/octet-stream");
+
+      const { error: uploadError } = await adminClient.storage
+        .from(bucket)
+        .upload(storagePath, buffer, {
+          contentType,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error("[Vendor Upload API] Asset upload error:", uploadError.message);
+        return NextResponse.json(
+          { success: false, error: `Asset upload failed: ${uploadError.message}` },
+          { status: 500 }
+        );
+      }
+
+      const { data: publicUrlData } = adminClient.storage
+        .from(bucket)
+        .getPublicUrl(storagePath);
+
+      const publicUrl = publicUrlData.publicUrl;
+
+      return NextResponse.json({
+        success: true,
+        url: publicUrl,
+        data: {
+          url: publicUrl,
+          path: storagePath,
+          name: fileName,
+          size: file.size,
+          type: isGlb ? "model" : "image",
+        },
+      });
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 2. VENDOR ONBOARDING DOCUMENTS -> private vendor-documents bucket
+    // ──────────────────────────────────────────────────────────────────────────
     if (!userId) {
       return NextResponse.json(
         { success: false, error: "Not authenticated. Please sign in." },
@@ -35,46 +103,39 @@ export async function POST(req: Request) {
       );
     }
 
-    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
-
-    // Map UI doc types to backend kinds and labels
+    const docType = documentType || "trade_licence";
     let kind = "trade_licence";
     let defaultLabel = "Trade licence";
 
     if (
-      documentType === "vatRegistrationCertificate" ||
-      documentType === "vat_certificate" ||
-      documentType === "vatCertificate"
+      docType === "vatRegistrationCertificate" ||
+      docType === "vat_certificate" ||
+      docType === "vatCertificate"
     ) {
       kind = "vat_certificate";
       defaultLabel = "VAT certificate";
     } else if (
-      documentType === "authorisedSignatoryId" ||
-      documentType === "bank_letter" ||
-      documentType === "bankLetter"
+      docType === "authorisedSignatoryId" ||
+      docType === "bank_letter" ||
+      docType === "bankLetter"
     ) {
       kind = "bank_letter";
       defaultLabel = "Bank letter";
     } else if (
-      documentType === "commercialRegistrationCertificate" ||
-      documentType === "trade_licence" ||
-      documentType === "tradeLicence"
+      docType === "commercialRegistrationCertificate" ||
+      docType === "trade_licence" ||
+      docType === "tradeLicence"
     ) {
       kind = "trade_licence";
       defaultLabel = "Trade licence";
     } else {
-      kind = documentType;
-      defaultLabel = documentType;
+      kind = docType;
+      defaultLabel = docType;
     }
 
-    const extension = file.name.split(".").pop() || "pdf";
-    const storagePath = `vendor-documents/${userId}/${kind}.${extension}`;
+    const docExt = extension || "pdf";
+    const storagePath = `vendor-documents/${userId}/${kind}.${docExt}`;
 
-    // ArrayBuffer for Supabase upload
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    // Upload to vendor-documents bucket
     const { error: uploadError } = await adminClient.storage
       .from("vendor-documents")
       .upload(storagePath, buffer, {
@@ -83,7 +144,7 @@ export async function POST(req: Request) {
       });
 
     if (uploadError) {
-      console.error("[Vendor Upload API] Supabase storage upload error:", uploadError.message);
+      console.error("[Vendor Upload API] Document upload error:", uploadError.message);
       return NextResponse.json(
         { success: false, error: `Upload failed: ${uploadError.message}` },
         { status: 500 }
@@ -98,7 +159,7 @@ export async function POST(req: Request) {
         label: defaultLabel,
         path: storagePath,
         uploaded_at: new Date().toISOString(),
-        name: file.name,
+        name: fileName,
         size: file.size,
       },
     });

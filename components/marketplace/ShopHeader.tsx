@@ -23,11 +23,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ShoppingCart, X } from "lucide-react";
+import { Search, ShoppingCart, X, LayoutDashboard, LogOut, ChevronDown } from "lucide-react";
 
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
-import { getCurrentUser, type AuthUser } from "@/lib/api/auth";
+import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 
 const COPY = {
   en: {
@@ -37,6 +37,8 @@ const COPY = {
     clear: "Clear search",
     cart: "Cart",
     signIn: "Sign in",
+    dashboard: "Dashboard",
+    logout: "Log out",
   },
   ar: {
     marketplace: "المتجر",
@@ -45,8 +47,16 @@ const COPY = {
     clear: "مسح البحث",
     cart: "السلة",
     signIn: "تسجيل الدخول",
+    dashboard: "لوحة التحكم",
+    logout: "تسجيل الخروج",
   },
 } as const;
+
+function getDashboardHref(role: AuthUser["role"]): string {
+  if (role === "vendor") return "/sell/dashboard";
+  if (role === "admin" || role === "super_admin") return "/admin/dashboard";
+  return "/dashboard";
+}
 
 export default function ShopHeader() {
   const router = useRouter();
@@ -63,6 +73,8 @@ export default function ShopHeader() {
   const [mounted, setMounted] = useState(false);
 
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [q, setQ] = useState(params.get("q") ?? "");
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -74,6 +86,30 @@ export default function ShopHeader() {
       .catch(() => { if (!cancelled) setUser(null); });
     return () => { cancelled = true; };
   }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDropdownOpen(false); };
+    document.addEventListener("mousedown", handle);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handle);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [dropdownOpen]);
+
+  const handleLogout = async () => {
+    setDropdownOpen(false);
+    try { await logout(); } catch {}
+    setUser(null);
+    router.push("/");
+  };
 
   // Keep the field in step when the URL changes from elsewhere — a cleared
   // filter, a back button.
@@ -203,18 +239,115 @@ export default function ShopHeader() {
           </Link>
 
           {user ? (
-            <Link
-              href="/dashboard"
-              title={user.full_name || user.email}
-              className="shrink-0 w-[36px] h-[36px] md:w-[40px] md:h-[40px] rounded-full bg-[#004643] text-white flex items-center justify-center text-[13px] font-medium overflow-hidden"
-            >
-              {user.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
-              ) : (
-                (user.full_name || user.email || "?").trim().charAt(0).toUpperCase()
+            <div ref={dropdownRef} style={{ position: "relative" }}>
+              {/* Avatar button */}
+              <button
+                onClick={() => setDropdownOpen(prev => !prev)}
+                title={user.full_name || user.email}
+                aria-haspopup="true"
+                aria-expanded={dropdownOpen}
+                className="flex items-center gap-1.5 h-[40px] md:h-[40px] ps-1 pe-2 rounded-full border border-[#e2eaf0] bg-white hover:border-[#87DDD7] transition-colors shrink-0"
+              >
+                <span className="w-[30px] h-[30px] rounded-full bg-[#004643] text-white flex items-center justify-center text-[12px] font-semibold overflow-hidden shrink-0">
+                  {user.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    (user.full_name || user.email || "?").trim().charAt(0).toUpperCase()
+                  )}
+                </span>
+                <ChevronDown
+                  size={13}
+                  className={`text-[#8E9493] transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+
+              {/* Dropdown */}
+              {dropdownOpen && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 8px)",
+                    right: 0,
+                    minWidth: 200,
+                    background: "#FFFFFF",
+                    border: "1px solid #EAEDEC",
+                    borderRadius: 14,
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
+                    zIndex: 100,
+                    overflow: "hidden",
+                    animation: "fadeInDown 0.15s ease",
+                  }}
+                >
+                  {/* User info */}
+                  <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid #F1F4F4" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#101212", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {user.full_name || "Account"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#8E9493", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {user.email}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ padding: "6px" }}>
+                    <Link
+                      href={getDashboardHref(user.role)}
+                      onClick={() => setDropdownOpen(false)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 9,
+                        padding: "9px 10px",
+                        borderRadius: 9,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: "#101212",
+                        textDecoration: "none",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "#F3FEFD")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <LayoutDashboard size={15} style={{ color: "#004643", flexShrink: 0 }} />
+                      {t.dashboard}
+                    </Link>
+
+                    <button
+                      onClick={handleLogout}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 9,
+                        width: "100%",
+                        padding: "9px 10px",
+                        borderRadius: 9,
+                        border: "none",
+                        background: "transparent",
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: "#812F28",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = "#FFF1F0")}
+                      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <LogOut size={15} style={{ flexShrink: 0 }} />
+                      {t.logout}
+                    </button>
+                  </div>
+                </div>
               )}
-            </Link>
+
+              <style>{`
+                @keyframes fadeInDown {
+                  from { opacity: 0; transform: translateY(-6px); }
+                  to   { opacity: 1; transform: translateY(0); }
+                }
+              `}</style>
+            </div>
           ) : (
             <Link
               href="/authpage/signin"

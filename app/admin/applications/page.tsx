@@ -180,7 +180,7 @@ function Queue({ onOpen }: { onOpen: (id: string) => void }) {
       </div>
 
       <div className="mt-5 overflow-hidden rounded-2xl border border-[#D5DBDA] bg-white">
-        <div className="hidden grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 border-b border-[#E6EBEA] bg-[#FBFCFC] px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-[#8E9493] md:grid">
+        <div className="hidden grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-4 border-b border-[#E6EBEA] bg-[#FBFCFC] px-5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-[#8E9493] md:grid">
           <span>Business</span>
           <span>Type</span>
           <span>Submitted</span>
@@ -221,7 +221,7 @@ function Queue({ onOpen }: { onOpen: (id: string) => void }) {
             <button
               key={v.id}
               onClick={() => onOpen(v.id)}
-              className="grid w-full grid-cols-1 gap-1 border-b border-[#F1F4F4] px-5 py-3.5 text-start transition-colors last:border-b-0 hover:bg-[#FBFCFC] md:grid-cols-[2fr_1fr_1fr_1fr_auto] md:items-center md:gap-4"
+              className="grid w-full grid-cols-1 gap-1 border-b border-[#F1F4F4] px-5 py-3.5 text-start transition-colors last:border-b-0 hover:bg-[#FBFCFC] md:grid-cols-[2fr_1fr_1fr_1fr_1fr] md:items-center md:gap-4"
             >
               <span className="min-w-0">
                 <span className="block truncate text-[13px] font-medium text-[#101212]">

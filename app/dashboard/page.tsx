@@ -7,9 +7,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Home, Clock, FolderOpen, Crown, ChevronRight,
   ArrowUpRight, Loader2, LogOut, User, Settings, Languages, ImageIcon,
-  Sparkles, X
+  Sparkles, X, Store
 } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import CreateProjectModal from "@/components/CreateProjectModal";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 
@@ -139,6 +140,13 @@ export default function DashboardPage() {
               <FolderOpen className="w-4 h-4" />
               <span className="text-xs font-medium">Collection</span>
             </div>
+            <Link
+              href="/marketplace"
+              className="flex items-center gap-2 h-full px-4 rounded-full cursor-pointer transition-colors hover:bg-gray-200 text-[#0a0a0a]"
+            >
+              <Store className="w-4 h-4" />
+              <span className="text-xs font-medium">Marketplace</span>
+            </Link>
           </div>
         </div>
 
@@ -186,6 +194,14 @@ export default function DashboardPage() {
 
                   {/* Menu items */}
                   <div className="py-1.5">
+                    <Link
+                      href="/marketplace"
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[#0a0a0a] hover:bg-[#f5f5f5] transition-colors md:hidden"
+                      onClick={() => setDropdownOpen(false)}
+                    >
+                      <Store className="w-4 h-4 text-[#737373]" />
+                      Marketplace
+                    </Link>
                     <button
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-[#0a0a0a] hover:bg-[#f5f5f5] transition-colors"
                       onClick={() => {
