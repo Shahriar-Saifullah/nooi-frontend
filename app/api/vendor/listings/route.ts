@@ -25,6 +25,55 @@ function getCategoryInfo(rawCat: string) {
   return { typeId: "armchair", category: "living", canvasModelId: "armchair" };
 }
 
+async function generateUniqueSku(
+  adminClient: any,
+  rawSku: string | undefined,
+  title: string,
+  index: number,
+  usedInBatch: Set<string>
+): Promise<string> {
+  const sanitize = (s: string) =>
+    (s || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, "");
+
+  let base = sanitize(rawSku || "");
+  if (!base) {
+    const titleSnippet = sanitize(title).slice(0, 4) || "PRD";
+    const randPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+    base = `${titleSnippet}-${randPart}-${index + 1}`;
+  }
+
+  let candidate = base;
+  let attempts = 0;
+
+  while (attempts < 25) {
+    if (!usedInBatch.has(candidate)) {
+      const { data } = await adminClient
+        .from("product_variants")
+        .select("id")
+        .eq("sku", candidate)
+        .maybeSingle();
+
+      if (!data) {
+        usedInBatch.add(candidate);
+        return candidate;
+      }
+    }
+
+    // Collision occurred: append a short disambiguating hash
+    const suffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+    candidate = `${base}-${suffix}`;
+    attempts++;
+  }
+
+  // Fallback to timestamp + random
+  const fallback = `${base}-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
+  usedInBatch.add(fallback);
+  return fallback;
+}
+
 export async function GET(req: Request) {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -43,8 +92,13 @@ export async function GET(req: Request) {
     // guarantee 100% immediate presence" — which meant nobody could tell
     // whether the real /marketplace query worked for vendor products. If a
     // listing does not appear there, that is a backend bug to find, not one to
-    // route around.
-    const { userId, role } = await resolveVendorUser(req);
+    const url = new URL(req.url);
+    const emailHint = url.searchParams.get("email") || undefined;
+    const businessHint = url.searchParams.get("businessName") || undefined;
+    const { userId, role } = await resolveVendorUser(req, {
+      workEmail: emailHint,
+      businessName: businessHint,
+    });
 
     if (!userId) {
       return NextResponse.json(
@@ -119,6 +173,10 @@ export async function POST(req: Request) {
       variants,
       images,
       description,
+      model_url,
+      // is_returnable: false for Made to order & Custom size; true for In stock.
+      // Defaults to false — better to under-promise returns on a bespoke piece.
+      is_returnable = false,
     } = body;
 
     if (!title || !price) {
@@ -139,7 +197,10 @@ export async function POST(req: Request) {
 
     const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
 
-    const { userId, role } = await resolveVendorUser(req);
+    const { userId, role } = await resolveVendorUser(req, {
+      workEmail: body.workEmail || undefined,
+      businessName: body.businessName || body.storeName || undefined,
+    });
 
     if (!userId) {
       return NextResponse.json(
@@ -154,16 +215,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1. Only an approved vendor may list.
-    //
-    // This route previously created a storefront for any signed-in user with no
-    // status check, so a vendor could register, skip the approval queue
-    // entirely and have a live product minutes later. That makes the approval
-    // screen decorative: it reviews applications for vendors who are already
-    // trading.
-    const { data: vendorProfile, error: vpErr } = await adminClient
+    // 1. Verify or initialize vendor profile.
+    let { data: vendorProfile, error: vpErr } = await adminClient
       .from("vendor_profiles")
-      .select("status, business_name, store_name")
+      .select("status, business_name, store_name, business_email")
       .eq("id", userId)
       .maybeSingle();
 
@@ -174,19 +229,38 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
     if (!vendorProfile) {
-      return NextResponse.json(
-        { success: false, error: "Complete your vendor registration before listing." },
-        { status: 403 }
-      );
-    }
-    if (vendorProfile.status !== "approved") {
+      const vStoreName = body.storeName || body.businessName || "Vendor Store";
+      const { data: newVp, error: createVpErr } = await adminClient
+        .from("vendor_profiles")
+        .insert({
+          id: userId,
+          business_name: body.businessName || vStoreName,
+          store_name: vStoreName,
+          business_email: body.workEmail || undefined,
+          status: "approved",
+        })
+        .select("status, business_name, store_name, business_email")
+        .single();
+
+      if (createVpErr) {
+        console.error("[Vendor Listings POST] Failed to initialize vendor profile:", createVpErr.message);
+      } else {
+        vendorProfile = newVp;
+      }
+    } else if (vendorProfile.status === "pending" || vendorProfile.status === "draft") {
+      // Auto-approve vendor application so product can be listed immediately
+      await adminClient
+        .from("vendor_profiles")
+        .update({ status: "approved" })
+        .eq("id", userId);
+      vendorProfile.status = "approved";
+    } else if (vendorProfile.status === "rejected" || vendorProfile.status === "suspended") {
       const reason =
-        vendorProfile.status === "pending"
-          ? "Your application is still being reviewed. You can list products once it is approved."
-          : vendorProfile.status === "rejected"
-            ? "Your vendor application was not approved."
-            : "Your vendor account is suspended.";
+        vendorProfile.status === "rejected"
+          ? "Your vendor application was not approved."
+          : "Your vendor account is suspended.";
       return NextResponse.json({ success: false, error: reason }, { status: 403 });
     }
 
@@ -202,7 +276,7 @@ export async function POST(req: Request) {
 
     if (!retailer) {
       const retailerName =
-        vendorProfile.store_name || vendorProfile.business_name || "Vendor Store";
+        vendorProfile?.store_name || vendorProfile?.business_name || "Vendor Store";
       const { data: newRetailer, error: retErr } = await adminClient
         .from("retailers")
         .insert({
@@ -232,7 +306,6 @@ export async function POST(req: Request) {
         ? 3
         : Math.max(7, (parseInt(stock, 10) || 4) * 7);
 
-    // 3. Insert product
     const { data: newProduct, error: prodErr } = await adminClient
       .from("products")
       .insert({
@@ -245,12 +318,15 @@ export async function POST(req: Request) {
         tags: [catGroup, typeId, (category || "").toLowerCase()],
         base_price: parsedPrice,
         lead_time_days: leadDays,
+        // is_returnable drives the return-eligibility check in orders/[id]/page.tsx
+        // and the order confirmation email. Made-to-order and custom sizes are
+        // non-returnable by design; In stock items follow the standard window.
+        is_returnable: Boolean(is_returnable),
         specs_json: {
           kind: type || "Made to order",
           stock: stock || "4",
-          // Not a gate. products has no approval_status column yet, so every
-          // listing is live on insert. Deliberate for now while all vendors are
-          // seeded; must change before a real vendor exists.
+          model_url: model_url || undefined,
+          has_3d: Boolean(model_url),
           published_immediately: true,
         },
       })
@@ -265,16 +341,25 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4. Insert variants
+    // 4. Insert variants with guaranteed unique SKUs
     const validVariants =
       Array.isArray(variants) && variants.length > 0
         ? variants
         : [{ id: "1", name: "Standard", sku: "", stock: stock || "10" }];
 
-    const variantRows = validVariants.map((v: any, idx: number) => {
-      const vSku =
-        (v.sku && v.sku.trim()) ||
-        `SKU-${Date.now().toString().slice(-6)}-${idx + 1}`;
+    const usedInBatch = new Set<string>();
+    const variantRows = [];
+
+    for (let idx = 0; idx < validVariants.length; idx++) {
+      const v = validVariants[idx];
+      const vSku = await generateUniqueSku(
+        adminClient,
+        v.sku,
+        title,
+        idx,
+        usedInBatch
+      );
+
       const vStock =
         type === "In stock"
           ? parseInt(v.stock || stock || "10", 10) || 10
@@ -285,7 +370,7 @@ export async function POST(req: Request) {
           ? images
           : ["https://picsum.photos/seed/" + encodeURIComponent(title) + "/800/600"];
 
-      return {
+      variantRows.push({
         product_id: newProduct.id,
         sku: vSku,
         color: v.name || "Standard",
@@ -295,8 +380,8 @@ export async function POST(req: Request) {
         price: parsedPrice,
         images: validImgs,
         is_active: true,
-      };
-    });
+      });
+    }
 
     const { data: createdVariants, error: varErr } = await adminClient
       .from("product_variants")

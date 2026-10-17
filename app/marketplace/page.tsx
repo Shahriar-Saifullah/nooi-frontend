@@ -27,7 +27,7 @@
  *   Ratings are deliberately absent. See the note in ProductCard.
  */
 
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   SlidersHorizontal, Check, X, ArrowLeft, Box, Loader2,
@@ -163,6 +163,9 @@ function MarketplaceInner() {
   const [sort, setSort] = useState<ProductQuery["sort"]>("newest");
   const [page, setPage] = useState(1);
 
+  const filterKey = `${group}|${retailerId}|${priceBand}|${inStockOnly}|${threeDOnly}|${search}|${sort}`;
+  const prevFilterKeyRef = useRef(filterKey);
+
   // Data
   const [facets, setFacets] = useState<Facets | null>(null);
   const [products, setProducts] = useState<MarketplaceProduct[]>([]);
@@ -205,6 +208,16 @@ function MarketplaceInner() {
   // ── Grid ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
+
+    // If filters changed, reset page to 1
+    if (prevFilterKeyRef.current !== filterKey) {
+      prevFilterKeyRef.current = filterKey;
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
 
@@ -227,7 +240,15 @@ function MarketplaceInner() {
         // canvas_model_id today, so it only bites once vendors list pieces
         // without a model.
         const rows = threeDOnly ? res.products.filter(p => p.is_3d) : res.products;
-        setProducts(prev => (page === 1 ? rows : [...prev, ...rows]));
+        setProducts(prev => {
+          const list = page === 1 ? rows : [...prev, ...rows];
+          const seen = new Set<string>();
+          return list.filter(p => {
+            if (!p?.id || seen.has(p.id)) return false;
+            seen.add(p.id);
+            return true;
+          });
+        });
         setTotal(res.total);
       })
       .catch(err => {
@@ -238,12 +259,7 @@ function MarketplaceInner() {
       .finally(() => !cancelled && setLoading(false));
 
     return () => { cancelled = true; };
-  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, search, sort, page]);
-
-  // Any filter change resets paging.
-  useEffect(() => {
-    setPage(1);
-  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, search, sort]);
+  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, search, sort, page, filterKey]);
 
   // ── Room band ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -673,9 +689,9 @@ function MarketplaceInner() {
           {products.length > 0 && (
             <>
               <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {products.map(p => (
+                {products.map((p, idx) => (
                   <ProductCard
-                    key={p.id}
+                    key={`${p.id}-${idx}`}
                     product={p}
                     quantity={quantityFor(p)}
                     onOpen={prod => router.push(`/marketplace/${prod.id}`)}

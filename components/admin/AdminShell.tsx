@@ -24,9 +24,10 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Store, PackageCheck, RotateCcw, ShoppingBag, XCircle,
   LifeBuoy, Users, Wallet, UsersRound, Settings, ScrollText, Loader2, ShieldAlert,
+  LogOut,
 } from "lucide-react";
 
-import { getCurrentUser, type AuthUser } from "@/lib/api/auth";
+import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 import { getVendorQueue } from "@/lib/api/admin";
 
 interface NavItem {
@@ -50,6 +51,18 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checking, setChecking] = useState(true);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+    } catch (err) {
+      console.error("Admin logout error:", err);
+    } finally {
+      router.replace("/authpage/signin");
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -142,12 +155,23 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
               ? "This account doesn't have admin permissions."
               : "Sign in with an admin account to continue."}
           </p>
-          <button
-            onClick={() => router.push(user ? "/dashboard" : "/authpage/signin?next=/admin")}
-            className="mt-5 rounded-full bg-[#004643] px-4 py-2 text-[12.5px] font-medium text-white hover:bg-[#003836]"
-          >
-            {user ? "Back to Nooi" : "Sign in"}
-          </button>
+          <div className="mt-5 flex items-center justify-center gap-2">
+            <button
+              onClick={() => router.push(user ? "/dashboard" : "/authpage/signin?next=/admin")}
+              className="rounded-full bg-[#004643] px-4 py-2 text-[12.5px] font-medium text-white hover:bg-[#003836]"
+            >
+              {user ? "Back to Nooi" : "Sign in"}
+            </button>
+            {user && (
+              <button
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="rounded-full border border-[#D5DBDA] bg-white px-4 py-2 text-[12.5px] font-medium text-[#812F28] hover:bg-[#FFFAF9] disabled:opacity-50"
+              >
+                {loggingOut ? "Logging out..." : "Log out"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -155,6 +179,32 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen bg-[#E9EDEC]">
+      {/* Mobile top bar */}
+      <header className="flex h-14 items-center justify-between border-b border-[#D5DBDA] bg-white px-4 md:hidden">
+        <div className="flex items-center gap-2">
+          <Image
+            width={100}
+            height={100}
+            src="/assets/logo.png"
+            alt="Nooi"
+            className="h-auto w-[24px] object-contain"
+          />
+          <span className="font-inter text-[14px] font-bold text-[#111d27]">
+            Admin
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          disabled={loggingOut}
+          className="flex items-center gap-1.5 rounded-md border border-[#D5DBDA] bg-[#F8FAF9] px-2.5 py-1 text-[11.5px] font-medium text-[#4B4F4F] transition-colors hover:border-[#812F28]/30 hover:bg-[#FFFAF9] hover:text-[#812F28] disabled:opacity-50"
+          title="Log out"
+        >
+          <LogOut size={13} />
+          <span>{loggingOut ? "Logging out..." : "Log out"}</span>
+        </button>
+      </header>
+
       <aside className="fixed inset-y-0 left-0 hidden w-[232px] flex-col border-r border-[#D5DBDA] bg-white md:flex">
         <div className="flex items-center gap-2.5 px-5 py-5">
           <Image
@@ -218,19 +268,32 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           ))}
         </nav>
 
-        <div className="border-t border-[#E6EBEA] px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#004643] text-[12px] font-medium text-white">
-              {(user?.full_name || user?.email || "?").trim().charAt(0).toUpperCase()}
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-[12px] font-medium text-[#101212]">
-                {user?.full_name || user?.email}
+        <div className="border-t border-[#E6EBEA] px-3.5 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#004643] text-[12px] font-medium text-white">
+                {(user?.full_name || user?.email || "?").trim().charAt(0).toUpperCase()}
               </span>
-              <span className="block text-[10.5px] text-[#8E9493]">
-                {role === "super_admin" ? "Super admin" : "Admin"}
-              </span>
-            </span>
+              <div className="min-w-0">
+                <span className="block truncate text-[12px] font-medium text-[#101212]">
+                  {user?.full_name || user?.email}
+                </span>
+                <span className="block text-[10.5px] text-[#8E9493]">
+                  {role === "super_admin" ? "Super admin" : "Admin"}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="flex shrink-0 items-center gap-1 rounded-md border border-[#D5DBDA] bg-[#F8FAF9] px-2 py-1 text-[11px] font-medium text-[#4B4F4F] transition-colors hover:border-[#812F28]/30 hover:bg-[#FFFAF9] hover:text-[#812F28] disabled:opacity-50"
+              title="Log out"
+              aria-label="Log out"
+            >
+              <LogOut size={13} />
+              <span>{loggingOut ? "..." : "Log out"}</span>
+            </button>
           </div>
         </div>
       </aside>

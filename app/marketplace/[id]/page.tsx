@@ -107,6 +107,7 @@ function ProductDetailInner() {
   const [variantId, setVariantId] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
   const [view, setView] = useState<"photos" | "3d">("photos");
+  const [selectedImageIdx, setSelectedImageIdx] = useState(0);
   const [tab, setTab] = useState<"details" | "reviews">("details");
   const [more, setMore] = useState<MarketplaceProduct[]>([]);
 
@@ -161,11 +162,20 @@ function ProductDetailInner() {
     [product, variantId],
   );
 
+  useEffect(() => {
+    setSelectedImageIdx(0);
+  }, [variantId]);
+
   const catalogItem = product?.canvas_model_id ? catalogById(product.canvas_model_id) : undefined;
+  const customModelUrl = product?.model_url || (product?.specs_json?.model_url as string | undefined);
+  const modelPath = customModelUrl || catalogItem?.path;
+  const has3d = Boolean(modelPath);
 
   const images = variant?.images?.length
     ? variant.images
     : product?.variants.flatMap(v => v.images ?? []) ?? [];
+
+  const activeImage = images[selectedImageIdx] || images[0];
 
   const inCartQty = useMemo(() => {
     if (!variant) return 0;
@@ -273,11 +283,14 @@ function ProductDetailInner() {
           {/* ── Gallery ─────────────────────────────────────────────────── */}
           <div>
             <div className="relative aspect-square rounded-2xl overflow-hidden bg-[#F1F4F4] border border-[#E6EBEA]">
-              {view === "3d" && catalogItem ? (
-                <ModelViewer modelPath={catalogItem.path} size={catalogItem.size} />
-              ) : images[0] ? (
+              {view === "3d" && modelPath ? (
+                <ModelViewer
+                  modelPath={modelPath}
+                  size={catalogItem?.size || (variant?.width_cm && variant?.depth_cm && variant?.height_cm ? { w: Number(variant.width_cm), d: Number(variant.depth_cm), h: Number(variant.height_cm) } : undefined)}
+                />
+              ) : activeImage ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={images[0]} alt={product.title} className="w-full h-full object-cover" />
+                <img src={activeImage} alt={product.title} className="w-full h-full object-cover transition-opacity duration-200" />
               ) : (
                 <span className="w-full h-full flex items-center justify-center text-[#B3B9B9]">
                   <Box size={34} strokeWidth={1.1} />
@@ -285,7 +298,34 @@ function ProductDetailInner() {
               )}
             </div>
 
-            {catalogItem && (
+            {/* Thumbnail strip for multiple images */}
+            {images.length > 1 && (
+              <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
+                {images.map((imgUrl, idx) => {
+                  const isSelected = selectedImageIdx === idx && view === "photos";
+                  return (
+                    <button
+                      key={`${imgUrl}-${idx}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedImageIdx(idx);
+                        setView("photos");
+                      }}
+                      className={`relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 border-2 transition-all ${
+                        isSelected
+                          ? "border-[#004643] shadow-sm ring-1 ring-[#004643] opacity-100"
+                          : "border-transparent opacity-60 hover:opacity-100 hover:border-[#D5DBDA]"
+                      }`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={imgUrl} alt={`${product.title} ${idx + 1}`} className="w-full h-full object-cover" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {has3d && (
               <div className="mt-3 flex items-center gap-2">
                 {([
                   { k: "photos" as const, l: t.photos, icon: null },
@@ -296,7 +336,7 @@ function ProductDetailInner() {
                     onClick={() => setView(v.k)}
                     className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border text-[12px] transition-colors
                       ${view === v.k
-                        ? "bg-[#F3FEFD] border-[#87DDD7] text-[#004643]"
+                        ? "bg-[#F3FEFD] border-[#87DDD7] text-[#004643] font-medium"
                         : "bg-white border-[#D5DBDA] text-[#343837] hover:bg-[#F1F4F4]"}`}
                   >
                     {v.icon}{v.l}
@@ -304,7 +344,7 @@ function ProductDetailInner() {
                 ))}
                 {view === "3d" && (
                   <span className="text-[11px] text-[#8E9493]">
-                    {catalogItem.name} · {num(catalogItem.size.w)}×{num(catalogItem.size.d)}×{num(catalogItem.size.h)} cm
+                    {catalogItem ? `${catalogItem.name} · ${num(catalogItem.size.w)}×${num(catalogItem.size.d)}×${num(catalogItem.size.h)} cm` : "Drag to rotate · Scroll to zoom"}
                   </span>
                 )}
               </div>

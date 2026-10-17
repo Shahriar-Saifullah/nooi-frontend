@@ -248,10 +248,11 @@ export async function logout(): Promise<ApiResponse<unknown>> {
  * Falls back to Supabase-only data if backend is unreachable.
  */
 export async function getCurrentUser(): Promise<ApiResponse<AuthUserResponse>> {
+  const supabase = getSupabase();
   const {
     data: { user: sbUser },
     error: sbError,
-  } = await getSupabase().auth.getUser();
+  } = await supabase.auth.getUser();
 
   if (sbError || !sbUser) {
     return {
@@ -267,18 +268,82 @@ export async function getCurrentUser(): Promise<ApiResponse<AuthUserResponse>> {
       path: "/me",
       method: "GET",
     });
-    if (backendRes.success) {
+    if (backendRes.success && backendRes.data?.user) {
       return backendRes;
     }
   } catch {
     // Backend unavailable — fall back to Supabase data
   }
 
-  // Fallback: return Supabase user data
+  // Fallback: return Supabase user data enriched with profiles & vendor_profiles
+  let userRole: "user" | "vendor" | "admin" | "super_admin" =
+    sbUser.user_metadata?.role || "user";
+  let fullName =
+    sbUser.user_metadata?.full_name || sbUser.user_metadata?.name || "";
+
+  try {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role, full_name")
+      .eq("id", sbUser.id)
+      .maybeSingle();
+
+    if (profile?.role) {
+      userRole = profile.role as any;
+    }
+    if (profile?.full_name) {
+      fullName = profile.full_name;
+    }
+  } catch (err) {
+    console.warn("[Auth API] profiles table query warning:", err);
+  }
+
+  // If role is not yet vendor or admin, check vendor_profiles
+  if (userRole !== "vendor" && userRole !== "admin" && userRole !== "super_admin") {
+    try {
+      const { data: vp } = await supabase
+        .from("vendor_profiles")
+        .select("id, status")
+        .eq("id", sbUser.id)
+        .maybeSingle();
+
+      if (vp) {
+        userRole = "vendor";
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  let vendorStatus: AuthUser["vendor_status"] = undefined;
+  if (userRole === "vendor") {
+    try {
+      const { data: vp } = await supabase
+        .from("vendor_profiles")
+        .select("status, submitted_at")
+        .eq("id", sbUser.id)
+        .maybeSingle();
+
+      if (vp) {
+        vendorStatus = vp.status || (vp.submitted_at ? "pending" : "draft");
+      } else {
+        vendorStatus = "draft";
+      }
+    } catch (vpErr) {
+      console.warn("[Auth API] vendor_profiles table query warning:", vpErr);
+    }
+  }
+
+  const baseUser = mapSupabaseUser(sbUser);
   return {
     success: true,
     data: {
-      user: mapSupabaseUser(sbUser),
+      user: {
+        ...baseUser,
+        role: userRole,
+        full_name: fullName || baseUser.full_name,
+        vendor_status: vendorStatus,
+      },
     },
   };
 }
