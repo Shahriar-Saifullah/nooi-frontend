@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
   Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
-  Ruler,
+  Ruler, Sparkles,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -18,7 +18,9 @@ import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import FurnitureListPanel from "@/components/FurnitureListPanel";
-import { catalogById, FURNITURE_CATALOG, type CatalogItem } from "@/lib/furniture/catalog";
+import {
+  catalogById, FURNITURE_CATALOG, MATERIAL_PRESETS, type CatalogItem,
+} from "@/lib/furniture/catalog";
 import {
   snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom, pushOutOfWalls,
   planWallsToWorld,
@@ -30,6 +32,7 @@ import {
 } from "@/lib/surfaces/catalog";
 import { DOOR_FINISHES } from "@/lib/surfaces/doors";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
+import type { PathTracerStats } from "@/components/PathTracerLayer";
 import { useProjectStore } from "@/lib/store";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
@@ -574,6 +577,13 @@ export default function CanvasPage() {
     return { width: 1500, depth: 1200 };
   })();
 
+  // ── Rendered walkthrough (path tracing) ───────────────────────────────────
+  // Not the AI render. This traces the real scene — the user's own furniture,
+  // lit properly — and they can keep moving through it. Nothing is generated,
+  // so nothing drifts: the sofa they placed is the sofa they see.
+  const [pathTracing, setPathTracing] = useState(false);
+  const [ptStats, setPtStats] = useState<PathTracerStats | null>(null);
+
   // ── Camera view presets ────────────────────────────────────────────────────
   const [cameraView, setCameraView] = useState<CameraViewPreset>("default");
   const handleCameraView = (view: CameraViewPreset) => {
@@ -817,7 +827,40 @@ export default function CanvasPage() {
         try { depthJpeg = (await prepareDepth(depthShot, 1280)) ?? undefined; }
         catch { /* depth is optional — colour pipeline still works */ }
       }
-      const data = await renderScene(currentProject.id, command, sceneJpeg, depthJpeg);
+      // Tell the server what is actually in the room.
+      //
+      // The negative prompt alone ("do not change the furniture") was losing
+      // the battle — a grey sectional was coming back as a brown leather
+      // armchair. Naming what IS there gives the model something to preserve.
+      //
+      // Only what the camera can plausibly see: every item in the project
+      // would describe rooms that are not in frame and dilute the instruction.
+      // Ceiling mounts are included only in Inside mode, matching what the
+      // scene actually renders.
+      const visibleFurniture = placedFurniture
+        .filter(f => {
+          const cat = f.modelId ? catalogById(f.modelId) : undefined;
+          const mount = f.mountType ?? cat?.mountType ?? "floor";
+          return mount !== "ceiling" || cameraView === "inside";
+        })
+        .slice(0, 24)
+        .map(f => {
+          const cat = f.modelId ? catalogById(f.modelId) : undefined;
+          const preset = f.materialPreset
+            ? MATERIAL_PRESETS.find(m => m.id === f.materialPreset)
+            : undefined;
+          return {
+            name: f.name || cat?.name || "furniture",
+            // The user's override wins; the catalogue colour is the fallback,
+            // since that is what the scene is actually showing.
+            ...(f.color || cat?.color ? { color: f.color || cat?.color } : {}),
+            ...(preset?.name ? { material: preset.name } : {}),
+          };
+        });
+
+      const data = await renderScene(
+        currentProject.id, command, sceneJpeg, depthJpeg, visibleFurniture,
+      );
       setGeneratedImageUrl(data.image_url);
       setRenders(prev => [{ url: data.image_url, source: sceneJpeg, at: Date.now() }, ...prev]);
       setCompareMode(false);
@@ -1712,6 +1755,9 @@ export default function CanvasPage() {
                 onClick={() => {
                   // Stop walkthrough (and any recording) when switching to 2D
                   if (mode === "2d" && walkthroughActive) { stopWalkthrough(); }
+                  // The tracer owns the render loop; leaving 3D with it still
+                  // active would hand the canvas back half-drawn.
+                  if (mode === "2d") setPathTracing(false);
                   setViewMode(mode);
                 }}
                 className={`flex items-center gap-[6px] px-[16px] py-[6px] rounded-full text-[12px] font-medium transition-all whitespace-nowrap ${
@@ -1753,7 +1799,9 @@ export default function CanvasPage() {
               ) : walkthroughActive && walkthroughPaused ? (
                 <><span>⏸ Paused — orbit freely</span><span className="opacity-40">·</span><span>▶ Resume when ready</span></>
               ) : (
-                cameraView === "inside"
+                pathTracing
+                  ? <><span>✨ Rendered — move as usual</span><span className="opacity-40">·</span><span>it sharpens when you stop</span></>
+                  : cameraView === "inside"
                   ? <><span>🖱 Drag to look</span><span>⚡ Scroll to fly</span><span>⌨ WASD to move</span><span>⬆ Q/E or Shift/Space for Up/Down</span></>
                   : <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span><span>⌨ WASD / Arrows to shift camera</span></>
               )}
@@ -1779,8 +1827,48 @@ export default function CanvasPage() {
             </div>
           )}
 
-          {/* Render this view — photorealistic image of exactly what's framed */}
+          {/* Rendered walkthrough — the real scene, traced, still walkable.
+               Sits directly above "Render view": one produces a picture, the
+               other a place to move around in, and they are easy to confuse
+               if they are not adjacent and clearly named. */}
           {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
+            <button
+              onClick={() => setPathTracing(v => !v)}
+              title={pathTracing
+                ? "Back to the editable view"
+                : "Render the whole scene and walk through it"}
+              className={`absolute bottom-[112px] right-5 z-10 flex items-center gap-2 pl-3.5 pr-4 py-2 rounded-full text-[12px] font-medium shadow-[0_4px_12px_rgba(0,0,0,0.25)] transition-colors ${
+                pathTracing
+                  ? "bg-white text-[#0a0a0a] hover:bg-white/90"
+                  : "bg-[#c7de7d] text-[#003832] hover:bg-[#b8d268]"
+              }`}
+            >
+              {pathTracing
+                ? <><X size={14} />Exit rendered view</>
+                : <><Sparkles size={14} />Rendered walkthrough</>}
+            </button>
+          )}
+
+          {/* Progress. The first seconds look broken without it: the BVH build
+               freezes briefly, then the image arrives noisy and cleans up. */}
+          {viewMode === "3d" && pathTracing && ptStats && (
+            <div className="absolute bottom-[158px] right-5 z-10 flex items-center gap-2 pl-3 pr-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-sm text-white text-[11px]">
+              {ptStats.error ? (
+                <span className="text-[#ffc9c0]">{ptStats.error}</span>
+              ) : ptStats.preparing ? (
+                <><Loader2 size={12} className="animate-spin" />Preparing the scene…</>
+              ) : ptStats.samples < 200 ? (
+                <><Loader2 size={12} className="animate-spin" />Refining · {ptStats.samples}</>
+              ) : (
+                <><Check size={12} className="text-[#c7de7d]" />Fully rendered</>
+              )}
+            </div>
+          )}
+
+          {/* Render this view — photorealistic image of exactly what's framed.
+               Hidden while tracing: capturing the canvas mid-trace would send
+               a noisy frame to the model. */}
+          {viewMode === "3d" && !pathTracing && !(walkthroughActive && !walkthroughPaused) && (
             <button
               onClick={() => handleSceneRender("")}
               disabled={isGeneratingRender}
@@ -1994,6 +2082,8 @@ export default function CanvasPage() {
                     setSelectedWall(sel);
                     if (sel) { setSelectedFurnitureId(null); setSelectedDoor(null); setRightTab("edit"); }
                   }}
+                  pathTracing={pathTracing}
+                  onPathTracerStats={setPtStats}
                   walkthroughActive={walkthroughActive}
                   walkthroughPaused={walkthroughPaused}
                   onWalkthroughProgress={(prog, info) => {

@@ -22,6 +22,7 @@ import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
+import PathTracerLayer, { type PathTracerStats } from "@/components/PathTracerLayer";
 import { EffectComposer } from "@react-three/postprocessing";
 import { N8AO } from "@react-three/postprocessing";
 
@@ -137,6 +138,9 @@ interface ThreeSceneV2Props {
   onWalkthroughProgress?: (progress: number, info?: WalkthroughProgressInfo) => void;
   /** Ambient occlusion. On by default; pass false on weak hardware. */
   aoEnabled?: boolean;
+  /** Path-traced rendering. Replaces the raster view entirely while on. */
+  pathTracing?: boolean;
+  onPathTracerStats?: (s: PathTracerStats) => void;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -1763,6 +1767,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   walkthroughPaused = false,
   onWalkthroughProgress,
   aoEnabled = true,
+  pathTracing = false,
+  onPathTracerStats,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100),
@@ -1931,7 +1937,12 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         frame. Fine for the AI path, which relights anyway. If the PNG export
         should match what the user sees, that is the thing to fix next.
       */}
-      <Postprocessing world={world} enabled={aoEnabled} />
+      {/* AO and the path tracer cannot both own the render loop — the composer
+          would draw over every traced sample. The tracer computes real
+          occlusion anyway, so AO is redundant while it runs. */}
+      <Postprocessing world={world} enabled={aoEnabled && !pathTracing} />
+
+      <PathTracerLayer active={pathTracing} onStats={onPathTracerStats} />
 
       <OrbitControls ref={controlsRef} makeDefault
         enableDamping
