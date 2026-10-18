@@ -1,4 +1,4 @@
-import { requestApi, type ApiResponse } from "./http";
+import { requestApi, requestJson, type ApiResponse } from "./http";
 import { createClient } from "@/utils/supabase/client";
 import type {
   VendorAccountData,
@@ -189,3 +189,216 @@ export async function getVendorStatus(hints?: {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Vendor Shipments / Orders (Express Backend)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface VendorShipmentItem {
+  id: string;
+  title: string;
+  color?: string | null;
+  sku?: string | null;
+  image?: string | null;
+  quantity: number;
+  item_status: string;
+}
+
+export interface VendorDeliverTo {
+  name: string;
+  street: string;
+  city: string;
+  state: string;
+  postcode: string;
+  country: string;
+}
+
+export interface VendorShipment {
+  id: string;
+  order_number: string;
+  placed_at: string;
+  shipment_status: string;
+  carrier_code: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  estimated_delivery: string | null;
+  dispatched_at: string | null;
+  delivered_at: string | null;
+  exception_code: string | null;
+  exception_note: string | null;
+  deliver_to: VendorDeliverTo;
+  items: VendorShipmentItem[];
+  item_count: number;
+  value: number;
+}
+
+export interface VendorOrdersData {
+  shipments: VendorShipment[];
+  counts: {
+    to_fulfil: number;
+    shipped: number;
+    delivered: number;
+    all: number;
+  };
+  carriers: string[];
+}
+
+export interface VendorOrdersResponse {
+  success: boolean;
+  data: VendorOrdersData;
+  error?: string;
+}
+
+export interface VendorDispatchResponse {
+  success: boolean;
+  data: {
+    id: string;
+    shipment_status: string;
+    carrier_code: string;
+    tracking_number: string;
+    tracking_url: string;
+    order_id: string;
+    retailer_id: string;
+  };
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Fetch vendor shipments and orders from Express backend
+ * GET /vendor/orders?tab=to_fulfil | shipped | delivered | all
+ */
+export async function getVendorOrders(
+  tab: "to_fulfil" | "shipped" | "delivered" | "all" = "all"
+): Promise<ApiResponse<VendorOrdersData>> {
+  try {
+    const res = await requestJson<VendorOrdersResponse>({
+      path: `/vendor/orders?tab=${encodeURIComponent(tab)}`,
+      method: "GET",
+    });
+    if (!res.success) {
+      return { success: false, error: res.error || "Failed to fetch vendor orders" };
+    }
+    return { success: true, data: res.data };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Network error loading vendor orders",
+    };
+  }
+}
+
+/**
+ * Dispatch a vendor shipment with carrier and tracking number
+ * POST /vendor/orders/:shipmentId/dispatch { carrier_code, tracking_number }
+ */
+export async function dispatchVendorShipment(
+  shipmentId: string,
+  payload: { carrier_code: string; tracking_number: string }
+): Promise<ApiResponse<VendorDispatchResponse["data"]>> {
+  try {
+    const res = await requestJson<VendorDispatchResponse, typeof payload>({
+      path: `/vendor/orders/${encodeURIComponent(shipmentId)}/dispatch`,
+      method: "POST",
+      body: payload,
+    });
+    if (!res.success) {
+      return { success: false, error: res.error || "Failed to dispatch shipment" };
+    }
+    return { success: true, data: res.data, message: res.message };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Failed to dispatch shipment",
+    };
+  }
+}
+
+/**
+ * Update vendor shipment status
+ * POST /vendor/orders/:shipmentId/status { status, note? }
+ */
+export async function updateVendorShipmentStatus(
+  shipmentId: string,
+  payload: { status: string; note?: string }
+): Promise<ApiResponse<any>> {
+  try {
+    const res = await requestJson<{ success: boolean; data?: any; error?: string }, typeof payload>({
+      path: `/vendor/orders/${encodeURIComponent(shipmentId)}/status`,
+      method: "POST",
+      body: payload,
+    });
+    if (!res.success) {
+      return { success: false, error: res.error || "Failed to update shipment status" };
+    }
+    return { success: true, data: res.data };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Failed to update shipment status",
+    };
+  }
+}
+
+/**
+ * Fetch a single vendor shipment by ID
+ * GET /vendor/orders/:shipmentId
+ */
+export async function getVendorShipmentById(
+  shipmentId: string
+): Promise<ApiResponse<any>> {
+  try {
+    const res = await requestJson<{ success: boolean; data: any; error?: string }>({
+      path: `/vendor/orders/${encodeURIComponent(shipmentId)}`,
+      method: "GET",
+    });
+    if (!res.success) {
+      return { success: false, error: res.error || "Failed to fetch shipment details" };
+    }
+    return { success: true, data: res.data };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Failed to fetch shipment details",
+    };
+  }
+}
+
+/**
+ * Advance a factory order's pre-dispatch production_stage.
+ * Valid stages: "materials" | "production" | "qc" | "ready"
+ * POST /api/vendor/orders/:shipmentId/stage { stage }
+ *
+ * This hits the Next.js route handler (same origin), not the Express
+ * backend, so baseUrl is left empty to prevent NEXT_PUBLIC_API_URL
+ * from being prepended.
+ */
+export async function updateVendorOrderStage(
+  shipmentId: string,
+  stage: "materials" | "production" | "qc" | "ready"
+): Promise<ApiResponse<{ shipmentId: string; orderId: string; production_stage: string }>> {
+  try {
+    const res = await requestJson<
+      {
+        success: boolean;
+        data?: { shipmentId: string; orderId: string; production_stage: string };
+        error?: string;
+        message?: string;
+      },
+      { stage: string }
+    >({
+      baseUrl: "",
+      path: `/api/vendor/orders/${encodeURIComponent(shipmentId)}/stage`,
+      method: "POST",
+      body: { stage },
+    });
+    if (!res.success) {
+      return { success: false, error: res.error || "Failed to update production stage" };
+    }
+    return { success: true, data: res.data! };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || "Failed to update production stage",
+    };
+  }
+}

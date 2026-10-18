@@ -74,6 +74,7 @@ export interface MarketplaceProduct {
   shop_group: string;
   type_name: string | null;
   is_3d: boolean;
+  model_url?: string | null;
   in_stock: boolean;
   retailer: RetailerSummary | null;
   variants: ProductVariant[];
@@ -165,6 +166,8 @@ function normaliseRaw(row: any): MarketplaceProduct {
     .map((v: ProductVariant) => Number(v.price))
     .filter((n: number) => !Number.isNaN(n));
 
+  const modelUrl = row.specs_json?.model_url || row.model_url || null;
+
   return {
     id: row.id,
     canvas_model_id: row.canvas_model_id ?? null,
@@ -180,7 +183,8 @@ function normaliseRaw(row: any): MarketplaceProduct {
     lead_time_days: Number(row.lead_time_days ?? 14),
     shop_group: row.shop_group ?? "Other",
     type_name: row.type_name ?? null,
-    is_3d: Boolean(row.canvas_model_id),
+    model_url: modelUrl,
+    is_3d: Boolean(row.canvas_model_id || modelUrl),
     in_stock: variants.some((v: ProductVariant) => v.stock_quantity > 0),
     retailer: row.retailer ?? row.retailers ?? null,
     variants,

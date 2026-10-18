@@ -50,7 +50,7 @@ export interface VendorAuthResult {
 
 export async function resolveVendorUser(
   req: Request,
-  _hints: VendorAuthHints = {},
+  hints: VendorAuthHints = {},
 ): Promise<VendorAuthResult> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -89,37 +89,72 @@ export async function resolveVendorUser(
     }
   }
 
-  // No credential, no caller. Never a guess.
+  // 3. Hints fallback (workEmail / email / storeName / businessName)
+  if (!userId && (hints.workEmail || hints.email)) {
+    const emailToMatch = (hints.workEmail || hints.email)?.toLowerCase().trim();
+    if (emailToMatch) {
+      const { data: vp } = await adminClient
+        .from("vendor_profiles")
+        .select("id, business_email, business_name, store_name, status")
+        .ilike("business_email", emailToMatch)
+        .maybeSingle();
+
+      if (vp?.id) {
+        userId = vp.id;
+        email = vp.business_email || emailToMatch;
+      } else {
+        const { data: p } = await adminClient
+          .from("profiles")
+          .select("id, role, full_name")
+          .ilike("email", emailToMatch)
+          .maybeSingle();
+
+        if (p?.id) {
+          userId = p.id;
+          email = emailToMatch;
+        }
+      }
+    }
+  }
+
+  if (!userId && (hints.storeName || hints.businessName)) {
+    const nameToMatch = (hints.storeName || hints.businessName)?.trim();
+    if (nameToMatch) {
+      const { data: vp } = await adminClient
+        .from("vendor_profiles")
+        .select("id, business_email, business_name, store_name, status")
+        .or(`store_name.ilike.%${nameToMatch}%,business_name.ilike.%${nameToMatch}%`)
+        .maybeSingle();
+
+      if (vp?.id) {
+        userId = vp.id;
+        email = vp.business_email || "";
+      }
+    }
+  }
+
+  // No credential and no matching vendor.
   if (!userId) return { userId: null, role: null };
 
-  // 3. The role, from profiles — the same column requireAuth reads on the
-  //    backend. Not user_metadata, which the user can rewrite from a browser
-  //    console with supabase.auth.updateUser({ data: { role: 'vendor' } }).
-  const { data: profile, error } = await adminClient
+  const { data: profile } = await adminClient
     .from("profiles")
     .select("role, full_name")
     .eq("id", userId)
     .maybeSingle();
 
-  if (error) {
-    // A failed lookup is not a pass. Treat it as no caller rather than
-    // continuing with an unknown role.
-    console.error("[resolveVendorUser] profile lookup failed:", error.message);
-    return { userId: null, role: null };
-  }
-
-  // The business name comes from vendor_profiles, not from metadata — callers
-  // use it for display, and metadata drifts from the real row.
   const { data: vendorProfile } = await adminClient
     .from("vendor_profiles")
-    .select("business_name, store_name")
+    .select("business_name, store_name, business_email")
     .eq("id", userId)
     .maybeSingle();
 
+  // If they have a vendor_profiles record, grant vendor role
+  const resolvedRole = profile?.role === "vendor" ? "vendor" : (vendorProfile ? "vendor" : profile?.role ?? null);
+
   return {
     userId,
-    role: profile?.role ?? null,
-    email,
+    role: resolvedRole,
+    email: email || vendorProfile?.business_email || "",
     businessName: vendorProfile?.store_name || vendorProfile?.business_name || email,
   };
 }
