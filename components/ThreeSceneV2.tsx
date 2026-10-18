@@ -541,8 +541,12 @@ function RoomRoof({ room, world }: { room: PolyRoom; world: World }) {
 
   return (
     <group position={[0, WALL_H, 0]}>
-      {/* Indoor ceiling underside visible from inside room */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -0.005, 0]} receiveShadow>
+      {/* Indoor ceiling underside visible from inside room.
+           Named so the path tracer can turn it into a light — see
+           PathTracerLayer. In raster the room is lit by a directional light
+           that passes straight through walls; in a path tracer it does not,
+           which is why the traced interior came out almost black. */}
+      <mesh name="nooi-ceiling" rotation={[Math.PI / 2, 0, 0]} position={[0, -0.005, 0]} receiveShadow>
         <shapeGeometry args={[shape]} />
         <meshStandardMaterial
           color="#fcfbf9"

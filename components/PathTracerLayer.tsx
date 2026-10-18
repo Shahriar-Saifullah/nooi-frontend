@@ -63,6 +63,14 @@ interface Props {
 function prepareScene(scene: THREE.Object3D): () => void {
   const swapped: Array<{ mesh: THREE.Mesh; original: THREE.BufferGeometry }> = [];
   const hidden: THREE.Object3D[] = [];
+  const litCeilings: Array<{ mesh: THREE.Mesh; original: THREE.Material | THREE.Material[] }> = [];
+
+  // The Lightformer environment was tuned as a subtle fill for the raster
+  // view, where a directional light does the real work. Here it is one of only
+  // two light sources, so it carries far more of the room.
+  const sceneRoot = scene as THREE.Scene;
+  const prevEnvIntensity = sceneRoot.environmentIntensity ?? 1;
+  sceneRoot.environmentIntensity = 2.2;
 
   scene.traverse((o) => {
     // ContactShadows and other helpers are a fake. Real light transport
@@ -76,6 +84,33 @@ function prepareScene(scene: THREE.Object3D): () => void {
 
     const mesh = o as THREE.Mesh;
     if (!(mesh as any).isMesh || !mesh.geometry) return;
+
+    // THE INTERIOR LIGHT.
+    //
+    // The scene's only real light is a directionalLight outside the building.
+    // In raster that light passes through walls, so the room looks lit; a path
+    // tracer respects the geometry, so the sun hits the roof and nothing
+    // reaches inside. That is why the first traced frames came out nearly
+    // black with only the lamp visible.
+    //
+    // Real interiors are lit from above. Turning the ceiling underside into an
+    // emissive surface is how architectural renderers solve exactly this — it
+    // gives soft, even light with no hard shadows, and because the room is
+    // genuinely bright the tracer converges far faster: most of the grain was
+    // rays searching for light that barely arrived.
+    if (mesh.name === "nooi-ceiling") {
+      litCeilings.push({ mesh, original: mesh.material });
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: "#fcfbf9",
+        // Warm, and bright enough to carry a room without blowing out the
+        // walls directly beneath it.
+        emissive: new THREE.Color("#fff4e2"),
+        emissiveIntensity: 2.4,
+        roughness: 1,
+        side: THREE.DoubleSide,
+      });
+      return;
+    }
 
     const attrs = mesh.geometry.attributes as Record<string, any>;
     const interleaved = Object.values(attrs).some(
@@ -101,6 +136,13 @@ function prepareScene(scene: THREE.Object3D): () => void {
   });
 
   return () => {
+    sceneRoot.environmentIntensity = prevEnvIntensity;
+    for (const { mesh, original } of litCeilings) {
+      const lit = mesh.material;
+      mesh.material = original;
+      if (Array.isArray(lit)) lit.forEach(m => m.dispose());
+      else lit.dispose();
+    }
     for (const { mesh, original } of swapped) {
       const flat = mesh.geometry;
       mesh.geometry = original;
@@ -110,6 +152,15 @@ function prepareScene(scene: THREE.Object3D): () => void {
   };
 }
 
+/** Resolution while the camera is moving. The image is discarded on every
+ *  move, so full-resolution tracing during a drag is wasted entirely. */
+const MOVING_SCALE = 0.3;
+/** Resolution once the camera settles and samples start accumulating. */
+const STILL_SCALE = 1.0;
+/** How long the camera must be still before switching up. Short enough to
+ *  feel immediate, long enough not to thrash during a slow drag. */
+const SETTLE_MS = 350;
+
 export default function PathTracerLayer({
   active, onStats, maxSamples = 200, bounces = 3,
 }: Props) {
@@ -118,6 +169,8 @@ export default function PathTracerLayer({
   const restore = useRef<(() => void) | null>(null);
   const lastCam = useRef(new THREE.Matrix4());
   const reported = useRef(-1);
+  const lastMove = useRef(0);
+  const atFullScale = useRef(false);
 
   // ── Build / tear down ──────────────────────────────────────────────────
   useEffect(() => {
@@ -135,6 +188,10 @@ export default function PathTracerLayer({
 
         const pt = new WebGLPathTracer(gl);
         pt.bounces = bounces;
+        // Quarter resolution to begin with. Moving the camera resets the
+        // image anyway, so tracing it at full size is work thrown away — this
+        // is what makes dragging feel responsive instead of sluggish.
+        pt.renderScale = MOVING_SCALE;
         // Tiles spread one sample across several frames, so the page stays
         // responsive on a large scene instead of locking up per sample.
         pt.tiles.set(2, 2);
@@ -190,8 +247,20 @@ export default function PathTracerLayer({
 
     // Any camera movement invalidates every accumulated sample — the image
     // is an average over one viewpoint. updateCamera() restarts it.
+    const now = performance.now();
     if (!lastCam.current.equals(camera.matrixWorld)) {
       lastCam.current.copy(camera.matrixWorld);
+      lastMove.current = now;
+      if (atFullScale.current) {
+        // Drop back to the small image for the duration of the movement.
+        pt.renderScale = MOVING_SCALE;
+        atFullScale.current = false;
+      }
+      try { pt.updateCamera(); } catch { /* mid-rebuild */ }
+    } else if (!atFullScale.current && now - lastMove.current > SETTLE_MS) {
+      // Settled. Go to full resolution and start accumulating properly.
+      pt.renderScale = STILL_SCALE;
+      atFullScale.current = true;
       try { pt.updateCamera(); } catch { /* mid-rebuild */ }
     }
 
