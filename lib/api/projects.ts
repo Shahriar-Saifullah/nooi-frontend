@@ -279,11 +279,20 @@ export async function aiFurnish(projectId: string, payload: AiFurnishPayload) {
 
 // ─── Render engine: live 3D scene → photorealistic image ─────────────────────
 
+export interface RenderFurnitureItem {
+  name: string;
+  color?: string;
+  material?: string;
+}
+
 export async function renderScene(
   projectId: string,
   prompt: string,
   sceneImage: string,
   depthImage?: string,
+  /** What is in the room. The server names these in the prompt so the model
+   *  has something to preserve rather than only a list of forbidden changes. */
+  furniture?: RenderFurnitureItem[],
 ) {
   const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch(`${BASE_URL}/projects/${projectId}/render-scene`, {
@@ -294,6 +303,7 @@ export async function renderScene(
       prompt,
       scene_image: sceneImage,
       ...(depthImage ? { depth_image: depthImage } : {}),
+      ...(furniture?.length ? { furniture } : {}),
     }),
   });
   const json = await res.json();
