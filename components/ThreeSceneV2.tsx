@@ -26,8 +26,10 @@ import PathTracerLayer, { type PathTracerStats } from "@/components/PathTracerLa
 import LightingRig, {
   DEFAULT_LIGHTING, type LightingSettings,
 } from "@/components/LightingRig";
-import { EffectComposer } from "@react-three/postprocessing";
-import { N8AO } from "@react-three/postprocessing";
+import {
+  EffectComposer, N8AO, Bloom, DepthOfField, Vignette, Noise,
+  HueSaturation, BrightnessContrast,
+} from "@react-three/postprocessing";
 
 // ─── Canvas Bridge Helper ──────────────────────────────────────────────────────
 // Textures decode asynchronously; nudge a redraw when one lands so a newly
@@ -1788,6 +1790,18 @@ function SceneContent({
 //
 // N8AO rather than the built-in SSAO: it handles large scenes without the
 // halo artefacts SSAO produces at this scale, and it is noticeably cheaper.
+/**
+ * The finishing pass.
+ *
+ * None of this invents detail — a post-process can only work with pixels that
+ * are already on screen, so it will never put wood grain on a flat surface.
+ * What it does is make a correct render look FINISHED: the difference between
+ * a viewport and a product is largely bloom, a camera-like falloff, and a
+ * colour grade, which is why every game and every arch-viz tool runs them.
+ *
+ * All of it is cheap enough to hold 60fps while the user moves, which is the
+ * whole reason to do this rather than trace rays.
+ */
 function Postprocessing({ world, enabled }: { world: World; enabled: boolean }) {
   if (!enabled) return null;
   return (
@@ -1806,6 +1820,54 @@ function Postprocessing({ world, enabled }: { world: World; enabled: boolean }) 
         screenSpaceRadius={false}
         color="#1a1a1a"
       />
+
+      {/*
+        Bloom. The single strongest "this is a render" cue: bright surfaces
+        bleeding slightly into their surroundings is what a real lens does and
+        a raw framebuffer does not.
+
+        The threshold matters more than the strength — too low and the whole
+        image hazes over, which is the classic amateur-render look. 0.9 means
+        only genuinely bright things glow: the lamp bulbs, the daylight
+        falling through glazing, a highlight on polished tile.
+      */}
+      <Bloom
+        intensity={0.42}
+        luminanceThreshold={0.9}
+        luminanceSmoothing={0.3}
+        mipmapBlur
+      />
+
+      {/*
+        Depth of field. Reads as a camera rather than a computer — a renderer
+        has infinite focus and the eye knows it.
+
+        Deliberately gentle: a strong blur looks like a tilt-shift toy, and
+        someone inspecting their own furniture needs it sharp. focusDistance
+        is normalised 0–1 across the view, so 0.025 keeps roughly the near and
+        middle of a room crisp and softens the far wall.
+      */}
+      <DepthOfField
+        focusDistance={0.025}
+        focalLength={0.05}
+        bokehScale={2.2}
+      />
+
+      {/*
+        Grade. Slightly lifted contrast and a touch of saturation — the same
+        move a photographer makes on a flat RAW, and the reason film looks
+        like film.
+      */}
+      <HueSaturation saturation={0.08} />
+      <BrightnessContrast brightness={0.01} contrast={0.08} />
+
+      {/*
+        Vignette and grain, both very light. They hide the perfect uniformity
+        that marks a synthetic image — real lenses fall off at the corners and
+        real sensors have noise.
+      */}
+      <Vignette offset={0.3} darkness={0.42} />
+      <Noise opacity={0.016} premultiply />
     </EffectComposer>
   );
 }

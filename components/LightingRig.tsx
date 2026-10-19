@@ -146,10 +146,18 @@ export default function LightingRig({
 
       return {
         id: `op${i}`,
-        // Set back slightly into the room so the light is not co-planar with
-        // the wall it comes through, which would light the wall edge-on.
-        pos: [wx + inward.x * 0.35, y, wz + inward.z * 0.35] as const,
-        target: [wx + inward.x * 4, y * 0.6, wz + inward.z * 4] as const,
+        // Stand WELL clear of the wall.
+        //
+        // At 0.35m the emitter sat inside the wall volume itself — walls here
+        // are up to ~0.4m thick after the thickness clamp — so the cone was
+        // starting mid-masonry and spilling through it in bright vertical
+        // bands that fell across the floor where no window was.
+        //
+        // 1.2m puts it unambiguously in the room, which is also closer to the
+        // truth: daylight does not originate at the glass, it floods in past
+        // it.
+        pos: [wx + inward.x * 1.2, y, wz + inward.z * 1.2] as const,
+        target: [wx + inward.x * 5, y * 0.55, wz + inward.z * 5] as const,
         // Wider openings admit more light, but not without limit — a 7m
         // slider should not outshine the sun.
         power: Math.min(1.5, 0.6 + width * 0.22),
@@ -175,7 +183,17 @@ export default function LightingRig({
           out every shadow in the scene. */}
       <ambientLight intensity={0.1 * b} />
 
-      {/* ── Fixtures ── */}
+      {/*
+        ── Fixtures ──
+
+        Each gets a light AND a visible glow. A lamp model lit only from
+        outside renders as a dark slab bolted to the ceiling — which is what
+        the pendant above was doing — and a room where the light source looks
+        switched off reads as wrong even when the floor beneath it is lit.
+
+        The sphere is small, unlit, and ignores depth-write so it never
+        occludes anything; it is a highlight, not geometry.
+      */}
       {fixtures.map(f => (
         <pointLight
           key={f.id}
@@ -203,6 +221,24 @@ export default function LightingRig({
           */
           castShadow={false}
         />
+      ))}
+
+      {fixtures.map(f => (
+        <mesh
+          key={`${f.id}-glow`}
+          position={f.pos as unknown as [number, number, number]}
+          name="nooi-noexport"
+          raycast={() => null}
+        >
+          <sphereGeometry args={[f.ceiling ? 0.11 : 0.07, 12, 12]} />
+          <meshBasicMaterial
+            color={bulb}
+            toneMapped={false}
+            transparent
+            opacity={0.9}
+            depthWrite={false}
+          />
+        </mesh>
       ))}
 
       {/* ── Daylight through openings ── */}
