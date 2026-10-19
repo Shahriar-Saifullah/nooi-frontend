@@ -1,5 +1,5 @@
 /**
- * Wall surface library — tileable materials applied to a single wall face
+ * Surface library — tileable materials applied to a wall face or a floor
  * ------------------------------------------------------------------------
  * These are TEXTURES, not geometry. A slatted wood panel supplied as a 4 m
  * 3D model would cost ~12k polys, only fit walls of that exact size, and need
@@ -15,7 +15,9 @@
  *
  * tileSize is what makes scale correct: it's how large one repetition of the
  * image is IN METRES on a real wall. Get it wrong and the grain looks like
- * either matchsticks or tree trunks.
+ * either matchsticks or tree trunks. It matters even more on a floor —
+ * everyone knows how wide a floorboard is, so the wrong scale reads as fake
+ * instantly.
  */
 
 export type SurfaceCategory = "wood" | "plaster" | "stone" | "tile" | "brick" | "fabric";
@@ -24,6 +26,14 @@ export interface WallSurface {
   id: string;                 // STABLE — saved per wall face, never rename
   name: string;
   category: SurfaceCategory;
+  /**
+   * Where this surface may be applied.
+   *
+   * A slatted wall panel laid flat reads wrong, and plaster underfoot reads
+   * wronger; porcelain tile is genuinely both. Absent means wall-only, so
+   * every existing entry keeps the behaviour it had.
+   */
+  usage?: ("wall" | "floor")[];
   map: string;                // colour/diffuse texture
   normalMap?: string;         // optional relief map
   tileSize: { w: number; h: number };  // metres covered by one repetition
@@ -51,6 +61,7 @@ export const WALL_SURFACES: WallSurface[] = [
     id: "wood-panel-40",
     name: "Walnut Slat Panel",
     category: "wood",
+    // Wall only: slats laid flat look like a boardwalk, not a floor.
     map: "/textures/wall/wood_panel_40.jpg",
     normalMap: "/textures/wall/wood_panel_40_normal.jpg",
     tileSize: { w: 4.04, h: 3.0 },
@@ -71,10 +82,15 @@ export const WALL_SURFACES: WallSurface[] = [
   // The manufacturer's own size is in the filename: 600 x 1200 mm. Using that
   // as tileSize means the tiles render at true scale on any wall — a 3 m wall
   // shows exactly 5 tiles across, like the real product would.
+  //
+  // 600 x 1200 is also a standard FLOOR tile size, and this is a floor-rated
+  // porcelain product, so these three are the library's only floor finishes
+  // until a wood option is added.
   {
     id: "tile-venice-beige",
     name: "Venice Beige",
     category: "tile",
+    usage: ["wall", "floor"],
     map: "/textures/wall/tile_venice_beige.jpg",
     tileSize: { w: 0.6, h: 1.2 },
     roughness: 0.15,          // gloss finish
@@ -84,6 +100,7 @@ export const WALL_SURFACES: WallSurface[] = [
     id: "tile-venice-grey",
     name: "Venice Grey",
     category: "tile",
+    usage: ["wall", "floor"],
     map: "/textures/wall/tile_venice_grey.jpg",
     tileSize: { w: 0.6, h: 1.2 },
     roughness: 0.15,
@@ -93,11 +110,32 @@ export const WALL_SURFACES: WallSurface[] = [
     id: "tile-venice-black",
     name: "Venice Black",
     category: "tile",
+    usage: ["wall", "floor"],
     map: "/textures/wall/tile_venice_black.jpg",
     tileSize: { w: 0.6, h: 1.2 },
     roughness: 0.15,
     credit: { source: "Amygres (via client)", license: "VERIFY BEFORE SHIPPING" },
   },
+
+  // ── WOOD FLOORING — the gap worth filling first ─────────────────────────
+  // Every reference interior a client points at has a wood floor, and the
+  // library has none: wood-panel-40 above is a slatted WALL panel.
+  //
+  // ambientCG is CC0, so nothing to track. Search "WoodFloor", take the Color
+  // and Normal maps at 2K, drop them in /public/textures/wall/, then
+  // uncomment. A plank is roughly 19cm wide, so a tile showing about ten
+  // planks is ~1.9 m across — get this right or it reads as fake on sight.
+  // {
+  //   id: "wood-oak-plank",
+  //   name: "Oak Plank",
+  //   category: "wood",
+  //   usage: ["wall", "floor"],
+  //   map: "/textures/wall/wood_oak_plank.jpg",
+  //   normalMap: "/textures/wall/wood_oak_plank_normal.jpg",
+  //   tileSize: { w: 1.9, h: 1.9 },
+  //   roughness: 0.55,
+  //   credit: { source: "ambientCG", license: "CC0" },
+  // },
 
   // ── Polished concrete (from the client's textures pack) ──────────────────
   // Uncomment once concrete_polished.jpg + _normal.jpg are in place.
@@ -105,6 +143,7 @@ export const WALL_SURFACES: WallSurface[] = [
   //   id: "concrete-polished",
   //   name: "Polished Concrete",
   //   category: "stone",
+  //   usage: ["wall", "floor"],
   //   map: "/textures/wall/concrete_polished.jpg",
   //   normalMap: "/textures/wall/concrete_polished_normal.jpg",
   //   tileSize: { w: 2.0, h: 2.0 },
@@ -132,3 +171,13 @@ export const surfacesByCategory = (c: SurfaceCategory | "all"): WallSurface[] =>
 /** categories that actually have entries — avoids empty filter chips */
 export const activeSurfaceCategories = (): SurfaceCategory[] =>
   Array.from(new Set(WALL_SURFACES.map(s => s.category)));
+
+/**
+ * Surfaces that may be applied to a floor.
+ *
+ * Deliberately a filtered subset rather than the whole library: offering
+ * plaster or wall slats underfoot produces a scene nobody would build, and a
+ * picker full of wrong options is worse than a short one.
+ */
+export const floorSurfaces = (): WallSurface[] =>
+  WALL_SURFACES.filter(s => s.usage?.includes("floor"));

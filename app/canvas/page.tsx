@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
   Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
-  Ruler, Sparkles,
+  Ruler, Sparkles, Sun,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -28,11 +28,16 @@ import {
 } from "@/lib/placement/snap";
 import {
   WALL_SURFACES, SURFACE_CATEGORY_LABELS, activeSurfaceCategories,
+  floorSurfaces as floorSurfaceOptions,
   type SurfaceCategory,
 } from "@/lib/surfaces/catalog";
 import { DOOR_FINISHES } from "@/lib/surfaces/doors";
 import type { ThreeSceneHandle, CameraViewPreset } from "@/components/ThreeSceneV2";
 import type { PathTracerStats } from "@/components/PathTracerLayer";
+import {
+  DEFAULT_LIGHTING, type LightingSettings,
+} from "@/components/LightingRig";
+import { capturePanoPair } from "@/lib/panoTest";
 import { useProjectStore } from "@/lib/store";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
@@ -140,6 +145,8 @@ export default function CanvasPage() {
     setOpenings([]);
     setWallColors({});
     setWallSurfaces({});
+    setFloorSurfaces({});
+    setSelectedFloorRoomId(null);
     setDoorFinishes({});
     setSelectedWall(null);
     setSelectedDoor(null);
@@ -180,6 +187,10 @@ export default function CanvasPage() {
           const savedWallSurfaces = (p.room_data as any)?.wall_surfaces;
           if (savedWallSurfaces && typeof savedWallSurfaces === "object") {
             setWallSurfaces(savedWallSurfaces);
+          }
+          const savedFloorSurfaces = (p.room_data as any)?.floor_surfaces;
+          if (savedFloorSurfaces && typeof savedFloorSurfaces === "object") {
+            setFloorSurfaces(savedFloorSurfaces);
           }
           const savedDoorFinishes = (p.room_data as any)?.door_finishes;
           if (savedDoorFinishes && typeof savedDoorFinishes === "object") {
@@ -344,6 +355,9 @@ export default function CanvasPage() {
   const [selectedWall, setSelectedWall] = useState<{ key: string; side: "A" | "B" } | null>(null);
   const [wallSurfaces, setWallSurfaces] = useState<Record<string, string>>({});
   const [doorFinishes, setDoorFinishes] = useState<Record<string, string>>({});
+  // Per-room floor finish. Keyed by room id, saved alongside the wall ones.
+  const [floorSurfaces, setFloorSurfaces] = useState<Record<string, string>>({});
+  const [selectedFloorRoomId, setSelectedFloorRoomId] = useState<string | null>(null);
   const [selectedDoor, setSelectedDoor] = useState<string | null>(null);
   // door keys as reported by the 3D scene — authoritative
   const [doorKeys, setDoorKeys] = useState<string[]>([]);
@@ -361,15 +375,16 @@ export default function CanvasPage() {
     if (!furnitureLoaded.current && placedFurniture.length === 0
         && Object.keys(wallColors).length === 0
         && Object.keys(wallSurfaces).length === 0
+        && Object.keys(floorSurfaces).length === 0
         && Object.keys(doorFinishes).length === 0) return;
     furnitureLoaded.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces, doorFinishes)
+      saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces, doorFinishes, floorSurfaces)
         .catch(err => console.error("Scene save failed:", err));
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [placedFurniture, wallColors, wallSurfaces, doorFinishes, currentProject?.id]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, currentProject?.id]);
 
   // ─── Canvas → Shop ─────────────────────────────────────────────────────────
   // The save above is debounced 1500ms. Navigating inside that window would
@@ -392,6 +407,7 @@ export default function CanvasPage() {
         wallColors,
         wallSurfaces,
         doorFinishes,
+        floorSurfaces,
       );
       router.push(`/marketplace?project=${currentProject.id}`);
     } catch (err) {
@@ -576,6 +592,13 @@ export default function CanvasPage() {
     }
     return { width: 1500, depth: 1200 };
   })();
+
+  // ── Lighting ──────────────────────────────────────────────────────────────
+  // Two dials rather than a fixture-by-fixture panel. The scene derives its
+  // lights from what is already placed — lamps emit, openings admit daylight —
+  // so the only things left to decide are how bright and how warm.
+  const [lighting, setLighting] = useState<LightingSettings>(DEFAULT_LIGHTING);
+  const [lightPanelOpen, setLightPanelOpen] = useState(false);
 
   // ── Rendered walkthrough (path tracing) ───────────────────────────────────
   // Not the AI render. This traces the real scene — the user's own furniture,
@@ -1141,6 +1164,7 @@ export default function CanvasPage() {
     furniture: PlacedFurniture[];
     wallColors: Record<string, string>;
     wallSurfaces: Record<string, string>;
+    floorSurfaces: Record<string, string>;
     doorFinishes: Record<string, string>;
   };
 
@@ -1154,7 +1178,7 @@ export default function CanvasPage() {
 
   const currentSnapshot = (): SceneSnapshot => ({
     furniture: placedFurniture,
-    wallColors, wallSurfaces, doorFinishes,
+    wallColors, wallSurfaces, floorSurfaces, doorFinishes,
   });
 
   const applySnapshot = (s: SceneSnapshot) => {
@@ -1162,6 +1186,7 @@ export default function CanvasPage() {
     setPlacedFurniture(s.furniture);
     setWallColors(s.wallColors);
     setWallSurfaces(s.wallSurfaces);
+    setFloorSurfaces(s.floorSurfaces);
     setDoorFinishes(s.doorFinishes);
     setSelectedFurnitureId(null);
     setSelectedWall(null);
@@ -1190,7 +1215,7 @@ export default function CanvasPage() {
     }, 700);
     return () => { if (historyTimer.current) clearTimeout(historyTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placedFurniture, wallColors, wallSurfaces, doorFinishes]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes]);
 
   const undo = () => {
     const prev = undoStack.current.pop();
@@ -1227,7 +1252,7 @@ export default function CanvasPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placedFurniture, wallColors, wallSurfaces, doorFinishes]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes]);
 
   // Tooltips should name the shortcut the user actually presses.
   const isMac = typeof navigator !== "undefined"
@@ -1331,6 +1356,16 @@ export default function CanvasPage() {
     if (placedFurniture.length > 0) revalidatePlacements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rfWalls, rooms]);
+
+  // ── Panorama seam test (temporary) ────────────────────────────────────────
+  // Not a feature. Run __nooiPanoTest() from the console in 3D mode; it
+  // downloads two adjacent 90° views with an overlap so we can check whether
+  // separately-rendered faces still match where they meet. Delete once that
+  // question is settled either way.
+  useEffect(() => {
+    (window as any).__nooiPanoTest = () => capturePanoPair(sceneRef.current);
+    return () => { delete (window as any).__nooiPanoTest; };
+  }, []);
 
   const handleAssistantCommand = async (command: string): Promise<boolean> => {
     if (FURNISH_VERB.test(command) && FURNISH_NOUN.test(command)) {
@@ -1808,6 +1843,57 @@ export default function CanvasPage() {
             </div>
           )}
 
+          {/* Lighting. Two dials, because the scene works out the rest:
+               every lamp placed emits, every opening admits daylight. */}
+          {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
+            <div className="absolute bottom-5 left-5 z-10">
+              {lightPanelOpen && (
+                <div className="mb-2 w-[214px] rounded-[12px] bg-black/70 backdrop-blur-sm p-3.5 text-white">
+                  <label className="block text-[11px] text-white/70">
+                    Brightness
+                    <input
+                      type="range" min={0.3} max={2} step={0.05}
+                      value={lighting.brightness}
+                      onChange={e => setLighting(l =>
+                        ({ ...l, brightness: Number(e.target.value) }))}
+                      className="mt-1.5 w-full accent-[#c7de7d]"
+                    />
+                  </label>
+                  <label className="mt-3 block text-[11px] text-white/70">
+                    Warmth
+                    <input
+                      type="range" min={0} max={1} step={0.05}
+                      value={lighting.warmth}
+                      onChange={e => setLighting(l =>
+                        ({ ...l, warmth: Number(e.target.value) }))}
+                      className="mt-1.5 w-full accent-[#c7de7d]"
+                    />
+                    <span className="mt-0.5 flex justify-between text-[10px] text-white/45">
+                      <span>Daylight</span><span>Tungsten</span>
+                    </span>
+                  </label>
+                  <button
+                    onClick={() => setLighting(DEFAULT_LIGHTING)}
+                    className="mt-3 w-full rounded-[7px] border border-white/20 py-1.5 text-[11px] text-white/70 hover:bg-white/10"
+                  >
+                    Reset
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={() => setLightPanelOpen(o => !o)}
+                title="Lighting"
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
+                  lightPanelOpen
+                    ? "bg-white text-[#0a0a0a]"
+                    : "bg-black/50 text-white/80 hover:text-white"
+                }`}
+              >
+                <Sun size={13} />Lighting
+              </button>
+            </div>
+          )}
+
           {/* Camera view presets — hidden while a walkthrough is playing */}
           {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
             <div className="absolute bottom-5 right-5 z-10 flex items-center gap-0.5 bg-black/50 backdrop-blur-sm rounded-full p-1">
@@ -2059,13 +2145,24 @@ export default function CanvasPage() {
                   furniture={placedFurniture}
                   onFurnitureSelect={(id) => {
                     setSelectedFurnitureId(id);
-                    if (id) { setSelectedWall(null); setSelectedDoor(null); }
+                    if (id) { setSelectedWall(null); setSelectedDoor(null); setSelectedFloorRoomId(null); }
                   }}
                   onFurnitureMove={handleFurnitureMove}
                   onFurnitureRotate={handleFurnitureRotate}
                   selectedFurnitureId={selectedFurnitureId}
                   wallColors={wallColors}
                   wallSurfaces={wallSurfaces}
+                  floorSurfaces={floorSurfaces}
+                  selectedFloorRoomId={selectedFloorRoomId}
+                  onFloorSelect={(id) => {
+                    setSelectedFloorRoomId(id);
+                    if (id) {
+                      setSelectedFurnitureId(null);
+                      setSelectedWall(null);
+                      setSelectedDoor(null);
+                      setRightTab("edit");
+                    }
+                  }}
                   doorFinishes={doorFinishes}
                   onDoorKeys={setDoorKeys}
                   selectedDoorKey={selectedDoor}
@@ -2074,14 +2171,16 @@ export default function CanvasPage() {
                     if (key) {
                       setSelectedFurnitureId(null);
                       setSelectedWall(null);
+                      setSelectedFloorRoomId(null);
                       setRightTab("edit");
                     }
                   }}
                   selectedWallSide={selectedWall ? wallKeyOf(selectedWall) : null}
                   onWallSelect={(sel) => {
                     setSelectedWall(sel);
-                    if (sel) { setSelectedFurnitureId(null); setSelectedDoor(null); setRightTab("edit"); }
+                    if (sel) { setSelectedFurnitureId(null); setSelectedDoor(null); setSelectedFloorRoomId(null); setRightTab("edit"); }
                   }}
+                  lighting={lighting}
                   pathTracing={pathTracing}
                   onPathTracerStats={setPtStats}
                   walkthroughActive={walkthroughActive}
@@ -2204,7 +2303,82 @@ export default function CanvasPage() {
                   onChange={patchSelected}
                   onDelete={handleDelete}
                 />
-              ) : selectedDoor ? (
+              ) : selectedFloorRoomId ? (() => {
+                const room = rooms.find(r => r.id === selectedFloorRoomId);
+                const options = floorSurfaceOptions();
+                const current = floorSurfaces[selectedFloorRoomId];
+                return (
+                  <div className="flex flex-col gap-4">
+                    <div>
+                      <p className="text-[13px] font-semibold text-[#0a0a0a]">Floor finish</p>
+                      <p className="text-[11px] text-[#a3a3a3] mt-0.5">
+                        {room?.name ?? "This room"} — only this room changes.
+                      </p>
+                    </div>
+
+                    {options.length === 0 ? (
+                      <p className="text-[11px] text-[#a3a3a3] py-4 text-center">
+                        No floor surfaces installed yet. Wall finishes are not
+                        offered here — slats and plaster read wrong underfoot.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2">
+                        {options.map(sf => {
+                          const active = current === sf.id;
+                          return (
+                            <button
+                              key={sf.id}
+                              onClick={() => setFloorSurfaces(prev =>
+                                ({ ...prev, [selectedFloorRoomId]: sf.id }))}
+                              className={`rounded-[8px] overflow-hidden border text-left transition hover:shadow-sm ${
+                                active ? "border-[#004643] ring-2 ring-[#c7de7d]" : "border-[#e5e5e5]"
+                              }`}
+                              title={sf.name}
+                            >
+                              <div className="aspect-square bg-[#fafafa]">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={sf.thumbnail ?? sf.map} alt={sf.name}
+                                     className="w-full h-full object-cover" loading="lazy" />
+                              </div>
+                              <p className="px-1.5 py-1 text-[9.5px] font-medium text-[#525252] truncate">
+                                {sf.name}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {current && (
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => setFloorSurfaces(prev => {
+                            const next = { ...prev };
+                            // One finish through the whole plan is what most
+                            // real homes have, and setting it room by room is
+                            // tedious enough that people give up halfway.
+                            for (const r of rooms) next[r.id] = current;
+                            return next;
+                          })}
+                          className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#525252] hover:bg-[#fafafa]"
+                        >
+                          Apply to all rooms{rooms.length > 1 ? ` (${rooms.length})` : ""}
+                        </button>
+                        <button
+                          onClick={() => setFloorSurfaces(prev => {
+                            const next = { ...prev };
+                            delete next[selectedFloorRoomId];
+                            return next;
+                          })}
+                          className="w-full py-2 rounded-[8px] border border-[#e5e5e5] text-[11px] font-medium text-[#b91c1c] hover:bg-[#fef2f2]"
+                        >
+                          Remove finish
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })() : selectedDoor ? (
                 <div className="flex flex-col gap-4">
                   <div>
                     <p className="text-[13px] font-semibold text-[#0a0a0a]">Door finish</p>
@@ -2439,7 +2613,7 @@ export default function CanvasPage() {
                   <p className="text-[11px] text-[#a3a3a3]">
                     {viewMode === "2d"
                       ? "Click a room in the floor plan to edit its measurements"
-                      : "Click a furniture item, wall or door in the 3D scene to edit it"}
+                      : "Click a furniture item, wall, door or floor in the 3D scene to edit it"}
                   </p>
                 </div>
               )}

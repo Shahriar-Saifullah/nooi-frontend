@@ -23,6 +23,9 @@ import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
 import PathTracerLayer, { type PathTracerStats } from "@/components/PathTracerLayer";
+import LightingRig, {
+  DEFAULT_LIGHTING, type LightingSettings,
+} from "@/components/LightingRig";
 import { EffectComposer } from "@react-three/postprocessing";
 import { N8AO } from "@react-three/postprocessing";
 
@@ -81,6 +84,9 @@ export interface ThreeSceneHandle {
   getCanvasElement: () => HTMLCanvasElement | null;
   /** smoothly move the camera to a preset view */
   setCameraView: (view: CameraViewPreset) => void;
+  /** The live camera. Needed to point it at each panorama face; the capture
+   *  functions render whatever it is currently looking at. */
+  getCamera: () => THREE.Camera | null;
 }
 
 export type CameraViewPreset = "default" | "top" | "front" | "inside";
@@ -119,6 +125,10 @@ interface ThreeSceneV2Props {
   wallColors?: Record<string, string>;
   /** per-side wall surface: "wallKey:A" | "wallKey:B" → surface id */
   wallSurfaces?: Record<string, string>;
+  /** per-room floor surface: room id → surface id */
+  floorSurfaces?: Record<string, string>;
+  selectedFloorRoomId?: string | null;
+  onFloorSelect?: (roomId: string | null) => void;
   /** per-door finish: door key → finish id */
   doorFinishes?: Record<string, string>;
   selectedDoorKey?: string | null;
@@ -138,6 +148,8 @@ interface ThreeSceneV2Props {
   onWalkthroughProgress?: (progress: number, info?: WalkthroughProgressInfo) => void;
   /** Ambient occlusion. On by default; pass false on weak hardware. */
   aoEnabled?: boolean;
+  /** Brightness and warmth for the interior lighting rig. */
+  lighting?: LightingSettings;
   /** Path-traced rendering. Replaces the raster view entirely while on. */
   pathTracing?: boolean;
   onPathTracerStats?: (s: PathTracerStats) => void;
@@ -435,7 +447,14 @@ function WallWithOpenings({
 
 // ─── Floors ──────────────────────────────────────────────────────────────────
 
-function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
+function RoomFloor({
+  room, world, surfaceId, selected, onSelect,
+}: {
+  room: PolyRoom; world: World;
+  surfaceId?: string;
+  selected?: boolean;
+  onSelect?: (roomId: string) => void;
+}) {
   const shape = useMemo(() => {
     const s = new THREE.Shape();
     if (room.polygon && room.polygon.length >= 3) {
@@ -487,23 +506,52 @@ function RoomFloor({ room, world }: { room: PolyRoom; world: World }) {
     );
   }
 
+  // The room-colour tint that used to sit on top of this at 0.22 opacity is
+  // gone. It is a 2D floor-plan affordance — colour-coding rooms — and in a
+  // lit 3D scene it turned every floor into muddy pastel. Room colour still
+  // identifies rooms in the plan, which is where it belongs.
+  const surf = surfaceId ? surfaceById(surfaceId) : undefined;
+
+  // Tiling needs the floor's real size, so one repetition covers the metres
+  // the surface says it should. A plank at the wrong scale reads as fake
+  // instantly, because everyone knows how wide a floorboard is.
+  const extent = useMemo(() => {
+    const b = shape.getPoints();
+    const xs = b.map(p => p.x), ys = b.map(p => p.y);
+    return {
+      w: Math.max(...xs) - Math.min(...xs),
+      d: Math.max(...ys) - Math.min(...ys),
+    };
+  }, [shape]);
+
+  const tex = surf ? getFaceTextures(surf, extent.w, extent.d) : undefined;
+
   return (
     <group>
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} receiveShadow>
+      <mesh
+        rotation={[Math.PI / 2, 0, 0]}
+        position={[0, 0.008, 0]}
+        receiveShadow
+        onPointerDown={onSelect ? (e) => {
+          e.stopPropagation();
+          onSelect(room.id);
+        } : undefined}
+        onClick={onSelect ? (e) => e.stopPropagation() : undefined}
+      >
         <shapeGeometry args={[shape]} />
         <meshStandardMaterial
-          color={room.color || "#e8e2d6"}
-          roughness={0.85}
-          transparent
-          opacity={0.22}
+          // Same reason as the walls: swapping `map` on a live material needs
+          // a shader recompile that R3F will not trigger, so a changing key
+          // forces a fresh one instead.
+          key={surf?.id ?? "base"}
+          map={tex?.map}
+          normalMap={tex?.normalMap}
+          color={tex ? (surf?.color ?? "#ffffff") : "#d9c7a7"}
+          roughness={surf?.roughness ?? 0.7}
+          emissive={selected ? "#c7de7d" : "#000000"}
+          emissiveIntensity={selected ? 0.18 : 0}
           side={THREE.DoubleSide}
         />
-      </mesh>
-      {/* wood base under indoor rooms */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
-        <shapeGeometry args={[shape]} />
-        <meshStandardMaterial color="#d9c7a7" roughness={0.7}
-          side={THREE.DoubleSide} />
       </mesh>
     </group>
   );
@@ -1293,6 +1341,7 @@ export interface SceneExportApi {
   capture: () => string;
   captureDepth: () => string;
   exportGlb: () => Promise<Blob>;
+  getCamera: () => THREE.Camera;
 }
 
 function ExportBridge({
@@ -1301,6 +1350,7 @@ function ExportBridge({
   const { gl, scene, camera } = useThree();
   useEffect(() => {
     register({
+      getCamera: () => camera,
       // Depth map for ControlNet-style conditioning. Renders the scene with a
       // depth material, then inverts it: three.js writes near=black/far=white,
       // while depth ControlNets expect near=white/far=black.
@@ -1434,6 +1484,7 @@ function SceneContent({
   rooms, rfWalls, openings, furniture, world,
   onFurnitureSelect, onFurnitureMove, onFurnitureRotate, selectedFurnitureId,
   wallColors, wallSurfaces, selectedWallSide, onWallSelect,
+  floorSurfaces, selectedFloorRoomId, onFloorSelect,
   doorFinishes, selectedDoorKey, onDoorSelect, onDoorKeys,
   insideMode = false,
 }: Required<Pick<ThreeSceneV2Props,
@@ -1448,6 +1499,9 @@ function SceneContent({
   wallSurfaces?: Record<string, string>;
   selectedWallSide?: string | null;
   onWallSelect?: (sel: WallSideSelection | null) => void;
+  floorSurfaces?: Record<string, string>;
+  selectedFloorRoomId?: string | null;
+  onFloorSelect?: (roomId: string | null) => void;
   doorFinishes?: Record<string, string>;
   selectedDoorKey?: string | null;
   onDoorSelect?: (key: string | null) => void;
@@ -1579,7 +1633,10 @@ function SceneContent({
     <group>
       {/* ground */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]} receiveShadow
-        onClick={() => { onFurnitureSelect?.(null); onWallSelect?.(null); onDoorSelect?.(null); }}>
+        onClick={() => {
+          onFurnitureSelect?.(null); onWallSelect?.(null);
+          onDoorSelect?.(null); onFloorSelect?.(null);
+        }}>
         <planeGeometry args={[world.totalW * 1.25, world.totalD * 1.25]} />
         <meshStandardMaterial color="#eae7e0" roughness={1} />
       </mesh>
@@ -1658,7 +1715,14 @@ function SceneContent({
         </mesh>
       )}
 
-      {rooms.map((r) => <RoomFloor key={r.id} room={r} world={world} />)}
+      {rooms.map((r) => (
+        <RoomFloor
+          key={r.id} room={r} world={world}
+          surfaceId={floorSurfaces?.[r.id]}
+          selected={selectedFloorRoomId === r.id}
+          onSelect={onFloorSelect}
+        />
+      ))}
 
       {/* Roof / Ceiling — ONLY rendered when Inside Mode is active */}
       {insideMode && rooms.map((r) => <RoomRoof key={`roof-${r.id}`} room={r} world={world} />)}
@@ -1757,6 +1821,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   furniture = [],
   wallColors,
   wallSurfaces,
+  floorSurfaces,
+  selectedFloorRoomId = null,
+  onFloorSelect,
   doorFinishes,
   selectedDoorKey = null,
   onDoorSelect,
@@ -1771,6 +1838,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   walkthroughPaused = false,
   onWalkthroughProgress,
   aoEnabled = true,
+  lighting = DEFAULT_LIGHTING,
   pathTracing = false,
   onPathTracerStats,
 }, ref) {
@@ -1795,6 +1863,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
     exportGlb: async () =>
       exportApi.current ? exportApi.current.exportGlb() : null,
     getCanvasElement: () => canvasElementRef.current,
+    getCamera: () => exportApi.current ? exportApi.current.getCamera() : null,
     setCameraView: (view: CameraViewPreset) => {
       if (view === "inside") { setInsideMode(true); return; }
       setInsideMode(false);
@@ -1819,7 +1888,10 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         toneMappingExposure: 1.15,
         antialias: true,
       }}
-      onPointerMissed={() => { onFurnitureSelect?.(null); onWallSelect?.(null); onDoorSelect?.(null); }}
+      onPointerMissed={() => {
+        onFurnitureSelect?.(null); onWallSelect?.(null);
+        onDoorSelect?.(null); onFloorSelect?.(null);
+      }}
       style={{ width: "100%", height: "100%" }}
     >
       <color attach="background" args={["#12161a"]} />
@@ -1853,13 +1925,31 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           scale={[world.totalD, world.maxDim, 1]} />
       </Environment>
 
-      {/* Dropped from 0.55 — ambient is flat by definition, and with IBL
-          supplying the fill it was washing out every shadow in the scene. */}
-      <ambientLight intensity={0.22} />
+      {/*
+        Interior lighting: the lamps the user placed, daylight through every
+        opening, and a sky/ground hemisphere. The flat ambientLight that used
+        to sit here is inside the rig now at a fraction of its old strength —
+        at 0.22 it was still lifting shadows that the sun had just drawn.
+      */}
+      <LightingRig
+        furniture={furniture}
+        openings={openings}
+        px={world.px}
+        pz={world.pz}
+        maxDim={world.maxDim}
+        totalW={world.totalW}
+        totalD={world.totalD}
+        wallHeight={WALL_H}
+        settings={lighting}
+        insideMode={insideMode}
+      />
 
       <directionalLight
         position={[world.totalW * 0.8, world.maxDim * 1.4, world.totalD * 0.5]}
-        intensity={1.9}
+        /* Was 1.9 when it was effectively the only light. The interior rig
+           now carries the room, so the sun's job is the hard shadow and the
+           sense of a time of day — not illumination. */
+        intensity={1.25}
         castShadow
         shadow-mapSize={[2048, 2048]}
         /*
@@ -1923,6 +2013,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           selectedFurnitureId={selectedFurnitureId}
           wallColors={wallColors}
           wallSurfaces={wallSurfaces}
+          floorSurfaces={floorSurfaces}
+          selectedFloorRoomId={selectedFloorRoomId}
+          onFloorSelect={onFloorSelect}
           doorFinishes={doorFinishes}
           selectedDoorKey={selectedDoorKey}
           onDoorSelect={onDoorSelect}

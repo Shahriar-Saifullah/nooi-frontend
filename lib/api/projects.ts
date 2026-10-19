@@ -60,6 +60,14 @@ export interface Project {
     /** Placed items, written by saveFurniture. The canvas and the shop both
         read this, so it is declared here rather than cast at each call site. */
     furniture?: FurniturePlacement[];
+    /** Finishes, all written by saveFurniture alongside the furniture.
+        Declared here for the same reason furniture is — the canvas was
+        casting room_data to `any` at four separate call sites to reach them. */
+    wall_colors?: Record<string, string>;
+    wall_surfaces?: Record<string, string>;
+    door_finishes?: Record<string, string>;
+    /** Keyed by room id, not by wall face. */
+    floor_surfaces?: Record<string, string>;
   };
   created_at: string;
   updated_at: string;
@@ -203,6 +211,9 @@ export async function saveFurniture(
   wallColors?: Record<string, string>,
   wallSurfaces?: Record<string, string>,
   doorFinishes?: Record<string, string>,
+  /** Per-room floor finish, keyed by room id — unlike the wall maps above,
+   *  which are keyed by wall face. */
+  floorSurfaces?: Record<string, string>,
 ) {
   const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch(`${BASE_URL}/projects/${projectId}/furniture`, {
@@ -211,9 +222,13 @@ export async function saveFurniture(
     headers,
     body: JSON.stringify({
       furniture,
+      // Each key is sent only when the caller supplied it. A caller saving
+      // furniture alone must not wipe the finishes server-side, which is why
+      // these are spread conditionally rather than always included.
       ...(wallColors !== undefined ? { wall_colors: wallColors } : {}),
       ...(wallSurfaces !== undefined ? { wall_surfaces: wallSurfaces } : {}),
       ...(doorFinishes !== undefined ? { door_finishes: doorFinishes } : {}),
+      ...(floorSurfaces !== undefined ? { floor_surfaces: floorSurfaces } : {}),
     }),
   });
   const json = await res.json();
