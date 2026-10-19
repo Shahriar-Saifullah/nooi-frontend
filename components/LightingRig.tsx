@@ -28,6 +28,13 @@ import * as THREE from "three";
  *  catalogue grows and a new lamp should work without touching this file. */
 const LIGHT_PATTERN = /lamp|light|chandelier|pendant|sconce|lantern/i;
 
+/** How many openings get their own light. Beyond this the cost is real and
+ *  the visual difference is not. */
+const MAX_WINDOW_LIGHTS = 6;
+/** Same reasoning for fixtures: a room full of lamps does not need every one
+ *  of them shading the whole scene. */
+const MAX_FIXTURE_LIGHTS = 8;
+
 export interface LightingSettings {
   /** 0.4 dim, 1 normal, 2 bright. Scales everything together. */
   brightness: number;
@@ -88,6 +95,7 @@ export default function LightingRig({
     return furniture
       .filter(f => LIGHT_PATTERN.test(f.name) || LIGHT_PATTERN.test(f.modelId ?? ""))
       .filter(f => (f.mountType ?? "floor") !== "ceiling" || insideMode)
+      .slice(0, MAX_FIXTURE_LIGHTS)
       .map(f => {
         const ceiling = (f.mountType ?? "floor") === "ceiling";
         // Sit the emitter where the bulb would be: just under a ceiling fitting,
@@ -102,7 +110,21 @@ export default function LightingRig({
 
   // ── 2. Daylight through openings ───────────────────────────────────────
   const windows = useMemo(() => {
-    return openings.map((op, i) => {
+    // CAP THE COUNT.
+    //
+    // A 14-room plan can carry 40 openings. Every one of them is a spotlight
+    // the GPU shades per fragment, and together they both cost frames and
+    // stack into blown-out white pools on the floor.
+    //
+    // The widest openings admit the most light and matter most, so those are
+    // the ones kept. Rooms whose window did not make the cut are still lit by
+    // the hemisphere and the sun — dimmer, which is roughly true of a room
+    // with a small window anyway.
+    const ranked = [...openings]
+      .sort((a, b) => b.width - a.width)
+      .slice(0, MAX_WINDOW_LIGHTS);
+
+    return ranked.map((op, i) => {
       // Openings are in ‰ of the source image; the scene divides by 10 to get
       // the 0–100 plan space, so this matches cutsPerWall.
       const wx = px(op.x / 10);
@@ -130,7 +152,7 @@ export default function LightingRig({
         target: [wx + inward.x * 4, y * 0.6, wz + inward.z * 4] as const,
         // Wider openings admit more light, but not without limit — a 7m
         // slider should not outshine the sun.
-        power: Math.min(2.2, 0.8 + width * 0.35),
+        power: Math.min(1.5, 0.6 + width * 0.22),
         isDoor,
       };
     });
@@ -144,7 +166,7 @@ export default function LightingRig({
         hemisphere at least tells the renderer which way is up.
       */}
       <hemisphereLight
-        args={["#dceaff", "#b9a98f", 0.45 * b]}
+        args={["#dceaff", "#b9a98f", 0.38 * b]}
         position={[0, wallHeight, 0]}
       />
 
@@ -160,15 +182,26 @@ export default function LightingRig({
           position={f.pos as unknown as [number, number, number]}
           color={bulb}
           // Ceiling fittings light a room; a table lamp pools.
-          intensity={(f.ceiling ? 9 : 5) * b}
+          /* Was 9 / 5. With the hemisphere, the sun and the window lights all
+             contributing, those stacked into white pools on the floor. */
+          intensity={(f.ceiling ? 5 : 2.6) * b}
           // Physical falloff. Without decay 2 a lamp lights the whole floor
           // evenly and reads as a flood rather than a lamp.
           decay={2}
           distance={f.ceiling ? 9 : 5}
-          castShadow={f.ceiling}
-          shadow-mapSize={[1024, 1024]}
-          shadow-bias={-0.004}
-          shadow-normalBias={0.02}
+          /*
+            NO SHADOWS FROM FIXTURES.
+
+            A point light's shadow is a CUBE map — six render passes per light
+            per frame. A handful of lamps is therefore dozens of extra passes
+            every frame, which is what made WASD movement stutter.
+
+            The directional light already draws the hard shadows that read as
+            "this room has a light source", and ambient occlusion handles
+            contact darkening. What these lamps add is the pool of light, and
+            that costs nothing.
+          */
+          castShadow={false}
         />
       ))}
 
@@ -182,8 +215,10 @@ export default function LightingRig({
           angle={w.isDoor ? 1.15 : 0.95}
           penumbra={1}
           color="#eaf2ff"
-          intensity={w.power * 9 * b}
-          decay={1.4}
+          /* Was power * 9. Daylight should wash a room, not scorch it — the
+             floor by the windows was reading as pure white. */
+          intensity={w.power * 3.5 * b}
+          decay={1.6}
           distance={Math.max(8, maxDim * 0.5)}
           castShadow={false}
         >
