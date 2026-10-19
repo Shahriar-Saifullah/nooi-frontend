@@ -3,37 +3,50 @@
 /**
  * Interior lighting — components/LightingRig.tsx
  * ============================================================================
- * The scene had one directional light outside the building and a flat ambient
- * term. That is why it read as a diagram: a real room is lit from inside it,
- * by fixtures and by daylight coming through openings, and the shading those
- * produce is most of what the eye uses to read depth and material.
+ * Deliberately simple, after the approach in Pascal's open-source viewer
+ * (github.com/pascalorg/editor, MIT): a few broad, soft sources plus ambient
+ * occlusion in post, rather than many local lights.
  *
- * Three sources, all derived from what is already in the scene:
+ * What changed from the previous rig and why:
  *
- *   1. Fixtures. Every lamp the user placed becomes a real light. A standing
- *      lamp that does not light the room is set dressing.
- *   2. Daylight through openings. The plan already knows where every window
- *      and door is; each becomes a light pointing inward.
- *   3. A sky/ground hemisphere instead of flat ambient, so shadowed surfaces
- *      pick up a direction rather than a uniform grey wash.
+ *   - NO LIGHT PER WINDOW. Each opening used to get its own spotlight. Even
+ *     capped at six and toned down twice, they stacked into the white pools on
+ *     the floor and the bright bands on walls. Daylight still enters: the sun
+ *     shines through the real holes the openings cut in the walls, with real
+ *     shadows, which is what a window actually does.
  *
- * All of it is tunable from one brightness and one warmth value, which is what
- * the settings panel drives.
+ *   - A FIXED POOL OF LAMP LIGHTS. three.js compiles the number of lights into
+ *     every material's shader, so adding or removing a lamp used to recompile
+ *     every material in the scene (a visible hitch). The pool is always
+ *     POOL_SIZE lights; unused ones sit at intensity 0. Every REASSIGN_S
+ *     seconds the pool is handed to the lamps nearest the camera, so a big
+ *     plan with many lamps still lights whatever the user is looking at.
+ *
+ *   - A GENERATED SKY FOR ENVIRONMENT LIGHT. A tiny gradient (cool zenith,
+ *     warm horizon, dim ground) set as scene.environment. Upward faces read a
+ *     little cooler than walls, which gives direction to the fill light, with
+ *     no HDR download.
+ *
+ * Everything still scales from one brightness and one warmth value, which is
+ * what the Lighting panel drives.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
 /** Catalogue ids and names that should emit light. Matched loosely because the
  *  catalogue grows and a new lamp should work without touching this file. */
 const LIGHT_PATTERN = /lamp|light|chandelier|pendant|sconce|lantern/i;
 
-/** How many openings get their own light. Beyond this the cost is real and
- *  the visual difference is not. */
-const MAX_WINDOW_LIGHTS = 6;
-/** Same reasoning for fixtures: a room full of lamps does not need every one
- *  of them shading the whole scene. */
-const MAX_FIXTURE_LIGHTS = 8;
+/** Real lights available to lamps at any moment. Constant on purpose — see the
+ *  header note on shader recompiles. */
+const POOL_SIZE = 8;
+/** How often the pool is reassigned to the nearest lamps. */
+const REASSIGN_S = 0.2;
+
+/** Environment (IBL) strength at brightness 1. */
+const ENV_INTENSITY = 0.6;
 
 export interface LightingSettings {
   /** 0.4 dim, 1 normal, 2 bright. Scales everything together. */
@@ -53,23 +66,8 @@ interface PlacedLike {
   mountType?: "floor" | "ceiling" | "wall";
 }
 
-interface OpeningLike {
-  type: "door" | "window";
-  wall: "horizontal" | "vertical";
-  x: number;
-  y: number;
-  width: number;
-}
-
 interface Props {
   furniture: PlacedLike[];
-  openings: OpeningLike[];
-  /** % → world, same mapping the scene uses. */
-  px: (x: number) => number;
-  pz: (y: number) => number;
-  maxDim: number;
-  totalW: number;
-  totalD: number;
   wallHeight: number;
   settings?: LightingSettings;
   /** Ceiling mounts only render inside; their lights should match. */
@@ -83,19 +81,84 @@ function temperature(warmth: number): THREE.Color {
   return cool.clone().lerp(warm, Math.max(0, Math.min(1, warmth)));
 }
 
+// ── Environment ─────────────────────────────────────────────────────────────
+
+const ZENITH = [0.4, 0.56, 0.78] as const;
+const HORIZON = [0.95, 0.84, 0.66] as const;
+const GROUND = [0.38, 0.35, 0.3] as const;
+
+function buildGradientSky(): THREE.DataTexture {
+  const W = 64, H = 32;
+  const data = new Float32Array(W * H * 4);
+  for (let y = 0; y < H; y++) {
+    const lat = ((y + 0.5) / H) * 2 - 1; // -1 straight down … +1 straight up
+    let r: number, g: number, b: number;
+    if (lat <= 0) {
+      const k = 1 + lat * 0.35;
+      r = GROUND[0] * k; g = GROUND[1] * k; b = GROUND[2] * k;
+    } else {
+      const t = lat ** 0.65;
+      r = HORIZON[0] + (ZENITH[0] - HORIZON[0]) * t;
+      g = HORIZON[1] + (ZENITH[1] - HORIZON[1]) * t;
+      b = HORIZON[2] + (ZENITH[2] - HORIZON[2]) * t;
+    }
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 1;
+    }
+  }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.LinearSRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Sets scene.environment for as long as it is mounted. The renderer turns an
+ *  equirect environment into a PMREM by itself, so nothing else is needed. */
+function SceneEnvironment({ intensity }: { intensity: number }) {
+  // The scene is read through get() inside the effects rather than captured
+  // from a hook: it is a three.js object mutated on purpose, which the React
+  // compiler's lint rules would otherwise reject.
+  const get = useThree(s => s.get);
+  const texture = useMemo(() => buildGradientSky(), []);
+
+  useEffect(() => {
+    const scene = get().scene;
+    const prev = scene.environment;
+    const prevIntensity = scene.environmentIntensity;
+    scene.environment = texture;
+    return () => {
+      if (scene.environment === texture) {
+        scene.environment = prev;
+        scene.environmentIntensity = prevIntensity;
+      }
+    };
+  }, [get, texture]);
+
+  useEffect(() => () => texture.dispose(), [texture]);
+
+  useEffect(() => {
+    const { scene, invalidate } = get();
+    scene.environmentIntensity = intensity;
+    invalidate();
+  }, [get, intensity]);
+
+  return null;
+}
+
+// ── Rig ─────────────────────────────────────────────────────────────────────
+
 export default function LightingRig({
-  furniture, openings, px, pz, maxDim, totalW, totalD, wallHeight,
-  settings = DEFAULT_LIGHTING, insideMode = false,
+  furniture, wallHeight, settings = DEFAULT_LIGHTING, insideMode = false,
 }: Props) {
   const b = Math.max(0.1, settings.brightness);
   const bulb = useMemo(() => temperature(settings.warmth), [settings.warmth]);
 
-  // ── 1. Fixtures ────────────────────────────────────────────────────────
   const fixtures = useMemo(() => {
     return furniture
       .filter(f => LIGHT_PATTERN.test(f.name) || LIGHT_PATTERN.test(f.modelId ?? ""))
       .filter(f => (f.mountType ?? "floor") !== "ceiling" || insideMode)
-      .slice(0, MAX_FIXTURE_LIGHTS)
       .map(f => {
         const ceiling = (f.mountType ?? "floor") === "ceiling";
         // Sit the emitter where the bulb would be: just under a ceiling fitting,
@@ -104,129 +167,97 @@ export default function LightingRig({
         const y = ceiling
           ? wallHeight - 0.35
           : (f.position[1] ?? 0) + ((f.height ?? 150) / 100) * 0.85;
-        return { id: f.id, pos: [f.position[0], y, f.position[2]] as const, ceiling };
+        return {
+          id: f.id,
+          pos: new THREE.Vector3(f.position[0], y, f.position[2]),
+          ceiling,
+        };
       });
   }, [furniture, insideMode, wallHeight]);
 
-  // ── 2. Daylight through openings ───────────────────────────────────────
-  const windows = useMemo(() => {
-    // CAP THE COUNT.
-    //
-    // A 14-room plan can carry 40 openings. Every one of them is a spotlight
-    // the GPU shades per fragment, and together they both cost frames and
-    // stack into blown-out white pools on the floor.
-    //
-    // The widest openings admit the most light and matter most, so those are
-    // the ones kept. Rooms whose window did not make the cut are still lit by
-    // the hemisphere and the sun — dimmer, which is roughly true of a room
-    // with a small window anyway.
-    const ranked = [...openings]
-      .sort((a, b) => b.width - a.width)
-      .slice(0, MAX_WINDOW_LIGHTS);
+  // ── Pool assignment ──
+  const poolRefs = useRef<Array<THREE.PointLight | null>>([]);
+  const sinceAssign = useRef(Infinity); // assign on the first frame
+  const lastFixtures = useRef(fixtures);
 
-    return ranked.map((op, i) => {
-      // Openings are in ‰ of the source image; the scene divides by 10 to get
-      // the 0–100 plan space, so this matches cutsPerWall.
-      const wx = px(op.x / 10);
-      const wz = pz(op.y / 10);
-      const horiz = op.wall === "horizontal";
+  useFrame(({ camera, invalidate }, dt) => {
+    // reassign at once when the lamps change, otherwise on the timer
+    if (lastFixtures.current !== fixtures) {
+      lastFixtures.current = fixtures;
+      sinceAssign.current = Infinity;
+    }
+    sinceAssign.current += dt;
+    if (sinceAssign.current < REASSIGN_S) return;
+    sinceAssign.current = 0;
 
-      // Point inward. "Inward" is toward the middle of the plan, which is the
-      // origin — crude, but right for every opening on an exterior wall, and
-      // an interior door lighting both ways is harmless.
-      const inward = new THREE.Vector3(-wx, 0, -wz);
-      if (inward.lengthSq() < 0.01) inward.set(0, 0, -1);
-      inward.normalize();
+    const nearest = fixtures.length <= POOL_SIZE
+      ? fixtures
+      : [...fixtures]
+          .sort((a, c) =>
+            a.pos.distanceToSquared(camera.position) - c.pos.distanceToSquared(camera.position))
+          .slice(0, POOL_SIZE);
 
-      // A door reaches the floor and floods; a window starts at sill height
-      // and throws a narrower band.
-      const isDoor = op.type === "door";
-      const y = isDoor ? 1.1 : 1.5;
-      const width = (op.width / 1000) * maxDim;
-
-      return {
-        id: `op${i}`,
-        // Stand WELL clear of the wall.
-        //
-        // At 0.35m the emitter sat inside the wall volume itself — walls here
-        // are up to ~0.4m thick after the thickness clamp — so the cone was
-        // starting mid-masonry and spilling through it in bright vertical
-        // bands that fell across the floor where no window was.
-        //
-        // 1.2m puts it unambiguously in the room, which is also closer to the
-        // truth: daylight does not originate at the glass, it floods in past
-        // it.
-        pos: [wx + inward.x * 1.2, y, wz + inward.z * 1.2] as const,
-        target: [wx + inward.x * 5, y * 0.55, wz + inward.z * 5] as const,
-        // Wider openings admit more light, but not without limit — a 7m
-        // slider should not outshine the sun.
-        power: Math.min(1.5, 0.6 + width * 0.22),
-        isDoor,
-      };
-    });
-  }, [openings, px, pz, maxDim]);
+    let changed = false;
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const light = poolRefs.current[i];
+      if (!light) continue;
+      const f = nearest[i];
+      if (!f) {
+        if (light.intensity !== 0) { light.intensity = 0; changed = true; }
+        continue;
+      }
+      // Ceiling fittings light a room; a table lamp pools.
+      const intensity = (f.ceiling ? 5 : 2.6) * b;
+      const distance = f.ceiling ? 9 : 5;
+      if (!light.position.equals(f.pos) || light.intensity !== intensity) {
+        light.position.copy(f.pos);
+        light.intensity = intensity;
+        light.distance = distance;
+        changed = true;
+      }
+    }
+    if (changed) invalidate();
+  });
 
   return (
     <group name="nooi-lighting">
-      {/*
-        Sky above, floor bounce below. A flat ambientLight lifts every surface
-        by the same amount, which is exactly what kills the sense of form; a
-        hemisphere at least tells the renderer which way is up.
-      */}
+      <SceneEnvironment intensity={ENV_INTENSITY * b} />
+
+      {/* Sky above, floor bounce below — tells the renderer which way is up,
+          which a flat ambient term cannot. */}
       <hemisphereLight
-        args={["#dceaff", "#b9a98f", 0.38 * b]}
+        args={["#fff5e6", "#b9a98f", 0.45 * b]}
         position={[0, wallHeight, 0]}
       />
 
-      {/* A little flat fill underneath, so deep corners are not pure black.
-          Deliberately small — this is the term that was at 0.55 and washing
-          out every shadow in the scene. */}
-      <ambientLight intensity={0.1 * b} />
+      {/* Flat fill so rooms under a ceiling (where the sun cannot reach) are
+          not left to the hemisphere alone. Ambient occlusion in post puts the
+          form back into corners and under furniture. */}
+      <ambientLight color="#fff9eb" intensity={0.3 * b} />
 
       {/*
-        ── Fixtures ──
+        The lamp pool. Always POOL_SIZE lights, assigned in useFrame above.
 
-        Each gets a light AND a visible glow. A lamp model lit only from
-        outside renders as a dark slab bolted to the ceiling — which is what
-        the pendant above was doing — and a room where the light source looks
-        switched off reads as wrong even when the floor beneath it is lit.
-
-        The sphere is small, unlit, and ignores depth-write so it never
-        occludes anything; it is a highlight, not geometry.
+        No shadows: a point-light shadow is a cube map, six extra passes per
+        light per frame. The sun draws the hard shadows; AO handles contact.
       */}
-      {fixtures.map(f => (
+      {Array.from({ length: POOL_SIZE }, (_, i) => (
         <pointLight
-          key={f.id}
-          position={f.pos as unknown as [number, number, number]}
+          key={`pool${i}`}
+          ref={el => { poolRefs.current[i] = el; }}
           color={bulb}
-          // Ceiling fittings light a room; a table lamp pools.
-          /* Was 9 / 5. With the hemisphere, the sun and the window lights all
-             contributing, those stacked into white pools on the floor. */
-          intensity={(f.ceiling ? 5 : 2.6) * b}
-          // Physical falloff. Without decay 2 a lamp lights the whole floor
-          // evenly and reads as a flood rather than a lamp.
+          intensity={0}
           decay={2}
-          distance={f.ceiling ? 9 : 5}
-          /*
-            NO SHADOWS FROM FIXTURES.
-
-            A point light's shadow is a CUBE map — six render passes per light
-            per frame. A handful of lamps is therefore dozens of extra passes
-            every frame, which is what made WASD movement stutter.
-
-            The directional light already draws the hard shadows that read as
-            "this room has a light source", and ambient occlusion handles
-            contact darkening. What these lamps add is the pool of light, and
-            that costs nothing.
-          */
           castShadow={false}
         />
       ))}
 
+      {/* A visible glow per lamp, pooled or not, so a fitting never looks
+          switched off. Small, unlit, never occludes. */}
       {fixtures.map(f => (
         <mesh
           key={`${f.id}-glow`}
-          position={f.pos as unknown as [number, number, number]}
+          position={f.pos}
           name="nooi-noexport"
           raycast={() => null}
         >
@@ -239,30 +270,6 @@ export default function LightingRig({
             depthWrite={false}
           />
         </mesh>
-      ))}
-
-      {/* ── Daylight through openings ── */}
-      {windows.map(w => (
-        <spotLight
-          key={w.id}
-          position={w.pos as unknown as [number, number, number]}
-          // Wide and soft: a window is an area source, and a tight cone would
-          // put a visible ellipse on the floor that no window produces.
-          angle={w.isDoor ? 1.15 : 0.95}
-          penumbra={1}
-          color="#eaf2ff"
-          /* Was power * 9. Daylight should wash a room, not scorch it — the
-             floor by the windows was reading as pure white. */
-          intensity={w.power * 3.5 * b}
-          decay={1.6}
-          distance={Math.max(8, maxDim * 0.5)}
-          castShadow={false}
-        >
-          <object3D
-            attach="target"
-            position={w.target as unknown as [number, number, number]}
-          />
-        </spotLight>
       ))}
     </group>
   );
