@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import {
-  OrbitControls, ContactShadows, useGLTF, Environment, Lightformer,
+  OrbitControls, ContactShadows, useGLTF,
 } from "@react-three/drei";
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
@@ -27,9 +27,12 @@ import LightingRig, {
   DEFAULT_LIGHTING, type LightingSettings,
 } from "@/components/LightingRig";
 import {
-  EffectComposer, N8AO, Bloom, DepthOfField, Vignette, Noise,
-  HueSaturation, BrightnessContrast,
+  EffectComposer, N8AO, ToneMapping, HueSaturation, BrightnessContrast,
 } from "@react-three/postprocessing";
+import InkEdges from "@/components/InkEdges";
+// Not in package.json directly — it is @react-three/postprocessing's own
+// dependency, and this enum is the documented way to pick a tone-map mode.
+import { ToneMappingMode } from "postprocessing";
 
 // ─── Canvas Bridge Helper ──────────────────────────────────────────────────────
 // Textures decode asynchronously; nudge a redraw when one lands so a newly
@@ -1793,27 +1796,30 @@ function SceneContent({
 /**
  * The finishing pass.
  *
- * None of this invents detail — a post-process can only work with pixels that
- * are already on screen, so it will never put wood grain on a flat surface.
- * What it does is make a correct render look FINISHED: the difference between
- * a viewport and a product is largely bloom, a camera-like falloff, and a
- * colour grade, which is why every game and every arch-viz tool runs them.
- *
- * All of it is cheap enough to hold 60fps while the user moves, which is the
- * whole reason to do this rather than trace rays.
+ * Kept to what makes a render read as clean and solid — the recipe Pascal's
+ * viewer uses (github.com/pascalorg/editor): ambient occlusion, tone mapping,
+ * a gentle grade, and thin ink lines on edges. No bloom, depth of field,
+ * vignette or grain: each of those was tried, and each made the room look
+ * hazier or blurrier rather than more real.
  */
-function Postprocessing({ world, enabled }: { world: World; enabled: boolean }) {
+function Postprocessing({ enabled }: { enabled: boolean }) {
   if (!enabled) return null;
   return (
-    <EffectComposer enableNormalPass multisampling={0}>
+    /*
+      multisampling: the composer renders into its own target, so the Canvas's
+      `antialias: true` does NOT apply once it is mounted. At 0 every edge was
+      aliased; 4 restores clean edges.
+    */
+    <EffectComposer enableNormalPass multisampling={4}>
       <N8AO
         // In world units. Too small and only the seams darken; too large and
         // whole rooms go muddy. Roughly a metre reads correctly for interiors
-        // regardless of how big the plan is, which is why this is NOT scaled
-        // by world.maxDim.
+        // regardless of how big the plan is.
         aoRadius={1.0}
         distanceFalloff={0.8}
-        intensity={2.2}
+        // Was 2.2. The rig no longer relies on contrast from local lights, so
+        // AO carries the form — but too strong and corners go dirty.
+        intensity={1.8}
         // Half resolution. AO is a low-frequency effect — the difference is
         // invisible and it costs half as much.
         halfRes
@@ -1822,52 +1828,25 @@ function Postprocessing({ world, enabled }: { world: World; enabled: boolean }) 
       />
 
       {/*
-        Bloom. The single strongest "this is a render" cue: bright surfaces
-        bleeding slightly into their surroundings is what a real lens does and
-        a raw framebuffer does not.
+        TONE MAPPING — must be here, not on the Canvas.
 
-        The threshold matters more than the strength — too low and the whole
-        image hazes over, which is the classic amateur-render look. 0.9 means
-        only genuinely bright things glow: the lamp bulbs, the daylight
-        falling through glazing, a highlight on polished tile.
+        EffectComposer forces gl.toneMapping = NoToneMapping while it is
+        mounted, so the Canvas's ACESFilmic setting was being silently dropped
+        and anything over 1.0 clipped straight to white. Exposure still comes
+        from gl.toneMappingExposure, which the composer leaves alone.
       */}
-      <Bloom
-        intensity={0.42}
-        luminanceThreshold={0.9}
-        luminanceSmoothing={0.3}
-        mipmapBlur
-      />
+      <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
 
-      {/*
-        Depth of field. Reads as a camera rather than a computer — a renderer
-        has infinite focus and the eye knows it.
-
-        Deliberately gentle: a strong blur looks like a tilt-shift toy, and
-        someone inspecting their own furniture needs it sharp. focusDistance
-        is normalised 0–1 across the view, so 0.025 keeps roughly the near and
-        middle of a room crisp and softens the far wall.
-      */}
-      <DepthOfField
-        focusDistance={0.025}
-        focalLength={0.05}
-        bokehScale={2.2}
-      />
-
-      {/*
-        Grade. Slightly lifted contrast and a touch of saturation — the same
-        move a photographer makes on a flat RAW, and the reason film looks
-        like film.
-      */}
+      {/* A gentle grade. ACES reads slightly flat and desaturated on its own. */}
       <HueSaturation saturation={0.08} />
-      <BrightnessContrast brightness={0.01} contrast={0.08} />
+      <BrightnessContrast brightness={0} contrast={0.05} />
 
       {/*
-        Vignette and grain, both very light. They hide the perfect uniformity
-        that marks a synthetic image — real lenses fall off at the corners and
-        real sensors have noise.
+        Ink lines on creases and silhouettes. Most of the crisp
+        "architectural render" look, and it hides soft or low-poly edges.
+        After the grade so the line colour is exactly what is asked for.
       */}
-      <Vignette offset={0.3} darkness={0.42} />
-      <Noise opacity={0.016} premultiply />
+      <InkEdges color="#2b2622" opacity={0.45} />
     </EffectComposer>
   );
 }
@@ -1944,10 +1923,11 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         fov: 40,
       }}
       gl={{
-        // ACES is R3F's default, but the exposure is not: interiors lit mostly
+        // ACES at exposure 1. Only takes effect when post-processing is off —
+        // with it on, the ToneMapping effect applies the same curve.
         // by bounced light sit too dark at 1.0.
         toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.15,
+        toneMappingExposure: 1.0,
         antialias: true,
       }}
       onPointerMissed={() => {
@@ -1959,48 +1939,16 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       <color attach="background" args={["#12161a"]} />
 
       {/*
-        Image-based lighting.
-
-        meshStandardMaterial is a PBR material: it expects an environment to
-        reflect. Without one every surface is lit only by the direct lights, so
-        wood has no sheen, glass has nothing to mirror, and metal reads as flat
-        grey — which is most of why this scene looked like a diagram.
-
-        Built from Lightformers rather than `preset="apartment"` because a
-        preset fetches an HDR from a third-party CDN at runtime. These are
-        geometry in the scene, so they work offline and cost nothing to load.
+        Image-based lighting now lives in LightingRig (a generated sky
+        gradient), alongside the rest of the lights it has to balance with.
       */}
-      <Environment resolution={256} frames={1}>
-        {/* broad sky fill from above */}
-        <Lightformer form="rect" intensity={1.6} color="#fdfbf7"
-          position={[0, world.maxDim, 0]} rotation={[-Math.PI / 2, 0, 0]}
-          scale={[world.totalW * 2, world.totalD * 2, 1]} />
-        {/* warm key from the sun side, matching the directional light below */}
-        <Lightformer form="rect" intensity={2.2} color="#fff0d8"
-          position={[world.totalW, world.maxDim * 0.7, world.totalD * 0.4]}
-          rotation={[0, -Math.PI / 2, 0]}
-          scale={[world.totalD, world.maxDim, 1]} />
-        {/* cool bounce from the opposite side so shadowed faces aren't dead */}
-        <Lightformer form="rect" intensity={0.9} color="#dce8f0"
-          position={[-world.totalW, world.maxDim * 0.5, -world.totalD * 0.4]}
-          rotation={[0, Math.PI / 2, 0]}
-          scale={[world.totalD, world.maxDim, 1]} />
-      </Environment>
 
       {/*
-        Interior lighting: the lamps the user placed, daylight through every
-        opening, and a sky/ground hemisphere. The flat ambientLight that used
-        to sit here is inside the rig now at a fraction of its old strength —
-        at 0.22 it was still lifting shadows that the sun had just drawn.
+        Interior lighting: environment sky, hemisphere, ambient fill and the
+        pooled lamp lights. Daylight is the sun below, through the openings.
       */}
       <LightingRig
         furniture={furniture}
-        openings={openings}
-        px={world.px}
-        pz={world.pz}
-        maxDim={world.maxDim}
-        totalW={world.totalW}
-        totalD={world.totalD}
         wallHeight={WALL_H}
         settings={lighting}
         insideMode={insideMode}
@@ -2011,7 +1959,10 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         /* Was 1.9 when it was effectively the only light. The interior rig
            now carries the room, so the sun's job is the hard shadow and the
            sense of a time of day — not illumination. */
-        intensity={1.25}
+        /* Was 1.25. The per-window spotlights are gone, so the sun is again
+           the main light — it is what shines through the window holes. */
+        color="#fff1c8"
+        intensity={2.8 * lighting.brightness}
         castShadow
         shadow-mapSize={[2048, 2048]}
         /*
@@ -2035,7 +1986,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       />
       <directionalLight
         position={[-world.totalW, world.maxDim, -world.totalD]}
-        intensity={0.35}
+        color="#dde5ff"
+        intensity={0.4 * lighting.brightness}
       />
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }}
                        rooms={rooms} world={world} />
@@ -2099,7 +2051,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       {/* AO and the path tracer cannot both own the render loop — the composer
           would draw over every traced sample. The tracer computes real
           occlusion anyway, so AO is redundant while it runs. */}
-      <Postprocessing world={world} enabled={aoEnabled && !pathTracing} />
+      <Postprocessing enabled={aoEnabled && !pathTracing} />
 
       <PathTracerLayer active={pathTracing} onStats={onPathTracerStats} />
 
