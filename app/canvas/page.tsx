@@ -37,6 +37,7 @@ import type { PathTracerStats } from "@/components/PathTracerLayer";
 import {
   DEFAULT_LIGHTING, type LightingSettings,
 } from "@/components/LightingRig";
+import { useRendererBackend } from "@/lib/three/rendererBackend";
 import { capturePanoPair } from "@/lib/panoTest";
 import { useProjectStore } from "@/lib/store";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls } from "@/lib/api/projects";
@@ -606,6 +607,9 @@ export default function CanvasPage() {
   // so nothing drifts: the sofa they placed is the sofa they see.
   const [pathTracing, setPathTracing] = useState(false);
   const [ptStats, setPtStats] = useState<PathTracerStats | null>(null);
+  // The path tracer (three-gpu-pathtracer) only runs on WebGL. On WebGPU the
+  // button is hidden rather than offered and then failing.
+  const rendererBackend = useRendererBackend();
 
   // ── Camera view presets ────────────────────────────────────────────────────
   const [cameraView, setCameraView] = useState<CameraViewPreset>("default");
@@ -1917,7 +1921,7 @@ export default function CanvasPage() {
                Sits directly above "Render view": one produces a picture, the
                other a place to move around in, and they are easy to confuse
                if they are not adjacent and clearly named. */}
-          {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
+          {viewMode === "3d" && rendererBackend === "webgl" && !(walkthroughActive && !walkthroughPaused) && (
             <button
               onClick={() => setPathTracing(v => !v)}
               title={pathTracing

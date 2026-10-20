@@ -33,6 +33,10 @@ import InkEdges from "@/components/InkEdges";
 // Not in package.json directly — it is @react-three/postprocessing's own
 // dependency, and this enum is the documented way to pick a tone-map mode.
 import { ToneMappingMode } from "postprocessing";
+import { useRendererBackend } from "@/lib/three/rendererBackend";
+import { webgpuGlFactory } from "@/components/webgpu/renderer";
+import WebGPUPostFx from "@/components/webgpu/WebGPUPostFx";
+import { createDepthNodeMaterial } from "@/components/webgpu/depthMaterial";
 
 // ─── Canvas Bridge Helper ──────────────────────────────────────────────────────
 // Textures decode asynchronously; nudge a redraw when one lands so a newly
@@ -1394,7 +1398,8 @@ function ExportBridge({
         // perspective depth, which saturates to white a metre from the camera
         // and gives ControlNet no usable signal. This outputs near = white,
         // far = black, which is what depth ControlNets expect (no post-invert).
-        const depthMat = new THREE.ShaderMaterial({
+        const isWebGPU = (gl as { isWebGPURenderer?: boolean }).isWebGPURenderer === true;
+        const depthMat: THREE.Material = isWebGPU ? createDepthNodeMaterial(near, far) : new THREE.ShaderMaterial({
           uniforms: { uNear: { value: near }, uFar: { value: far } },
           vertexShader: `
             varying float vDepth;
@@ -1427,6 +1432,15 @@ function ExportBridge({
         // colour pipeline, losing the geometry conditioning that keeps the
         // user's actual furniture in the picture.
         const prevTarget = gl.getRenderTarget();
+        // The depth values must reach the PNG untouched. WebGL's raw GLSL
+        // skips tone mapping and colour conversion by itself; WebGPU applies
+        // both at output, so switch them off for this one frame.
+        const prevToneMapping = gl.toneMapping;
+        const prevColorSpace = gl.outputColorSpace;
+        if (isWebGPU) {
+          gl.toneMapping = THREE.NoToneMapping;
+          gl.outputColorSpace = THREE.LinearSRGBColorSpace;
+        }
         gl.setRenderTarget(null);
         gl.render(scene, cam);
         const raw = gl.domElement.toDataURL("image/png");
@@ -1434,6 +1448,8 @@ function ExportBridge({
         scene.overrideMaterial = prevOverride;
         scene.background = prevBg;
         depthMat.dispose();
+        gl.toneMapping = prevToneMapping;
+        gl.outputColorSpace = prevColorSpace;
         gl.render(scene, cam); // restore the visible frame immediately
         gl.setRenderTarget(prevTarget);
 
@@ -1513,6 +1529,9 @@ function SceneContent({
   onDoorKeys?: (keys: string[]) => void;
   insideMode?: boolean;
 }) {
+  // drei's ContactShadows is built on GLSL ShaderMaterials, which WebGPU
+  // cannot run. On WebGPU the AO pass covers the same contact darkening.
+  const isWebGPU = useThree(s => (s.gl as { isWebGPURenderer?: boolean }).isWebGPURenderer === true);
   const cuts = useMemo(
     () => cutsPerWall(rfWalls, openings, world),
     [rfWalls, openings, world],
@@ -1772,10 +1791,12 @@ function SceneContent({
         );
       })}
 
-      <group name="nooi-noexport">
-        <ContactShadows position={[0, 0, 0]} opacity={0.22}
-          scale={world.maxDim * 1.3} blur={2.4} far={3} />
-      </group>
+      {!isWebGPU && (
+        <group name="nooi-noexport">
+          <ContactShadows position={[0, 0, 0]} opacity={0.22}
+            scale={world.maxDim * 1.3} blur={2.4} far={3} />
+        </group>
+      )}
     </group>
   );
 }
@@ -1892,6 +1913,9 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   const exportApi = useRef<SceneExportApi | null>(null);
   const cameraViewFn = useRef<((v: CameraViewPreset) => void) | null>(null);
   const [insideMode, setInsideMode] = useState(false);
+  // WebGPU when the browser supports it, WebGL otherwise (or ?renderer=webgl).
+  // null for the first few ms while the adapter is probed.
+  const backend = useRendererBackend();
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 
   useImperativeHandle(ref, () => ({
@@ -1912,8 +1936,15 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
     },
   }), []);
 
+  if (!backend) {
+    return <div style={{ width: "100%", height: "100%", background: "#12161a" }} />;
+  }
+
   return (
     <Canvas
+      // A different backend is a different renderer on a fresh canvas; the key
+      // forces a clean remount when WebGPU fails over to WebGL.
+      key={backend}
       // "soft" selects PCFSoftShadowMap. The default (plain `shadows`) is
       // PCFShadowMap, whose hard edges are the main reason a three.js interior
       // reads as a diagram rather than a room.
@@ -1922,14 +1953,16 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         position: [world.totalW * 0.55, world.maxDim * 0.85, world.totalD * 0.95],
         fov: 40,
       }}
-      gl={{
-        // ACES at exposure 1. Only takes effect when post-processing is off —
-        // with it on, the ToneMapping effect applies the same curve.
-        // by bounced light sit too dark at 1.0.
-        toneMapping: THREE.ACESFilmicToneMapping,
-        toneMappingExposure: 1.0,
-        antialias: true,
-      }}
+      gl={backend === "webgpu"
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? (webgpuGlFactory as any)
+        : {
+            // ACES at exposure 1. Only takes effect when post-processing is
+            // off — with it on, the ToneMapping effect applies the same curve.
+            toneMapping: THREE.ACESFilmicToneMapping,
+            toneMappingExposure: 1.0,
+            antialias: true,
+          }}
       onPointerMissed={() => {
         onFurnitureSelect?.(null); onWallSelect?.(null);
         onDoorSelect?.(null); onFloorSelect?.(null);
@@ -2051,9 +2084,16 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       {/* AO and the path tracer cannot both own the render loop — the composer
           would draw over every traced sample. The tracer computes real
           occlusion anyway, so AO is redundant while it runs. */}
-      <Postprocessing enabled={aoEnabled && !pathTracing} />
-
-      <PathTracerLayer active={pathTracing} onStats={onPathTracerStats} />
+      {backend === "webgl" ? (
+        <>
+          <Postprocessing enabled={aoEnabled && !pathTracing} />
+          {/* three-gpu-pathtracer is WebGL-only; the toolbar hides the toggle
+              on WebGPU. */}
+          <PathTracerLayer active={pathTracing} onStats={onPathTracerStats} />
+        </>
+      ) : (
+        aoEnabled && <WebGPUPostFx />
+      )}
 
       <OrbitControls ref={controlsRef} makeDefault
         enableDamping

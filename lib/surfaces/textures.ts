@@ -81,6 +81,11 @@ function cloneFor(url: string, repeatX: number, repeatY: number, srgb: boolean):
   c.wrapS = c.wrapT = THREE.RepeatWrapping;
   c.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   c.repeat.set(repeatX, repeatY);
+  // Anisotropic filtering. Without it a floor seen at a low angle samples a
+  // tiny mip and the tiling pattern aliases into ripples (the zig-zag on the
+  // carpet). Both renderers clamp this to what the GPU supports; 16 is the
+  // common maximum and costs little.
+  c.anisotropy = 16;
   c.needsUpdate = true;
   if (!entry.loaded) {
     entry.clones.push(c);          // patched when the image arrives
