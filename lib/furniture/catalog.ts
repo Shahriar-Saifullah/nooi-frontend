@@ -35,6 +35,10 @@ export interface AssetCredit {
   author?: string;
 }
 
+/** Pieces drawn in code instead of loaded from a .glb (components/decor). */
+export type ProceduralKind =
+  | "tv" | "art-abstract" | "art-lines" | "mirror-round" | "curtains" | "sconce";
+
 /** One concrete design the user can drag into the scene. */
 export interface CatalogItem {
   id: string;                     // STABLE — saved in projects, never rename
@@ -57,6 +61,14 @@ export interface CatalogItem {
    */
   fitToWallHeight?: boolean;
   credit?: AssetCredit;
+  /**
+   * Drawn in code (components/decor/WallDecor.tsx); `path` is then empty and
+   * `thumbnail` must be set, since there is no .glb to render a preview from.
+   */
+  procedural?: ProceduralKind;
+  /** Wall mounts: height of the item's CENTRE above the floor, in cm, where a
+   *  drop hangs it. Dragging can move it up or down from there. */
+  mountHeight?: number;
 }
 
 /** A kind of furniture (Sofa, Bed, Dining Chair …) holding its designs. */
@@ -303,6 +315,43 @@ export const FURNITURE_TYPES: FurnitureType[] = [
       v("decor", "picture-frame", { id: "frame-medium", name: "Medium Frame", path: "/models/decor/frame_medium.glb", size: { w: 18, d: 3, h: 24 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
       v("decor", "picture-frame", { id: "frame-large", name: "Large Frame", path: "/models/decor/frame_large.glb", size: { w: 25, d: 4, h: 33 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
       v("decor", "picture-frame", { id: "frame-curved", name: "Curved Frame", path: "/models/decor/frame_curved.glb", size: { w: 30, d: 8, h: 22 }, color: "#3f3a36", tags: ["frame", "curved", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+    ],
+  },
+
+  // ══ Wall-mounted ══════════════════════════════════════════════════════════
+  // Drawn in code (components/decor/WallDecor.tsx), so no .glb and no licence
+  // to track. Dropped onto a wall they hang flush at `mountHeight` (centre, cm)
+  // and face into the room; dragged, they slide along walls and up or down.
+  {
+    id: "wall-tv", name: "Wall TV", category: "living",
+    variants: [
+      v("living", "wall-tv", { id: "tv-55", name: "55\" Wall TV", path: "", procedural: "tv", thumbnail: "/models/thumbs/proc_tv-55.png", size: { w: 123, d: 5, h: 72 }, mountHeight: 120, color: "#141518", tags: ["tv", "television", "screen", "media", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("living", "wall-tv", { id: "tv-75", name: "75\" Wall TV", path: "", procedural: "tv", thumbnail: "/models/thumbs/proc_tv-75.png", size: { w: 168, d: 6, h: 97 }, mountHeight: 125, color: "#141518", tags: ["tv", "television", "screen", "media", "wall", "large"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "wall-art", name: "Wall Art", category: "decor",
+    variants: [
+      v("decor", "wall-art", { id: "art-abstract-lg", name: "Abstract Canvas", path: "", procedural: "art-abstract", thumbnail: "/models/thumbs/proc_art-abstract-lg.png", size: { w: 120, d: 4, h: 80 }, mountHeight: 155, color: "#c9a57a", tags: ["art", "painting", "canvas", "abstract", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("decor", "wall-art", { id: "art-lines", name: "Line Art Print", path: "", procedural: "art-lines", thumbnail: "/models/thumbs/proc_art-lines.png", size: { w: 60, d: 3, h: 90 }, mountHeight: 150, color: "#2b2622", tags: ["art", "print", "line art", "frame", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "mirror", name: "Mirror", category: "decor",
+    variants: [
+      v("decor", "mirror", { id: "mirror-round", name: "Round Brass Mirror", path: "", procedural: "mirror-round", thumbnail: "/models/thumbs/proc_mirror-round.png", size: { w: 80, d: 4, h: 80 }, mountHeight: 155, color: "#b8955a", tags: ["mirror", "round", "brass", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "curtains", name: "Curtains", category: "decor",
+    variants: [
+      v("decor", "curtains", { id: "curtains-linen", name: "Linen Curtains", path: "", procedural: "curtains", thumbnail: "/models/thumbs/proc_curtains-linen.png", size: { w: 260, d: 12, h: 265 }, mountHeight: 142, color: "#e8e1d4", tags: ["curtains", "drapes", "window", "linen", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "wall-light", name: "Wall Light", category: "lighting",
+    variants: [
+      v("lighting", "wall-light", { id: "sconce-brass", name: "Brass Wall Sconce", path: "", procedural: "sconce", thumbnail: "/models/thumbs/proc_sconce-brass.png", size: { w: 18, d: 22, h: 28 }, mountHeight: 185, color: "#a88a5a", tags: ["light", "lamp", "sconce", "wall light", "brass"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
     ],
   },
 

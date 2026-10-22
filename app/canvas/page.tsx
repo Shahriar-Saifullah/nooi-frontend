@@ -23,7 +23,7 @@ import {
 } from "@/lib/furniture/catalog";
 import {
   snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom, pushOutOfWalls,
-  planWallsToWorld,
+  planWallsToWorld, settleClearOfWalls, hitsWall,
   type WorldWall, type Footprint, type Poly,
 } from "@/lib/placement/snap";
 import {
@@ -42,7 +42,14 @@ import { capturePanoPair } from "@/lib/panoTest";
 import { useProjectStore } from "@/lib/store";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls } from "@/lib/api/projects";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
-import type { PlacedFurniture } from "@/components/ThreeSceneV2";
+import type { PlacedFurniture, WallHandleDragEvent } from "@/components/ThreeSceneV2";
+import WallSizeFields from "@/components/WallSizeFields";
+import {
+  beginEndDrag, beginBodyDrag, applySession, setWallLength, setWallThickness, wallSize,
+  type WallSession,
+} from "@/lib/walls/wallEdit";
+import { makeFrame } from "@/lib/geometry/planFrame";
+import { WALL_T_MIN, WALL_T_MAX } from "@/lib/placement/snap";
 
 // ─── Lazy-load Three.js (no SSR — Three.js requires browser APIs) ─────────────
 const ThreeSceneV2 = dynamic(() => import("@/components/ThreeSceneV2"), {
@@ -287,13 +294,65 @@ export default function CanvasPage() {
     return top;
   };
 
-  const addFurniture = (cat: CatalogItem, position: [number, number, number]) => {
+  // ── Walls are solid ─────────────────────────────────────────────────────────
+  // A floor item's footprint at the size it is drawn (size slider included).
+  const floorFootprint = (f: Pick<PlacedFurniture, "position" | "rotation" | "width" | "depth" | "sizeScale" | "modelId" | "id">): Footprint => {
+    const cat = f.modelId ? catalogById(f.modelId) : undefined;
+    const s = f.sizeScale ?? 1;
+    return {
+      x: f.position[0], z: f.position[2],
+      w: ((f.width ?? cat?.size.w ?? 60) / 100) * s,
+      d: ((f.depth ?? cat?.size.d ?? 60) / 100) * s,
+      rotation: f.rotation ?? 0, id: f.id,
+    };
+  };
+  const isFloorItem = (f: Pick<PlacedFurniture, "mountType">) => (f.mountType ?? "floor") === "floor";
+
+  // the walls in world space, kept current by an effect next to worldWalls()
+  // below (that function is declared after these handlers)
+  const placementWalls = useRef<WorldWall[]>([]);
+
+  const wallToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noRoomToast = (msg: string) => {
+    setToast(msg);
+    setToastAction(null);
+    if (wallToastTimer.current) clearTimeout(wallToastTimer.current);
+    wallToastTimer.current = setTimeout(() => setToast(null), 3500);
+  };
+
+  /**
+   * Apply a change to a floor item (rotate, resize) only if the result stays
+   * out of the walls. An item that now overlaps a wall steps clear of it
+   * when it can (rotating a sofa against a wall moves it off the wall just
+   * enough); when there is no room, the change is refused and the item stays
+   * as it was.
+   */
+  const changeFloorItem = (
+    id: string, patch: Partial<PlacedFurniture>, refusal: string,
+  ): boolean => {
+    const cur = placedFurniture.find(f => f.id === id);
+    if (!cur) return false;
+    const next = { ...cur, ...patch } as PlacedFurniture;
+    if (!isFloorItem(next)) {
+      setPlacedFurniture(prev => prev.map(f => f.id === id ? { ...f, ...patch } : f));
+      return true;
+    }
+    const clear = settleClearOfWalls(floorFootprint(next), placementWalls.current);
+    if (!clear) { noRoomToast(refusal); return false; }
+    setPlacedFurniture(prev => prev.map(f => f.id !== id ? f : {
+      ...f, ...patch,
+      position: [clear.x, f.position[1], clear.z] as [number, number, number],
+    }));
+    return true;
+  };
+
+  const addFurniture = (cat: CatalogItem, position: [number, number, number], rotation = 0) => {
     const newItem: PlacedFurniture = {
       id: `${cat.id}-${Date.now()}`,
       modelId: cat.id,
       name: cat.name,
       position,
-      rotation: 0,
+      rotation,
       sizeScale: 1,
       color: null,
       materialPreset: null,
@@ -342,8 +401,35 @@ export default function CanvasPage() {
     // client coords → NDC → raycast onto floor or ceiling plane
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+
+    // Wall mounts (TV, art, mirror, curtains, wall lights) hang on the wall
+    // under the pointer, facing into the room.
+    if (cat.mountType === "wall") {
+      const placed = sceneRef.current?.wallPlacementFromNdc(nx, ny, {
+        w: cat.size.w, d: cat.size.d, h: cat.size.h, mountHeight: cat.mountHeight,
+      });
+      if (placed) {
+        addFurniture(cat, placed.position, placed.rotation);
+      } else {
+        setToast(`Drop the ${cat.name.toLowerCase()} onto a wall to hang it.`);
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 4000);
+      }
+      return;
+    }
     const hit = sceneRef.current?.floorPointFromNdc(nx, ny, isCeiling ? "ceiling" : "floor");
-    const x = hit ? hit[0] : 0, z = hit ? hit[1] : 0;
+    let x = hit ? hit[0] : 0, z = hit ? hit[1] : 0;
+    // a floor item dropped on or against a wall steps clear of it; with no
+    // wall-free spot nearby it is not placed at all
+    if (!isCeiling) {
+      const clear = settleClearOfWalls(
+        { x, z, w: cat.size.w / 100, d: cat.size.d / 100, rotation: 0 }, placementWalls.current);
+      if (!clear) {
+        noRoomToast(`There isn't room for the ${cat.name.toLowerCase()} there — drop it on open floor.`);
+        return;
+      }
+      x = clear.x; z = clear.z;
+    }
     const y = supportHeightAt(x, z, {
       width: cat.size.w, depth: cat.size.d, mountType: (cat as any).mountType,
     });
@@ -439,6 +525,13 @@ export default function CanvasPage() {
 
   const patchSelected = (patch: Partial<PlacedFurniture>) => {
     if (!selectedFurnitureId) return;
+    // size and rotation change the footprint: those must not reach into a wall
+    if ("sizeScale" in patch || "rotation" in patch) {
+      changeFloorItem(selectedFurnitureId, patch, "sizeScale" in patch
+        ? "It won't fit any bigger here — move it away from the wall first."
+        : "Not enough room to turn it here — move it away from the wall first.");
+      return;
+    }
     setPlacedFurniture(prev =>
       prev.map(f => f.id === selectedFurnitureId ? { ...f, ...patch } : f));
   };
@@ -453,18 +546,25 @@ export default function CanvasPage() {
         setPlacedFurniture(prev => prev.filter(f => f.id !== selectedFurnitureId));
         setSelectedFurnitureId(null);
       } else if (e.key.toLowerCase() === "r") {
-        setPlacedFurniture(prev => prev.map(f =>
-          f.id === selectedFurnitureId
-            ? { ...f, rotation: (f.rotation ?? 0) + Math.PI / 4 } : f));
+        // wall mounts take their rotation from the wall they hang on
+        const f = placedFurniture.find(p => p.id === selectedFurnitureId);
+        if (f && f.mountType !== "wall") {
+          changeFloorItem(f.id, { rotation: (f.rotation ?? 0) + Math.PI / 4 },
+            "Not enough room to turn it here — move it away from the wall first.");
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedFurnitureId]);
+    // changeFloorItem reads the current furniture and walls
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFurnitureId, placedFurniture, rfWalls]);
 
   const handleRotate = () => {
-    if (!selectedFurnitureId) return;
-    setPlacedFurniture(prev => prev.map(f => f.id === selectedFurnitureId ? { ...f, rotation: f.rotation + Math.PI / 4 } : f));
+    const f = placedFurniture.find(p => p.id === selectedFurnitureId);
+    if (!f || f.mountType === "wall") return;
+    changeFloorItem(f.id, { rotation: (f.rotation ?? 0) + Math.PI / 4 },
+      "Not enough room to turn it here — move it away from the wall first.");
   };
 
   const handleDelete = () => {
@@ -567,9 +667,9 @@ export default function CanvasPage() {
     }
     if (imageSize && imageSize.width > 0 && imageSize.height > 0) {
       if (imageSize.width >= imageSize.height) {
-        return { width: Math.round(SCALED), depth: Math.round(SCALED * imageSize.height / imageSize.width) };
+        return { width: Math.round(SCALED), depth: Math.round(SCALED * imageSize.height / imageSize.width), visualScale: VISUAL_SCALE };
       } else {
-        return { width: Math.round(SCALED * imageSize.width / imageSize.height), depth: Math.round(SCALED) };
+        return { width: Math.round(SCALED * imageSize.width / imageSize.height), depth: Math.round(SCALED), visualScale: VISUAL_SCALE };
       }
     }
     // Fallback: use Roboflow wall extents to estimate aspect ratio
@@ -579,8 +679,8 @@ export default function CanvasPage() {
       if (maxX > 0 && maxY > 0) {
         const BASE = 1500;
         return maxX >= maxY
-          ? { width: BASE, depth: Math.round(BASE * maxY / maxX) }
-          : { width: Math.round(BASE * maxX / maxY), depth: BASE };
+          ? { width: BASE, depth: Math.round(BASE * maxY / maxX), visualScale: 1 }
+          : { width: Math.round(BASE * maxX / maxY), depth: BASE, visualScale: 1 };
       }
     }
     // Fallback: use room data
@@ -588,11 +688,14 @@ export default function CanvasPage() {
       const largestWidth  = Math.max(...rooms.map((r: any) => (r.width  || 0) * 100));
       const largestLength = Math.max(...rooms.map((r: any) => (r.length || 0) * 100));
       if (largestWidth > 0 && largestLength > 0) {
-        return { width: Math.max(largestWidth * 2, 400), depth: Math.max(largestLength * 2, 400) };
+        return { width: Math.max(largestWidth * 2, 400), depth: Math.max(largestLength * 2, 400), visualScale: 1 };
       }
     }
-    return { width: 1500, depth: 1200 };
+    return { width: 1500, depth: 1200, visualScale: 1 };
   })();
+  // The plan's size for every % ↔ metres conversion (lib/geometry/planFrame).
+  // visualScale: only the measured branch above stretches the layout.
+  const planFrame = makeFrame(roomDimensionsCm.width, roomDimensionsCm.depth, roomDimensionsCm.visualScale);
 
   // ── Lighting ──────────────────────────────────────────────────────────────
   // Two dials rather than a fixture-by-fixture panel. The scene derives its
@@ -600,6 +703,8 @@ export default function CanvasPage() {
   // so the only things left to decide are how bright and how warm.
   const [lighting, setLighting] = useState<LightingSettings>(DEFAULT_LIGHTING);
   const [lightPanelOpen, setLightPanelOpen] = useState(false);
+  // Room areas + distance-to-wall lines for the selected item.
+  const [showDimensions, setShowDimensions] = useState(false);
 
   // ── Rendered walkthrough (path tracing) ───────────────────────────────────
   // Not the AI render. This traces the real scene — the user's own furniture,
@@ -742,6 +847,9 @@ export default function CanvasPage() {
         fp = resolveCollision(fp, settled);
         // collision resolution can shove an item back into a wall
         if (walls.length > 0) fp = pushOutOfWalls(fp, walls);
+        // still inside a wall (no room for it here): leave it out rather
+        // than place it through the wall
+        if (walls.length > 0 && hitsWall(fp, walls)) return;
         settled.push(fp);
 
         newItems.push({
@@ -907,6 +1015,7 @@ export default function CanvasPage() {
   // and reissued ids as `wi${i}` even for walls that carried their own.
   const worldWalls = (): WorldWall[] =>
     planWallsToWorld(rfWalls, roomDimensionsCm.width / 100, roomDimensionsCm.depth / 100);
+  useEffect(() => { placementWalls.current = worldWalls(); });
 
   // ── NOOI-10: wall editing ─────────────────────────────────────────────────
   // Detected walls are an estimate. Editing them changes the shell everything
@@ -1055,6 +1164,69 @@ export default function CanvasPage() {
     } finally {
       setSavingWalls(false);
     }
+  };
+
+  // ── Wall editing from the 3D view ──────────────────────────────────────────
+  // Same rules as the 2D editor (lib/walls/wallEdit). A drag outlives the
+  // render it started in, so the handlers read walls and the save function
+  // through refs that every render refreshes; and the save runs one tick after
+  // the drag ends, once React has rendered the last move — saving straight
+  // from the pointerup handler would persist the walls from a frame earlier.
+  const rfWallsRef = useRef(rfWalls);
+  const commitWallsRef = useRef(commitWalls);
+  // a drag reads the latest walls and commit through these
+  useEffect(() => { rfWallsRef.current = rfWalls; commitWallsRef.current = commitWalls; });
+  const wallSession = useRef<WallSession | null>(null);
+
+  const applyWallChanges = (changes: ReturnType<typeof applySession>) => {
+    for (const c of changes) handleWallChange(c.index, c.wall as typeof rfWalls[number], c.opts);
+  };
+  const commitWallsSoon = () => setTimeout(() => { void commitWallsRef.current(); }, 0);
+
+  const handleWallHandleDrag = (e: WallHandleDragEvent) => {
+    if (e.phase === "start") {
+      wallSession.current = e.handle === "body"
+        ? beginBodyDrag(rfWallsRef.current, planFrame, e.index, e.x, e.z)
+        : beginEndDrag(rfWallsRef.current, planFrame, e.index, e.handle);
+      return;
+    }
+    const s = wallSession.current;
+    if (!s) return;
+    if (e.phase === "move") {
+      applyWallChanges(applySession(rfWallsRef.current, planFrame, s, e.x, e.z, true));
+      return;
+    }
+    wallSession.current = null;
+    commitWallsSoon();
+  };
+
+  // The selected wall's size for the panel: real length (the scene layout
+  // is stretched, the user's measurements are not) and the thickness the
+  // renderer actually draws. Conversions live in lib/geometry/planFrame.
+  const selectedWallIdx = selectedWall
+    ? rfWalls.findIndex((w, i) => ((w as { id?: string }).id ?? `wi${i}`) === selectedWall.key)
+    : -1;
+  const selectedWallSize = (() => {
+    if (selectedWallIdx < 0 || !rfWalls[selectedWallIdx]) return null;
+    const size = wallSize(rfWalls, planFrame, selectedWallIdx);
+    return {
+      lengthCm: size.lengthRealM * 100,
+      thicknessCm: Math.max(WALL_T_MIN, Math.min(WALL_T_MAX, size.thicknessM)) * 100,
+    };
+  })();
+
+  const setSelectedWallLength = (cm: number) => {
+    if (selectedWallIdx < 0) return;
+    applyWallChanges(setWallLength(rfWalls, planFrame, selectedWallIdx, cm / 100, 1));
+    wallBaseline.current.clear();
+    commitWallsSoon();
+  };
+  const setSelectedWallThickness = (cm: number) => {
+    if (selectedWallIdx < 0) return;
+    const c = setWallThickness(rfWalls, planFrame, selectedWallIdx, cm / 100);
+    handleWallChange(c.index, c.wall);
+    wallBaseline.current.clear();
+    commitWallsSoon();
   };
 
   const handleWallAdd = (wall: typeof rfWalls[number]) => {
@@ -1847,12 +2019,30 @@ export default function CanvasPage() {
             </div>
           )}
 
-          {/* Lighting. Two dials, because the scene works out the rest:
-               every lamp placed emits, every opening admits daylight. */}
+          {/* Lighting. A time of day and two dials; the scene works out the
+               rest: every lamp placed emits, every opening admits daylight. */}
           {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
             <div className="absolute bottom-5 left-5 z-10">
               {lightPanelOpen && (
                 <div className="mb-2 w-[214px] rounded-[12px] bg-black/70 backdrop-blur-sm p-3.5 text-white">
+                  {/* Time of day: sun angle and colour, sky, and lamps, all at
+                       once. Night switches every lamp on. */}
+                  <div className="mb-3 grid grid-cols-3 gap-1 rounded-[8px] bg-white/10 p-0.5">
+                    {(["day", "sunset", "night"] as const).map(t => {
+                      const active = (lighting.timeOfDay ?? "day") === t;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => setLighting(l => ({ ...l, timeOfDay: t }))}
+                          className={`rounded-[6px] py-1 text-[11px] font-medium transition-colors ${
+                            active ? "bg-white text-[#0a0a0a]" : "text-white/70 hover:text-white"
+                          }`}
+                        >
+                          {t === "day" ? "Day" : t === "sunset" ? "Sunset" : "Night"}
+                        </button>
+                      );
+                    })}
+                  </div>
                   <label className="block text-[11px] text-white/70">
                     Brightness
                     <input
@@ -1884,17 +2074,31 @@ export default function CanvasPage() {
                   </button>
                 </div>
               )}
-              <button
-                onClick={() => setLightPanelOpen(o => !o)}
-                title="Lighting"
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
-                  lightPanelOpen
-                    ? "bg-white text-[#0a0a0a]"
-                    : "bg-black/50 text-white/80 hover:text-white"
-                }`}
-              >
-                <Sun size={13} />Lighting
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setLightPanelOpen(o => !o)}
+                  title="Lighting"
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
+                    lightPanelOpen
+                      ? "bg-white text-[#0a0a0a]"
+                      : "bg-black/50 text-white/80 hover:text-white"
+                  }`}
+                >
+                  <Sun size={13} />Lighting
+                </button>
+                <button
+                  onClick={() => setShowDimensions(v => !v)}
+                  title="Room areas and distances to the walls"
+                  aria-pressed={showDimensions}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
+                    showDimensions
+                      ? "bg-white text-[#0a0a0a]"
+                      : "bg-black/50 text-white/80 hover:text-white"
+                  }`}
+                >
+                  <Ruler size={13} />Dimensions
+                </button>
+              </div>
             </div>
           )}
 
@@ -2101,6 +2305,7 @@ export default function CanvasPage() {
                             onWallDelete={handleWallDelete}
                             selectedWallIndex={selectedWallIndex}
                             onWallSelect={setSelectedWallIndex}
+                            frame={planFrame}
                           />
                         )}
                       </div>
@@ -2143,6 +2348,7 @@ export default function CanvasPage() {
                   ref={sceneRef}
                   roomWidthCm={roomDimensionsCm.width}
                   roomDepthCm={roomDimensionsCm.depth}
+                  visualScale={roomDimensionsCm.visualScale}
                   rooms={rooms}
                   rfWalls={rfWalls}
                   openings={openings}
@@ -2152,6 +2358,10 @@ export default function CanvasPage() {
                     if (id) { setSelectedWall(null); setSelectedDoor(null); setSelectedFloorRoomId(null); }
                   }}
                   onFurnitureMove={handleFurnitureMove}
+                  onWallHandleDrag={handleWallHandleDrag}
+                  showDimensions={showDimensions}
+                  onFurnitureToggleLight={(id) => setPlacedFurniture(prev => prev.map(f =>
+                    f.id === id ? { ...f, lightLevel: (f.lightLevel ?? 1) > 0 ? 0 : 1 } : f))}
                   onFurnitureRotate={handleFurnitureRotate}
                   selectedFurnitureId={selectedFurnitureId}
                   wallColors={wallColors}
@@ -2221,7 +2431,17 @@ export default function CanvasPage() {
             <div className="flex-1 overflow-hidden px-3 pb-3">
               {viewMode === "3d" ? (
                 <FurnitureLibrary
-                  onQuickAdd={(cat) => addFurniture(cat, [0, 0, 0])}
+                  onQuickAdd={(cat) => {
+                    // a wall mount goes on the wall nearest the middle of the view
+                    if (cat.mountType === "wall") {
+                      const placed = sceneRef.current?.wallPlacementFromNdc(0, 0, {
+                        w: cat.size.w, d: cat.size.d, h: cat.size.h, mountHeight: cat.mountHeight,
+                      }, true);
+                      if (placed) addFurniture(cat, placed.position, placed.rotation);
+                      return;
+                    }
+                    addFurniture(cat, [0, 0, 0]);
+                  }}
                 />
               ) : (
                 <div className="flex flex-col items-center py-6 gap-2 text-center">
@@ -2451,6 +2671,15 @@ export default function CanvasPage() {
                       Wall {selectedWall.key} · {selectedWall.side === "A" ? "side 1" : "side 2"} — only this side changes.
                     </p>
                   </div>
+
+                  {selectedWallSize && (
+                    <WallSizeFields
+                      lengthCm={selectedWallSize.lengthCm}
+                      thicknessCm={selectedWallSize.thicknessCm}
+                      onLength={setSelectedWallLength}
+                      onThickness={setSelectedWallThickness}
+                    />
+                  )}
 
                   {/* Paint | Surface */}
                   <div className="flex gap-1 p-1 bg-[#f5f5f5] rounded-[10px]">

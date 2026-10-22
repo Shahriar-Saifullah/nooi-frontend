@@ -203,6 +203,8 @@ export interface FurniturePlacement {
   width?: number;
   depth?: number;
   height?: number;
+  /** Lamps only: 0 = off … 1 = full. */
+  lightLevel?: number;
 }
 
 export async function saveFurniture(

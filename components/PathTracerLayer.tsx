@@ -76,7 +76,7 @@ function prepareScene(scene: THREE.Object3D): () => void {
     // ContactShadows and other helpers are a fake. Real light transport
     // produces the shadow properly, and leaving the fake one in means a dark
     // smear under everything.
-    if (o.name === "nooi-noexport" && o.visible) {
+    if ((o.name === "nooi-noexport" || o.name === "nooi-ui") && o.visible) {
       o.visible = false;
       hidden.push(o);
       return;
@@ -241,9 +241,11 @@ export default function PathTracerLayer({
    * draws instead of the rasteriser. At priority 0 both would draw and the
    * result would flicker between them.
    */
-  useFrame(() => {
+  useFrame((state) => {
     const pt = tracer.current;
     if (!active || !pt) return;
+    // on-demand canvas: keep sampling until the image has converged
+    if (!atFullScale.current || Math.floor(pt.samples ?? 0) < maxSamples) state.invalidate();
 
     // Any camera movement invalidates every accumulated sample — the image
     // is an average over one viewpoint. updateCamera() restarts it.

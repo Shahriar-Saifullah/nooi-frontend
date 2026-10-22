@@ -77,20 +77,25 @@ function baseEntry(url: string): BaseEntry {
 
 function cloneFor(url: string, repeatX: number, repeatY: number, srgb: boolean): THREE.Texture {
   const entry = baseEntry(url);
-  const c = entry.tex.clone();
+  // NOT entry.tex.clone() while the image is still downloading.
+  //
+  // Texture.clone() always marks the copy as needing upload, and a clone
+  // shares its image source with the original. Cloning before the download
+  // finished therefore flagged an EMPTY image for upload. WebGL skips that
+  // quietly; WebGPU throws ("Cannot read properties of null (reading
+  // 'complete')") on every frame until the image lands — and three frames of
+  // that switch the canvas back to WebGL. A fresh texture is not flagged, and
+  // gets its image and its flag together in the load callback above.
+  const c = entry.loaded ? entry.tex.clone() : new THREE.Texture();
   c.wrapS = c.wrapT = THREE.RepeatWrapping;
   c.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   c.repeat.set(repeatX, repeatY);
   // Anisotropic filtering. Without it a floor seen at a low angle samples a
-  // tiny mip and the tiling pattern aliases into ripples (the zig-zag on the
-  // carpet). Both renderers clamp this to what the GPU supports; 16 is the
-  // common maximum and costs little.
+  // tiny mip and the pattern shimmers. Both renderers clamp this to what the
+  // GPU supports; 16 is the common maximum and costs little.
   c.anisotropy = 16;
-  c.needsUpdate = true;
   if (!entry.loaded) {
-    entry.clones.push(c);          // patched when the image arrives
-  } else {
-    c.image = entry.tex.image;     // already decoded — take it now
+    entry.clones.push(c);          // image + upload flag set when it arrives
   }
   return c;
 }

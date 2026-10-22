@@ -13,7 +13,7 @@
  *                 occlusion, then an edge-aware denoise. Smoother and more
  *                 stable than N8AO on WebGL.
  *   GI          — optional one-bounce indirect light from the same node
- *                 (WEBGPU_FX.giIntensity; off by default until tuned)
+ *                 (WEBGPU_FX.giIntensity), denoised like the AO
  *   ink lines   — creases and silhouettes, see inkEdges.ts
  *   grade       — mild contrast around mid-grey + saturation, in scene
  *                 space, before tone mapping
@@ -52,11 +52,13 @@ export const WEBGPU_FX = {
     backfaceLighting: 0.5,
     intensity: 1.5,
   },
-  /** One-bounce indirect light. 0 = off. Try 0.5–2 once the rest looks right;
-   *  without temporal filtering it can shimmer while the camera moves. */
-  giIntensity: 0,
+  /** One-bounce indirect light: shadowed faces pick up a little of the colour
+   *  of what faces them, which is most of the "soft, real room" look. Denoised
+   *  like the AO. Kept modest because there is no temporal filtering: set to 0
+   *  if it shimmers while the camera moves on a given machine. */
+  giIntensity: 0.8,
   grade: { contrast: 1.05, saturation: 1.1 },
-  ink: { color: "#2b2622", opacity: 0.5, radius: 1 },
+  ink: { color: "#2b2622", opacity: 0.35, radius: 1 },
 };
 
 export default function WebGPUPostFx() {
@@ -71,6 +73,7 @@ export default function WebGPUPostFx() {
     if (!(renderer as any).isWebGPURenderer || !hasSize) return;
 
     const disposables: Array<{ dispose(): void }> = [];
+    const giIntensity = WEBGPU_FX.giIntensity;
     let pipeline: RenderPipeline | null = null;
 
     try {
@@ -103,7 +106,7 @@ export default function WebGPUPostFx() {
       giPass.thickness.value = p.thickness;
       giPass.backfaceLighting.value = p.backfaceLighting;
       giPass.aoIntensity.value = p.intensity;
-      giPass.giIntensity.value = WEBGPU_FX.giIntensity;
+      giPass.giIntensity.value = giIntensity;
       giPass.useLinearThickness.value = false;
       giPass.useScreenSpaceSampling.value = true;
       giPass.useTemporalFiltering = false;
@@ -119,8 +122,15 @@ export default function WebGPUPostFx() {
       const ao = mix(aoDenoised.r, float(1), smoothstep(float(0.9994), float(0.9998), sampleDepth(screenUV)));
 
       let rgb: any = color.rgb.mul(ao);
-      if (WEBGPU_FX.giIntensity > 0) {
-        rgb = rgb.add(albedo.rgb.mul(giPass.getGINode().rgb));
+      if (giIntensity > 0) {
+        // One bounce of indirect light, tinted by the surface it lands on.
+        // Raw SSGI at one slice is speckled, so it goes through the same
+        // edge-aware denoise as the AO before it is added.
+        const giRaw = giPass.getGINode();
+        const giDenoised: any = denoise(vec4(giRaw.rgb, float(1)), depth, sceneNormal, camera);
+        disposables.push(giDenoised);
+        giDenoised.radius.value = 6;
+        rgb = rgb.add(albedo.rgb.mul(giDenoised.rgb));
       }
 
       // ── ink ──

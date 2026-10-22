@@ -98,7 +98,11 @@ export function inkedEdges({
     max(float(1).sub(nC.dot(n(uv.add(vec2(px.x, 0))))), float(1).sub(nC.dot(n(uv.sub(vec2(px.x, 0)))))),
     max(float(1).sub(nC.dot(n(uv.add(vec2(0, px.y))))), float(1).sub(nC.dot(n(uv.sub(vec2(0, px.y)))))),
   );
-  const normalEdge = smoothstep(float(0.01), float(0.05), nDiff);
+  // Pascal's 0.01–0.05 suits low-poly architecture. Nooi's furniture GLBs are
+  // dense and finely curved (tufted sofas, turned legs), and at those values
+  // every facet inked — the sofa read as a pencil sketch. 0.12–0.35 keeps real
+  // creases (≈30°+) and ignores smooth curvature.
+  const normalEdge = smoothstep(float(0.12), float(0.35), nDiff);
 
   // fade out in the far field (≈150 m → 350 m at the normalised clip range)
   const distanceFade = float(1).sub(smoothstep(float(0.9994), float(0.9998), dC));

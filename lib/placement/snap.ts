@@ -18,6 +18,8 @@
  * in the scene, or on the server.
  */
 
+import { wallToScene, type PlanFrame } from "@/lib/geometry/planFrame";
+
 export interface WorldWall {
   x1: number; z1: number;
   x2: number; z2: number;
@@ -69,32 +71,31 @@ export const WALL_T_MAX = 0.20;
 export function planWallsToWorld(
   walls: PlanWall[], totalW: number, totalD: number,
 ): WorldWall[] {
-  const maxDim = Math.max(totalW, totalD);
-  const px = (x: number) => (x / 100) * totalW - totalW / 2;
-  const pz = (y: number) => (y / 100) * totalD - totalD / 2;
+  // % → scene metres goes through the plan frame like every other conversion
+  const frame: PlanFrame = { widthM: totalW, depthM: totalD, visualScale: 1 };
 
-  return walls.map((w, i) => {
-    const thickness = Math.min(WALL_T_MAX,
-      Math.max(WALL_T_MIN, (w.thickness / 100) * maxDim));
+  return walls.map((raw, i) => {
+    const w = wallToScene(frame, raw);
+    const thickness = Math.min(WALL_T_MAX, Math.max(WALL_T_MIN, w.thickness));
     const half = thickness / 2;
-    const id = w.id ?? `wi${i}`;
+    const id = raw.id ?? `wi${i}`;
 
     // The renderer draws each wall axis-aligned along whichever axis it spans
     // furthest, and extends it half a thickness at both ends so corners
     // interpenetrate instead of leaving a slit. Mirror both exactly.
-    const horiz = Math.abs(w.x2 - w.x1) >= Math.abs(w.y2 - w.y1);
-    if (horiz) {
-      const z = pz((w.y1 + w.y2) / 2);
+    // orientation is decided in plan %, exactly as the renderer decides it
+    if (Math.abs(raw.x2 - raw.x1) >= Math.abs(raw.y2 - raw.y1)) {
+      const z = (w.y1 + w.y2) / 2;
       return {
-        x1: px(Math.min(w.x1, w.x2)) - half, z1: z,
-        x2: px(Math.max(w.x1, w.x2)) + half, z2: z,
+        x1: Math.min(w.x1, w.x2) - half, z1: z,
+        x2: Math.max(w.x1, w.x2) + half, z2: z,
         thickness, id,
       };
     }
-    const x = px((w.x1 + w.x2) / 2);
+    const x = (w.x1 + w.x2) / 2;
     return {
-      x1: x, z1: pz(Math.min(w.y1, w.y2)) - half,
-      x2: x, z2: pz(Math.max(w.y1, w.y2)) + half,
+      x1: x, z1: Math.min(w.y1, w.y2) - half,
+      x2: x, z2: Math.max(w.y1, w.y2) + half,
       thickness, id,
     };
   });
@@ -191,58 +192,131 @@ export function snapToWall(
   };
 }
 
+// ── Walls as solid obstacles ─────────────────────────────────────────────────
+//
+// A floor item is a rectangle (its footprint) at any rotation; a wall is an
+// axis-aligned solid band (planWallsToWorld already extends it over the
+// corners). Overlap is tested EXACTLY with the separating-axis test on the
+// four axes that matter: world x, world z, and the item's own two sides.
+//
+// The previous check measured the item by halfExtents(), which only knows
+// 0° and 90°: at 30° a 220 × 90 sofa was treated as 45 cm deep when it
+// reaches 94 cm, and sank 44 cm into the wall.
+
+/** Unit vectors of an item's width (u) and depth (v) axes on the floor, for
+ *  a three.js rotation about +Y: local x → (cos r, −sin r), local z →
+ *  (sin r, cos r). */
+function itemAxes(rotation: number): [[number, number], [number, number]] {
+  const c = Math.cos(rotation), s = Math.sin(rotation);
+  return [[c, -s], [s, c]];
+}
+
+/** The four floor corners of a footprint. */
+export function footprintCorners(f: Footprint): [number, number][] {
+  const [u, v] = itemAxes(f.rotation);
+  const a = f.w / 2, b = f.d / 2;
+  return ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([i, j]) => [
+    f.x + u[0] * a * i + v[0] * b * j,
+    f.z + u[1] * a * i + v[1] * b * j,
+  ] as [number, number]);
+}
+
+export interface WallPenetration {
+  /** how far the item must move to clear the wall (plus `clearance`), m */
+  depth: number;
+  /** direction to move it: away from the wall */
+  nx: number; nz: number;
+  wall: WorldWall;
+}
+
 /**
- * Push an item clear of every wall it overlaps.
+ * How deep an item sits in one wall, and the shortest way out. null when it
+ * is at least `clearance` away from it.
+ */
+export function wallPenetration(
+  f: Footprint, w: WorldWall, clearance = 0,
+): WallPenetration | null {
+  const half = w.thickness / 2;
+  const horiz = Math.abs(w.x2 - w.x1) >= Math.abs(w.z2 - w.z1);
+  // the wall as an axis-aligned rectangle
+  const minX = Math.min(w.x1, w.x2) - (horiz ? 0 : half);
+  const maxX = Math.max(w.x1, w.x2) + (horiz ? 0 : half);
+  const minZ = Math.min(w.z1, w.z2) - (horiz ? half : 0);
+  const maxZ = Math.max(w.z1, w.z2) + (horiz ? half : 0);
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+  const ex = (maxX - minX) / 2, ez = (maxZ - minZ) / 2;
+
+  const [u, v] = itemAxes(f.rotation);
+  const a = f.w / 2, b = f.d / 2;
+  const dx = f.x - cx, dz = f.z - cz;
+
+  let best: WallPenetration | null = null;
+  for (const [nx, nz] of [[1, 0], [0, 1], u, v] as [number, number][]) {
+    const rItem = a * Math.abs(u[0] * nx + u[1] * nz) + b * Math.abs(v[0] * nx + v[1] * nz);
+    const rWall = ex * Math.abs(nx) + ez * Math.abs(nz);
+    const along = dx * nx + dz * nz;
+    const overlap = rItem + rWall + clearance - Math.abs(along);
+    if (overlap <= 0) return null;                    // separated on this axis
+    if (!best || overlap < best.depth) {
+      const sign = along >= 0 ? 1 : -1;
+      best = { depth: overlap, nx: nx * sign, nz: nz * sign, wall: w };
+    }
+  }
+  return best;
+}
+
+/** The deepest wall overlap of an item, in metres; 0 when it is clear. */
+export function wallOverlapDepth(f: Footprint, walls: WorldWall[]): number {
+  let deepest = 0;
+  for (const w of walls) {
+    const p = wallPenetration(f, w);
+    if (p && p.depth > deepest) deepest = p.depth;
+  }
+  return deepest;
+}
+
+/** True when any part of the item is inside a wall (touching is fine). */
+export const hitsWall = (f: Footprint, walls: WorldWall[], tolerance = 0.005) =>
+  wallOverlapDepth(f, walls) > tolerance;
+
+/**
+ * Push an item clear of every wall it overlaps, by the shortest route out of
+ * each, leaving `clearance` between it and the wall face.
  *
  * Room polygons trace the wall CENTRELINE, so an item sitting neatly inside a
- * room polygon can still be buried up to half a wall thickness. Containment
- * checks alone therefore do not prevent clipping — this does, by treating each
- * wall as a solid band and evicting anything inside it.
- *
- * Iterated because pushing out of one wall can push into another in a corner.
+ * room polygon can still be buried up to half a wall thickness — containment
+ * checks alone do not prevent clipping. Iterated because pushing out of one
+ * wall can push into another in a corner. In a gap narrower than the item
+ * there is no way out; check the result with hitsWall().
  */
 export function pushOutOfWalls(
-  f: Footprint, walls: WorldWall[], clearance = 0.02, passes = 4,
+  f: Footprint, walls: WorldWall[], clearance = 0.02, passes = 8,
 ): Footprint {
-  let cur = { ...f };
-  const [hw, hd] = halfExtents(cur);
-
+  const cur = { ...f };
   for (let pass = 0; pass < passes; pass++) {
     let moved = false;
-
     for (const w of walls) {
-      const dx = w.x2 - w.x1, dz = w.z2 - w.z1;
-      const len2 = dx * dx + dz * dz;
-      if (len2 < 1e-9) continue;
-
-      let t = ((cur.x - w.x1) * dx + (cur.z - w.z1) * dz) / len2;
-      t = Math.max(0, Math.min(1, t));
-      const px = w.x1 + dx * t, pz = w.z1 + dz * t;
-
-      let nx = cur.x - px, nz = cur.z - pz;
-      let dist = Math.hypot(nx, nz);
-      if (dist < 1e-6) {
-        // dead centre on the wall: evict along the wall's perpendicular
-        const L = Math.sqrt(len2);
-        nx = -dz / L; nz = dx / L; dist = 0;
-      } else {
-        nx /= dist; nz /= dist;
-      }
-
-      // how far the footprint reaches along this wall's normal
-      const reach = Math.abs(nx) * hw + Math.abs(nz) * hd;
-      const needed = w.thickness / 2 + reach + clearance;
-      if (dist >= needed) continue;
-
-      const push = needed - dist;
-      cur.x += nx * push;
-      cur.z += nz * push;
+      const p = wallPenetration(cur, w, clearance);
+      // already clear, or only within the clearance margin by a hair
+      if (!p || p.depth < 1e-4) continue;
+      cur.x += p.nx * p.depth;
+      cur.z += p.nz * p.depth;
       moved = true;
     }
-
     if (!moved) break;
   }
   return cur;
+}
+
+/**
+ * Where an item may stand: nudged clear of the walls, or null when there is
+ * no wall-free spot close by (a gap narrower than the item). Callers refuse
+ * the placement on null rather than leave the item inside a wall.
+ */
+export function settleClearOfWalls(f: Footprint, walls: WorldWall[]): Footprint | null {
+  if (walls.length === 0) return f;
+  const out = pushOutOfWalls(f, walls);
+  return hitsWall(out, walls) ? null : out;
 }
 
 // ── Collision ────────────────────────────────────────────────────────────────
