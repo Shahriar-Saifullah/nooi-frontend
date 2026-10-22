@@ -12,19 +12,24 @@ import {
 import * as THREE from "three";
 import { surfaceById } from "@/lib/surfaces/catalog";
 import {
-  snapToWall, resolveCollision, pushOutOfWalls, planWallsToWorld,
+  snapToWall, resolveCollision, settleClearOfWalls, planWallsToWorld, halfExtents, nearestWall,
   WALL_T_MIN, WALL_T_MAX,
   type WorldWall, type Footprint,
 } from "@/lib/placement/snap";
 import { doorFinishById } from "@/lib/surfaces/doors";
 import { getFaceTextures, getDoorTexture, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
+import WallDecor from "@/components/decor/WallDecor";
+import { RoomAreaLabels, ItemDimensions } from "@/components/Measurements";
+import { Html } from "@react-three/drei";
+import { installBvh, buildBoundsTrees } from "@/lib/three/bvh";
+import { makeFrame, sceneToReal, snapSceneToRealCm, type PlanFrame } from "@/lib/geometry/planFrame";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
 import PathTracerLayer, { type PathTracerStats } from "@/components/PathTracerLayer";
 import LightingRig, {
-  DEFAULT_LIGHTING, type LightingSettings,
+  DEFAULT_LIGHTING, isLightFixture, type LightingSettings,
 } from "@/components/LightingRig";
 import {
   EffectComposer, N8AO, ToneMapping, HueSaturation, BrightnessContrast,
@@ -44,6 +49,45 @@ import { createDepthNodeMaterial } from "@/components/webgpu/depthMaterial";
 function SurfaceTextureRefresh() {
   const invalidate = useThree(s => s.invalidate);
   useEffect(() => onSurfaceTextureLoaded(() => invalidate()), [invalidate]);
+  return null;
+}
+
+// ─── On-demand rendering ──────────────────────────────────────────────────────
+// The Canvas runs frameloop="demand": a frame is drawn only when something
+// asks for one, so an idle view costs nothing (laptops stay cool, phones keep
+// their battery). Who asks:
+//   - R3F itself, whenever React changes a prop on a three.js object;
+//   - OrbitControls, on every camera change (damping included);
+//   - every animation in this file, for as long as it is still moving
+//     (doors, cutaway walls, camera flights, walk mode, the tour);
+//   - this driver: a short burst after mount and after each update of the
+//     scene's props, so work that lands a moment later — a model's
+//     materials, an effect that mutates an object directly — still reaches
+//     the screen; and any key press, for the keyboard camera.
+export const KICK_MS = { mount: 4000, update: 700 };
+/** Cap a frame's delta: after an idle stretch the first frame's delta is the
+ *  whole idle time, which would teleport anything that moves by `dt`. */
+export const frameDt = (dt: number) => Math.min(dt, 1 / 20);
+
+function DemandDriver({ kickRef }: { kickRef: React.MutableRefObject<((ms: number) => void) | null> }) {
+  const invalidate = useThree(s => s.invalidate);
+  const until = useRef(0);
+  useEffect(() => {
+    kickRef.current = (ms: number) => {
+      until.current = Math.max(until.current, performance.now() + ms);
+      invalidate();
+    };
+    kickRef.current(KICK_MS.mount);
+    const key = () => invalidate();
+    window.addEventListener("keydown", key);
+    window.addEventListener("keyup", key);
+    return () => {
+      kickRef.current = null;
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("keyup", key);
+    };
+  }, [invalidate, kickRef]);
+  useFrame(() => { if (performance.now() < until.current) invalidate(); });
   return null;
 }
 
@@ -72,6 +116,8 @@ export interface PlacedFurniture {
   color?: string | null;              // material color override
   materialPreset?: string | null;     // id from MATERIAL_PRESETS
   mountType?: "floor" | "ceiling" | "wall";
+  /** Lamps only: 0 = off … 1 = full. Absent = on at full. */
+  lightLevel?: number;
   // legacy box fields (still used as GLTF fallback)
   scale?: [number, number, number];
   width?: number;
@@ -79,9 +125,38 @@ export interface PlacedFurniture {
   height?: number;
 }
 
+
+// accelerated raycasting for every mesh (lib/three/bvh)
+installBvh();
+
+/** A drag on one of the selected wall's 3D handles. (x, z) is the pointer
+ *  on the floor in scene metres, snapped so real lengths land on whole
+ *  centimetres; the page feeds it to the same edit rules as the 2D editor
+ *  (lib/walls/wallEdit). */
+export interface WallHandleDragEvent {
+  index: number;
+  /** 1 / 2 = that end; "body" = the middle handle (slides the wall sideways) */
+  handle: 1 | 2 | "body";
+  x: number;
+  z: number;
+  phase: "start" | "move" | "end";
+}
+
+/** Where a wall-mounted item hangs: its bottom-centre and the rotation that
+ *  turns its face (+z) into the room. */
+export interface WallPlacement { position: [number, number, number]; rotation: number }
+
 export interface ThreeSceneHandle {
   /** raycast an NDC point (-1..1) onto the floor or ceiling; returns world [x, z] */
   floorPointFromNdc: (nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null;
+  /** Hang an item of the given size (cm) on the wall under an NDC point, at
+   *  `mountHeight` cm (its centre). With `nearestIfMissed`, a point that misses
+   *  every wall falls back to the wall nearest the floor point under it. */
+  wallPlacementFromNdc: (
+    nx: number, ny: number,
+    item: { w: number; d: number; h: number; mountHeight?: number },
+    nearestIfMissed?: boolean,
+  ) => WallPlacement | null;
   /** render the current view and return it as a PNG data-URL */
   captureImage: () => string | null;
   /** grayscale depth map of the current view (near = white), for
@@ -126,6 +201,9 @@ export interface PolyRoom extends GridRoom {
 interface ThreeSceneV2Props {
   roomWidthCm?: number;
   roomDepthCm?: number;
+  /** scene metres per real metre for the floor layout (the page draws plans
+   *  larger than life); measurements shown to the user divide by it */
+  visualScale?: number;
   rooms?: PolyRoom[];
   rfWalls?: VWall[];
   openings?: Opening[];
@@ -151,12 +229,20 @@ interface ThreeSceneV2Props {
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   /** fired when wall-snapping re-orients an item so its back faces the wall */
   onFurnitureRotate?: (id: string, rotation: number) => void;
+  /** double-click on a lamp: switch it on or off */
+  onFurnitureToggleLight?: (id: string) => void;
   selectedFurnitureId?: string | null;
   walkthroughActive?: boolean;
   walkthroughPaused?: boolean;
   onWalkthroughProgress?: (progress: number, info?: WalkthroughProgressInfo) => void;
   /** Ambient occlusion. On by default; pass false on weak hardware. */
   aoEnabled?: boolean;
+  /** Room areas, and distance-to-wall lines for the selected item. Distance
+   *  lines also show for any item while it is being dragged. */
+  showDimensions?: boolean;
+  /** Handles on the selected wall: drag its ends to resize it, its middle to
+   *  slide it. Omit to disable wall editing in 3D. */
+  onWallHandleDrag?: (e: WallHandleDragEvent) => void;
   /** Brightness and warmth for the interior lighting rig. */
   lighting?: LightingSettings;
   /** Path-traced rendering. Replaces the raster view entirely while on. */
@@ -180,15 +266,19 @@ interface World {
   totalW: number;
   totalD: number;
   maxDim: number;
+  /** the same plan as a PlanFrame — lengths and areas shown to the user go
+   *  through it (scene → real) */
+  frame: PlanFrame;
   px: (xPct: number) => number; // % → world x
   pz: (yPct: number) => number; // % → world z
 }
 
-function makeWorld(totalW: number, totalD: number): World {
+function makeWorld(totalW: number, totalD: number, visualScale = 1): World {
   return {
     totalW,
     totalD,
     maxDim: Math.max(totalW, totalD),
+    frame: makeFrame(totalW * 100, totalD * 100, visualScale),
     px: (x) => (x / 100) * totalW - totalW / 2,
     pz: (y) => (y / 100) * totalD - totalD / 2,
   };
@@ -210,6 +300,84 @@ function wallPieces(a0: number, a1: number, cuts: Cut[]) {
   }
   if (a1 - cursor > 0.02) solids.push([cursor, a1]);
   return { solids, cuts: sorted };
+}
+
+// ─── Doors that open ─────────────────────────────────────────────────────────
+//
+// A hinged leaf swings open as an eye-level camera comes within reach (walk
+// mode and the guided walkthrough both qualify) and closes again behind it.
+// It always swings AWAY from the viewer, so it never sweeps through them.
+// From the orbit views a door rests slightly ajar, as it always has, and a
+// double-click opens or closes it fully.
+
+const DOOR_OPEN = 1.45;      // rad, a little short of 90° so it reads as a door
+const DOOR_AJAR = 0.5;
+const DOOR_REACH = 1.9;      // m: auto-open distance
+const EYE_LEVEL_MAX = 2.4;   // m: below this the camera counts as standing
+
+function SwingDoor({
+  horiz, hinge, centre, children,
+}: {
+  horiz: boolean;
+  /** hinge position (world) */
+  hinge: [number, number, number];
+  /** door centre on the plan (world x, z) */
+  centre: [number, number];
+  children: React.ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  // null = automatic; otherwise the user's double-click choice
+  const manual = useRef<"open" | "closed" | null>(null);
+  const side = useRef(horiz ? -1 : 1);
+
+  useFrame(({ camera, invalidate }, rawDt) => {
+    const g = ref.current;
+    if (!g) return;
+    const dt = frameDt(rawDt);
+    const cam = camera.position;
+    const standing = cam.y < EYE_LEVEL_MAX;
+    const near = standing && Math.hypot(cam.x - centre[0], cam.z - centre[1]) < DOOR_REACH;
+
+    // swing away from the camera: see the sign derivation in the header —
+    // a horizontal wall's leaf runs along +x and a positive angle moves its
+    // free end towards −z; a vertical wall's leaf runs along +z and a
+    // positive angle moves it towards +x
+    const away = horiz
+      ? (cam.z > hinge[2] ? 1 : -1)
+      : (cam.x > hinge[0] ? -1 : 1);
+
+    let target: number;
+    if (manual.current === "open" || (manual.current !== "closed" && near)) {
+      // only pick a side while (nearly) closed, so an open door does not flip
+      if (Math.abs(g.rotation.y) < 0.2) side.current = away;
+      target = side.current * DOOR_OPEN;
+    } else if (manual.current === "closed" || standing) {
+      target = 0;
+    } else {
+      target = horiz ? -DOOR_AJAR : DOOR_AJAR;   // orbit views: as before
+    }
+    const y = g.rotation.y;
+    if (Math.abs(y - target) > 0.001) {
+      g.rotation.y = y + (target - y) * Math.min(1, dt * 6);
+      invalidate();                      // still swinging
+    }
+  });
+
+  return (
+    <group
+      ref={ref}
+      position={hinge}
+      rotation={[0, horiz ? -DOOR_AJAR : DOOR_AJAR, 0]}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        const g = ref.current;
+        const isOpen = g ? Math.abs(g.rotation.y) > 1 : false;
+        manual.current = isOpen ? "closed" : "open";
+      }}
+    >
+      {children}
+    </group>
+  );
 }
 
 // ─── Wall rendering ──────────────────────────────────────────────────────────
@@ -355,9 +523,10 @@ function WallWithOpenings({
 
               {cw <= HINGED_MAX && (
                 // hinged leaf, pivoted at the jamb (not its own centre)
-                <group
-                  position={horiz ? [cut.start + 0.03, 0, c] : [c, 0, cut.start + 0.03]}
-                  rotation={[0, horiz ? -0.5 : 0.5, 0]}
+                <SwingDoor
+                  horiz={horiz}
+                  hinge={horiz ? [cut.start + 0.03, 0, c] : [c, 0, cut.start + 0.03]}
+                  centre={horiz ? [cut.start + cw / 2, c] : [c, cut.start + cw / 2]}
                 >
                   <mesh
                     position={horiz
@@ -391,7 +560,7 @@ function WallWithOpenings({
                       );
                     })()}
                   </mesh>
-                </group>
+                </SwingDoor>
               )}
 
               {cw > HINGED_MAX && cw <= SLIDER_MAX && (
@@ -450,6 +619,410 @@ function WallWithOpenings({
           </group>
         );
       })}
+    </group>
+  );
+}
+
+// ─── Wall cutaway ────────────────────────────────────────────────────────────
+//
+// In the orbit views the walls nearest the camera hid the rooms behind them,
+// so a client looking at their furnished home mostly saw the outside of it.
+// Like the cutaway in The Sims (and Pascal's viewer), a wall that stands
+// between the camera and the middle of the plan drops to a low ledge, and
+// rises again as the camera moves round. The ledge keeps the plan readable;
+// hiding the wall outright made rooms look like they had no walls at all.
+//
+// Scaled, not hidden: the wall group shrinks towards the floor, so selection,
+// painting and door clicks keep working on what is left, and the change can
+// animate instead of popping.
+
+/** Height a cut-away wall keeps, in metres. */
+const CUTAWAY_H = 0.32;
+
+/** Current height factor of every wall (1 = full), by wall key. Written by
+ *  CutawayWall each frame; read by wall-mounted items (which hide with their
+ *  wall rather than float in mid-air) and by the wall raycast (which must not
+ *  hit the part of a wall that is not there). */
+const wallCutScale = new Map<string, number>();
+/** Above this camera elevation (top-down views) nothing needs cutting. */
+const CUTAWAY_MAX_ELEVATION = THREE.MathUtils.degToRad(68);
+
+function wallLine(wall: VWall, world: World) {
+  const horiz = Math.abs(wall.x2 - wall.x1) >= Math.abs(wall.y2 - wall.y1);
+  const c = horiz
+    ? world.pz((wall.y1 + wall.y2) / 2)
+    : world.px((wall.x1 + wall.x2) / 2);
+  const a0 = horiz ? world.px(Math.min(wall.x1, wall.x2)) : world.pz(Math.min(wall.y1, wall.y2));
+  const a1 = horiz ? world.px(Math.max(wall.x1, wall.x2)) : world.pz(Math.max(wall.y1, wall.y2));
+  return { horiz, c, mid: (a0 + a1) / 2 };
+}
+
+function CutawayWall({
+  wall, wallKey, world, enabled, children,
+}: {
+  wall: VWall; wallKey: string; world: World; enabled: boolean; children: React.ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  const line = useMemo(() => wallLine(wall, world), [wall, world]);
+
+  useFrame(({ camera, invalidate }, rawDt) => {
+    const g = ref.current;
+    if (!g) return;
+    const dt = frameDt(rawDt);
+
+    let cut = false;
+    if (enabled) {
+      const cam = camera.position;
+      // signed distance of the camera and of the plan's centre (the origin)
+      // from the wall's line, along the wall's normal
+      const camSide = line.horiz ? cam.z - line.c : cam.x - line.c;
+      const centreSide = -line.c;
+      // horizontal distance from the camera to the wall's midpoint
+      const dx = (line.horiz ? line.mid : line.c) - cam.x;
+      const dz = (line.horiz ? line.c : line.mid) - cam.z;
+      const flat = Math.hypot(dx, dz);
+      const elevation = Math.atan2(cam.y - 1, flat);
+
+      cut =
+        Math.abs(centreSide) > 0.15 &&               // a wall through the middle stays up
+        Math.sign(camSide) !== Math.sign(centreSide) &&
+        Math.abs(camSide) / Math.max(flat, 1e-3) > 0.3 && // facing the camera, not edge-on
+        elevation < CUTAWAY_MAX_ELEVATION;
+    }
+
+    const target = cut ? CUTAWAY_H / WALL_H : 1;
+    const y = g.scale.y;
+    if (Math.abs(y - target) < 0.002) {
+      if (y !== target) g.scale.y = target;
+    } else {
+      // ~150 ms ease either way
+      g.scale.y = y + (target - y) * Math.min(1, dt * 10);
+      invalidate();                      // still easing
+    }
+    wallCutScale.set(wallKey, g.scale.y);
+  });
+  useEffect(() => () => { wallCutScale.delete(wallKey); }, [wallKey]);
+
+  return <group ref={ref}>{children}</group>;
+}
+
+// ─── Wall mounting ───────────────────────────────────────────────────────────
+//
+// TVs, art, mirrors, curtains and wall lights hang on a wall FACE: back flush
+// against it, front turned into the room. The raycast tests each wall's two
+// faces as vertical planes, honours the cutaway (a lowered wall can only be
+// hit on its ledge), and returns the face the ray actually arrives at.
+
+interface WallFaceHit {
+  x: number; y: number; z: number;
+  /** face normal, pointing into the room the item will face */
+  nx: number; nz: number;
+  horiz: boolean;
+  /** the wall's extent along its own axis */
+  a0: number; a1: number;
+}
+
+function wallHitFromRay(ray: THREE.Ray, walls: WorldWall[]): WallFaceHit | null {
+  let best: WallFaceHit | null = null;
+  let bestT = Infinity;
+  for (const w of walls) {
+    const horiz = w.z1 === w.z2;
+    const half = w.thickness / 2;
+    const top = WALL_H * (wallCutScale.get(w.id ?? "") ?? 1);
+    const c = horiz ? w.z1 : w.x1;
+    const a0 = horiz ? Math.min(w.x1, w.x2) : Math.min(w.z1, w.z2);
+    const a1 = horiz ? Math.max(w.x1, w.x2) : Math.max(w.z1, w.z2);
+    const o = horiz ? ray.origin.z : ray.origin.x;
+    const dd = horiz ? ray.direction.z : ray.direction.x;
+    if (Math.abs(dd) < 1e-6) continue;
+    for (const side of [-1, 1]) {
+      const plane = c + side * half;
+      if (Math.sign(o - plane) !== side) continue;     // only faces turned towards the ray
+      const t = (plane - o) / dd;
+      if (t <= 0 || t >= bestT) continue;
+      const px = ray.origin.x + ray.direction.x * t;
+      const py = ray.origin.y + ray.direction.y * t;
+      const pz = ray.origin.z + ray.direction.z * t;
+      const along = horiz ? px : pz;
+      if (along < a0 || along > a1 || py < 0 || py > top) continue;
+      bestT = t;
+      best = { x: px, y: py, z: pz, nx: horiz ? 0 : side, nz: horiz ? side : 0, horiz, a0, a1 };
+    }
+  }
+  return best;
+}
+
+/** The face of the wall nearest a floor point, as if a ray had hit it there. */
+function nearestWallFace(x: number, z: number, walls: WorldWall[]): WallFaceHit | null {
+  const hit = nearestWall(x, z, walls);
+  if (!hit) return null;
+  const w = hit.wall;
+  const horiz = w.z1 === w.z2;
+  // snap the normal to the wall's own axis (nearestWall's is diagonal past
+  // the wall ends)
+  const nx = horiz ? 0 : Math.sign(hit.nx || 1);
+  const nz = horiz ? Math.sign(hit.nz || 1) : 0;
+  const half = w.thickness / 2;
+  return {
+    x: horiz ? hit.px : w.x1 + nx * half,
+    y: WALL_H / 2,
+    z: horiz ? w.z1 + nz * half : hit.pz,
+    nx, nz, horiz,
+    a0: horiz ? Math.min(w.x1, w.x2) : Math.min(w.z1, w.z2),
+    a1: horiz ? Math.max(w.x1, w.x2) : Math.max(w.z1, w.z2),
+  };
+}
+
+/** Hang an item (metres) on a face, centred at `centreY`, kept on the wall. */
+function placeOnWall(
+  hit: WallFaceHit, size: { w: number; h: number; d: number }, centreY: number,
+): WallPlacement {
+  const along0 = hit.horiz ? hit.x : hit.z;
+  const lo = hit.a0 + size.w / 2 + 0.02, hi = hit.a1 - size.w / 2 - 0.02;
+  const along = lo <= hi ? Math.max(lo, Math.min(hi, along0)) : (hit.a0 + hit.a1) / 2;
+  const cy = Math.max(size.h / 2 + 0.02, Math.min(WALL_H - size.h / 2 - 0.02, centreY));
+  // a few millimetres proud of the face, so the back never z-fights the paint
+  const off = size.d / 2 + 0.004;
+  const x = hit.horiz ? along : hit.x + hit.nx * off;
+  const z = hit.horiz ? hit.z + hit.nz * off : along;
+  return { position: [x, cy - size.h / 2, z], rotation: Math.atan2(hit.nx, hit.nz) };
+}
+
+/** Item size in metres, honouring its size multiplier. */
+function itemSizeM(item: PlacedFurniture) {
+  const cat = item.modelId ? catalogById(item.modelId) : undefined;
+  const s = item.sizeScale ?? 1;
+  return {
+    w: ((item.width ?? cat?.size.w ?? 60) / 100) * s,
+    h: ((item.height ?? cat?.size.h ?? 60) / 100) * s,
+    d: ((item.depth ?? cat?.size.d ?? 5) / 100) * s,
+  };
+}
+
+function WallMountedItem({
+  item, walls,
+}: { item: PlacedFurniture; walls: WorldWall[] }) {
+  const cat = item.modelId ? catalogById(item.modelId) : undefined;
+  const ref = useRef<THREE.Group>(null);
+  const size = itemSizeM(item);
+  // the wall it hangs on, found once per position
+  const wallId = useMemo(
+    () => nearestWall(item.position[0], item.position[2], walls)?.wall.id ?? null,
+    [item.position, walls],
+  );
+  // hide with the wall when the cutaway lowers it
+  useFrame(() => {
+    const g = ref.current;
+    if (!g || !wallId) return;
+    const visible = (wallCutScale.get(wallId) ?? 1) > 0.6;
+    if (g.visible !== visible) g.visible = visible;
+  });
+  if (!cat?.procedural) return null;
+  return (
+    <group
+      ref={ref}
+      position={[item.position[0], (item.position[1] ?? 0) + size.h / 2, item.position[2]]}
+      rotation={[0, item.rotation ?? 0, 0]}
+      onPointerDown={(e) => { e.stopPropagation(); (window as unknown as { __nooiSelect?: (id: string) => void }).__nooiSelect?.(item.id); }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <WallDecor
+        kind={cat.procedural} w={size.w} h={size.h} d={size.d} color={item.color}
+        glow={Math.max(0, Math.min(1, item.lightLevel ?? 1))}
+      />
+    </group>
+  );
+}
+
+function WallPlacementBridge({
+  register, walls,
+}: {
+  register: (fn: ThreeSceneHandle["wallPlacementFromNdc"]) => void;
+  walls: WorldWall[];
+}) {
+  const { camera } = useThree();
+  useEffect(() => {
+    const ray = new THREE.Raycaster();
+    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const p = new THREE.Vector3();
+    register((nx, ny, item, nearestIfMissed = false) => {
+      ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      let hit = wallHitFromRay(ray.ray, walls);
+      if (!hit && nearestIfMissed) {
+        const onFloor = ray.ray.intersectPlane(floor, p) ? [p.x, p.z] : [0, 0];
+        hit = nearestWallFace(onFloor[0], onFloor[1], walls);
+      }
+      if (!hit) return null;
+      const size = { w: item.w / 100, h: item.h / 100, d: item.d / 100 };
+      return placeOnWall(hit, size, (item.mountHeight ?? 150) / 100);
+    });
+  }, [camera, register, walls]);
+  return null;
+}
+
+// ─── Wall handles (edit walls in 3D) ─────────────────────────────────────────
+//
+// Shown on the selected wall in the orbit views: a white disc at each end
+// (drag to lengthen or shorten it) and a green one in the middle (drag to
+// slide the whole wall sideways), plus its length. The drag itself is
+// resolved by the page with the same rules as the 2D plan editor, so corners
+// stay welded and rooms, doors and windows follow.
+//
+// Handles draw over everything and are named "nooi-ui" (hidden in captures).
+// The pointer is projected onto the floor plane, which keeps the motion
+// predictable from any orbit angle.
+
+const HANDLE_Y = 0.6;          // m: above the cutaway ledge, below eye level
+
+const _tmpV = new THREE.Vector3();
+
+function WallHandles({
+  wall, index, world, onDrag,
+}: {
+  wall: VWall; index: number; world: World;
+  onDrag: (e: WallHandleDragEvent) => void;
+}) {
+  // read at drag time through get(): these are three.js objects the drag
+  // mutates (controls.enabled), which hook values must not be
+  const get = useThree(st => st.get);
+  const [active, setActive] = useState<1 | 2 | "body" | null>(null);
+  const [hover, setHover] = useState<1 | 2 | "body" | null>(null);
+  // the page's handler changes every render; a drag must always call the
+  // latest one, not the one from the render the drag started in
+  // Pin the label to the canvas's own container. Left to choose, <Html>
+  // mounts into whatever the event system is connected to at that moment;
+  // when R3F connects its events a beat later the label is moved to a fresh
+  // root that never gets its content, and the length vanishes.
+  const host = useThree(st => st.gl.domElement.parentElement);
+  const labelHost = useMemo(() => ({ current: host as HTMLElement }), [host]);
+  const onDragRef = useRef(onDrag);
+  useEffect(() => { onDragRef.current = onDrag; });
+
+  const ww = planWallsToWorld([wall], world.totalW, world.totalD)[0];
+  const horiz = ww.z1 === ww.z2;
+  const half = ww.thickness / 2;
+  // centreline ends, without the half-thickness the renderer adds for corners
+  const e1: [number, number] = horiz ? [ww.x1 + half, ww.z1] : [ww.x1, ww.z1 + half];
+  const e2: [number, number] = horiz ? [ww.x2 - half, ww.z2] : [ww.x2, ww.z2 - half];
+  const mid: [number, number] = [(e1[0] + e2[0]) / 2, (e1[1] + e2[1]) / 2];
+  const lengthM = Math.hypot(e2[0] - e1[0], e2[1] - e1[1]);
+
+  // snap so the REAL position lands on a whole centimetre — typed and
+  // dragged lengths then agree
+  const snap = (x: number, z: number): [number, number] => [
+    snapSceneToRealCm(world.frame, x), snapSceneToRealCm(world.frame, z),
+  ];
+
+  useEffect(() => {
+    if (!active) return;
+    const { gl, camera } = get();
+    const controls = get().controls as unknown as { enabled: boolean } | null;
+    const el = gl.domElement;
+    const ray = new THREE.Raycaster();
+    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    const flags = window as unknown as { __nooiFurnitureDrag?: boolean; __nooiWalkMode?: boolean };
+    flags.__nooiFurnitureDrag = true;
+    if (controls) controls.enabled = false;
+
+    const at = (e: PointerEvent): [number, number] | null => {
+      const r = el.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(
+        ((e.clientX - r.left) / r.width) * 2 - 1,
+        -(((e.clientY - r.top) / r.height) * 2 - 1),
+      ), camera);
+      return ray.ray.intersectPlane(floor, hit) ? snap(hit.x, hit.z) : null;
+    };
+    const move = (e: PointerEvent) => {
+      const p = at(e);
+      if (p) onDragRef.current({ index, handle: active, x: p[0], z: p[1], phase: "move" });
+    };
+    const up = (e: PointerEvent) => {
+      const p = at(e);
+      onDragRef.current({ index, handle: active, x: p?.[0] ?? 0, z: p?.[1] ?? 0, phase: "end" });
+      setActive(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      flags.__nooiFurnitureDrag = false;
+      if (controls && !flags.__nooiWalkMode) controls.enabled = true;
+    };
+    // the session is fixed for the length of one drag
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  const start = (h: 1 | 2 | "body") => (e: { stopPropagation: () => void; point: THREE.Vector3 }) => {
+    e.stopPropagation();
+    // body drags start from where the pointer meets the floor under the handle
+    const p = h === "body" ? mid : h === 1 ? e1 : e2;
+    onDrag({ index, handle: h, x: p[0], z: p[1], phase: "start" });
+    setActive(h);
+  };
+
+  // Handles keep roughly the same size on screen: 12 cm is right when close
+  // to the wall, a speck from the overview camera.
+  const scaled = useRef<THREE.Object3D[]>([]);
+  const keepOnScreenSize = (o: THREE.Object3D | null) => {
+    if (o && !scaled.current.includes(o)) scaled.current.push(o);
+  };
+  useFrame(({ camera }) => {
+    scaled.current = scaled.current.filter(o => o.parent);
+    for (const o of scaled.current) {
+      const d = camera.position.distanceTo(o.getWorldPosition(_tmpV));
+      o.scale.setScalar(THREE.MathUtils.clamp(d / 9, 1, 4));
+    }
+  });
+
+  const disc = (h: 1 | 2 | "body", p: [number, number]) => {
+    const isBody = h === "body";
+    const lit = active === h || hover === h;
+    return (
+      <group key={String(h)} position={[p[0], HANDLE_Y, p[1]]} ref={keepOnScreenSize}>
+        <mesh
+          name="nooi-ui" renderOrder={1000}
+          onPointerDown={start(h)}
+          onPointerOver={(e) => { e.stopPropagation(); setHover(h); document.body.style.cursor = "grab"; }}
+          onPointerOut={() => { setHover(null); document.body.style.cursor = ""; }}
+        >
+          <sphereGeometry args={[lit ? 0.15 : 0.12, 20, 20]} />
+          <meshBasicMaterial
+            color={isBody ? "#c7de7d" : "#ffffff"}
+            toneMapped={false} depthTest={false} transparent opacity={0.95}
+          />
+        </mesh>
+        <mesh name="nooi-ui" renderOrder={999} raycast={() => null}>
+          <sphereGeometry args={[(lit ? 0.15 : 0.12) + 0.025, 20, 20]} />
+          <meshBasicMaterial color="#0f5c4f" toneMapped={false} depthTest={false} transparent opacity={0.95} />
+        </mesh>
+      </group>
+    );
+  };
+
+  return (
+    <group>
+      {disc(1, e1)}
+      {disc(2, e2)}
+      {disc("body", mid)}
+      <Html position={[mid[0], HANDLE_Y + 0.4, mid[1]]} center zIndexRange={[40, 0]} portal={labelHost}
+        // the wrapper is sized to the label and would otherwise swallow the
+        // press meant for the middle handle underneath
+        style={{ pointerEvents: "none" }}>
+        <div style={{
+          pointerEvents: "none", whiteSpace: "nowrap",
+          // sit clear above the middle handle rather than on top of it
+          transform: "translateY(-30px)",
+          font: "600 11px/1.2 system-ui, -apple-system, Segoe UI, sans-serif",
+          color: "#fff", background: "#0f5c4f", borderRadius: 6, padding: "3px 7px",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+        }}>
+          {sceneToReal(world.frame, lengthM).toFixed(2)} m
+        </div>
+      </Html>
     </group>
   );
 }
@@ -521,19 +1094,16 @@ function RoomFloor({
   // identifies rooms in the plan, which is where it belongs.
   const surf = surfaceId ? surfaceById(surfaceId) : undefined;
 
-  // Tiling needs the floor's real size, so one repetition covers the metres
-  // the surface says it should. A plank at the wrong scale reads as fake
-  // instantly, because everyone knows how wide a floorboard is.
-  const extent = useMemo(() => {
-    const b = shape.getPoints();
-    const xs = b.map(p => p.x), ys = b.map(p => p.y);
-    return {
-      w: Math.max(...xs) - Math.min(...xs),
-      d: Math.max(...ys) - Math.min(...ys),
-    };
-  }, [shape]);
-
-  const tex = surf ? getFaceTextures(surf, extent.w, extent.d) : undefined;
+  // TILE SCALE. ShapeGeometry's UVs are the shape's own coordinates — here,
+  // metres — not 0–1 like a wall face. So the texture already repeats once
+  // per metre, and the repeat must be 1 / tileSize, i.e. getFaceTextures with
+  // a 1 m × 1 m "face".
+  //
+  // This used to pass the room's full extent, which multiplied by the size a
+  // second time: a 0.6 × 1.2 m marble tile drew at roughly 5 × 10 cm and its
+  // veins collapsed into a fine zig-zag that read as woven carpet — in the
+  // viewport and in every AI render made from it.
+  const tex = surf ? getFaceTextures(surf, 1, 1) : undefined;
 
   return (
     <group>
@@ -556,7 +1126,12 @@ function RoomFloor({
           map={tex?.map}
           normalMap={tex?.normalMap}
           color={tex ? (surf?.color ?? "#ffffff") : "#d9c7a7"}
-          roughness={surf?.roughness ?? 0.7}
+          // Floors never go glossier than 0.38. The tile finishes are 0.15
+          // (mirror gloss), and with no reflected environment to show, the
+          // only thing a mirror floor reflects is the nearest lamp: a hard
+          // white streak running towards the camera in walk mode. 0.38 keeps
+          // the sheen of polished tile and spreads that highlight out.
+          roughness={Math.max(surf?.roughness ?? 0.7, 0.38)}
           emissive={selected ? "#c7de7d" : "#000000"}
           emissiveIntensity={selected ? 0.18 : 0}
           side={THREE.DoubleSide}
@@ -640,11 +1215,13 @@ function applyOverrides(
     const base: THREE.MeshStandardMaterial =
       (n.userData._origMat as THREE.MeshStandardMaterial);
     // only override when the user asked for it, else keep the model's material
-    if (item.color || preset || selected) {
+    // Selection is shown by SelectionBrackets now, not by tinting the model:
+    // a green-washed sofa hid the very colour and fabric being chosen.
+    void selected;
+    if (item.color || preset) {
       const m = base.clone();
       if (item.color) m.color = new THREE.Color(item.color);
       if (preset) { m.roughness = preset.roughness; m.metalness = preset.metalness; }
-      if (selected) { m.emissive = new THREE.Color("#2dd4bf"); m.emissiveIntensity = 0.25; }
       n.material = m;
     } else {
       n.material = base;
@@ -658,6 +1235,8 @@ function GltfModel({
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const { scene } = useGLTF(cat!.path);
   const clone = useMemo(() => scene.clone(true), [scene]);
+  // picking a detailed model tests a bounds tree, not every triangle
+  useEffect(() => { buildBoundsTrees(clone); }, [clone]);
   const group = useRef<THREE.Group>(null);
 
   // The model's size in ITS OWN local space, independent of whatever scale the
@@ -733,7 +1312,7 @@ function GltfModel({
 }
 
 function BoxFurniture({
-  item, selected,
+  item,
 }: { item: PlacedFurniture; selected: boolean }) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const s = item.sizeScale ?? 1;
@@ -754,28 +1333,147 @@ function BoxFurniture({
       <meshStandardMaterial
         color={item.color || cat?.color || "#b09a7a"}
         roughness={0.7}
-        emissive={selected ? "#2dd4bf" : "#000000"}
-        emissiveIntensity={selected ? 0.3 : 0}
       />
     </mesh>
   );
 }
 
+// ─── Selection brackets ──────────────────────────────────────────────────────
+//
+// Corner brackets around the selected item's real outline, plus a soft
+// footprint on the floor — the convention of most design tools. Lines and a
+// flat quad cost nothing to draw and look the same on WebGL and WebGPU, where
+// an outline post-effect would re-render the scene every frame.
+//
+// The box is measured in the item's own frame (its rotation undone), so a
+// rotated sofa gets a tight box rather than a loose axis-aligned one. It is
+// re-measured a few times a second while selected, which catches a model that
+// finishes loading after it was selected.
+//
+// Named "nooi-ui": captures (and so the AI render) hide it.
+
+const SELECT_COLOR = "#c7de7d";
+
+/** Bracket bar thickness in metres. Solid bars rather than GL lines: lines are
+ *  1 px on most GPUs, and on WebGPU a line material does not write the extra
+ *  outputs (normals, albedo) the effects pass renders into, which made its
+ *  pipeline invalid. */
+const BRACKET_T = 0.014;
+
+function SelectionBrackets({
+  target, item,
+}: { target: React.RefObject<THREE.Group | null>; item: PlacedFurniture }) {
+  const lines = useRef<THREE.InstancedMesh>(null);
+  const pad = useRef<THREE.Mesh>(null);
+  const since = useRef(Infinity);
+  const box = useMemo(() => new THREE.Box3(), []);
+
+  const lastSig = useRef("");
+  useFrame((_, dt) => {
+    const root = target.current;
+    // Re-measure when the item moved, resized or its model finished loading
+    // (more meshes), and otherwise at most 4× a second. With on-demand
+    // rendering there may be no "later" frame, so a change must not wait for
+    // the throttle.
+    let meshes = 0;
+    root?.traverse(o => { if ((o as THREE.Mesh).isMesh) meshes++; });
+    const sig = `${item.position.join()},${item.rotation ?? 0},${item.sizeScale ?? 1},${meshes}`;
+    since.current += dt;
+    if (sig === lastSig.current && since.current < 0.25) return;
+    lastSig.current = sig;
+    since.current = 0;
+    const ln = lines.current, pd = pad.current;
+    if (!root || !ln || !pd) return;
+
+    // world → item frame: undo the item's position and rotation
+    const toItem = new THREE.Matrix4()
+      .makeRotationY(-(item.rotation ?? 0))
+      .multiply(new THREE.Matrix4().makeTranslation(-item.position[0], 0, -item.position[2]));
+    box.makeEmpty();
+    const tmp = new THREE.Box3();
+    const m = new THREE.Matrix4();
+    root.updateWorldMatrix(true, true);
+    root.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.geometry || mesh.name === "nooi-ui") return;
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+      tmp.copy(mesh.geometry.boundingBox!).applyMatrix4(m.multiplyMatrices(toItem, mesh.matrixWorld));
+      box.union(tmp);
+    });
+    if (box.isEmpty()) return;
+
+    // 8 corners × 3 short bars along the edges that meet there
+    const { min, max } = box;
+    const size = new THREE.Vector3().subVectors(max, min);
+    const tick = (n: number) => Math.min(0.18, n * 0.28);
+    const tx = tick(size.x), ty = tick(size.y), tz = tick(size.z);
+    const mtx = new THREE.Matrix4();
+    let i = 0;
+    for (const x of [min.x, max.x]) for (const y of [min.y, max.y]) for (const z of [min.z, max.z]) {
+      const sx = x === min.x ? 1 : -1, sy = y === min.y ? 1 : -1, sz = z === min.z ? 1 : -1;
+      // a unit cube scaled into a bar that starts at the corner
+      ln.setMatrixAt(i++, mtx.makeScale(tx, BRACKET_T, BRACKET_T).setPosition(x + sx * tx / 2, y, z));
+      ln.setMatrixAt(i++, mtx.makeScale(BRACKET_T, ty, BRACKET_T).setPosition(x, y + sy * ty / 2, z));
+      ln.setMatrixAt(i++, mtx.makeScale(BRACKET_T, BRACKET_T, tz).setPosition(x, y, z + sz * tz / 2));
+    }
+    ln.instanceMatrix.needsUpdate = true;
+    ln.count = i;
+    ln.computeBoundingSphere();
+
+    pd.position.set((min.x + max.x) / 2, min.y + 0.006, (min.z + max.z) / 2);
+    pd.scale.set(size.x + 0.08, size.z + 0.08, 1);
+  });
+
+  return (
+    <group
+      position={[item.position[0], 0, item.position[2]]}
+      rotation={[0, item.rotation ?? 0, 0]}
+    >
+      <instancedMesh
+        ref={lines} args={[undefined, undefined, 24]} count={0}
+        name="nooi-ui" raycast={() => null} renderOrder={999} frustumCulled={false}
+      >
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial color={SELECT_COLOR} toneMapped={false} depthTest={false} transparent />
+      </instancedMesh>
+      <mesh ref={pad} name="nooi-ui" rotation={[-Math.PI / 2, 0, 0]} raycast={() => null} renderOrder={998}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial color={SELECT_COLOR} toneMapped={false} transparent opacity={0.14} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
+
 function FurnitureItem({
-  item, selected, world,
-}: { item: PlacedFurniture; selected: boolean; world: World }) {
+  item, selected, world, walls = [], onToggleLight,
+}: {
+  item: PlacedFurniture; selected: boolean; world: World; walls?: WorldWall[];
+  onToggleLight?: (id: string) => void;
+}) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
-  // GLTF path exists → try the real model (Suspense handles load); else box
-  if (cat) {
-    return (
-      <Suspense fallback={<BoxFurniture item={item} selected={selected} />}>
-        <ModelErrorBoundary fallback={<BoxFurniture item={item} selected={selected} />}>
-          <GltfModel item={item} selected={selected} world={world} />
-        </ModelErrorBoundary>
-      </Suspense>
-    );
-  }
-  return <BoxFurniture item={item} selected={selected} />;
+  const ref = useRef<THREE.Group>(null);
+  // Drawn-in-code wall decor; else the GLTF (Suspense handles load); else box
+  const body = cat?.procedural ? (
+    <WallMountedItem item={item} walls={walls} />
+  ) : cat ? (
+    <Suspense fallback={<BoxFurniture item={item} selected={selected} />}>
+      <ModelErrorBoundary fallback={<BoxFurniture item={item} selected={selected} />}>
+        <GltfModel item={item} selected={selected} world={world} />
+      </ModelErrorBoundary>
+    </Suspense>
+  ) : <BoxFurniture item={item} selected={selected} />;
+  return (
+    <>
+      <group
+        ref={ref}
+        onDoubleClick={onToggleLight && isLightFixture(item) ? (e) => {
+          e.stopPropagation();
+          onToggleLight(item.id);
+        } : undefined}
+      >{body}</group>
+      {selected && <SelectionBrackets target={ref} item={item} />}
+    </>
+  );
 }
 
 // If a .glb file is missing/broken, fall back to the colored box instead of
@@ -933,7 +1631,104 @@ function PlacementBridge({
 
 const EYE_HEIGHT = 1.6;
 
-function WalkControls({ world, active }: { world: World; active: boolean }) {
+// ─── Walk collisions ─────────────────────────────────────────────────────────
+//
+// Inside mode used to clamp the camera to the plan's outer box only, so a
+// client could walk straight through walls and furniture — which breaks the
+// sense of being in the room faster than anything else.
+//
+// The walker is a vertical capsule seen from above: a circle of BODY_R. Walls
+// are their solid pieces with DOOR openings removed (doorways stay walkable,
+// windows do not). Furniture blocks by its footprint, unless it is low enough
+// to step over (a rug, a floor cushion).
+
+const BODY_R = 0.22;
+/** Items whose top is below the walker's feet + this are stepped over. */
+const STEP_H = 0.35;
+/** Eye to feet. Flying up with E / Space lifts the feet too. */
+const BODY_H = 1.5;
+/** Field of view while walking. The orbit camera's 40° feels like looking
+ *  through a tube on foot; ~60° vertical gives back peripheral vision without
+ *  wide-angle distortion. */
+const WALK_FOV = 60;
+
+interface WalkObstacle { minX: number; maxX: number; minZ: number; maxZ: number; top: number }
+
+function buildWalkObstacles(
+  rfWalls: VWall[], openings: Opening[], world: World, furniture: PlacedFurniture[],
+): WalkObstacle[] {
+  const out: WalkObstacle[] = [];
+  const cuts = cutsPerWall(rfWalls, openings, world);
+  planWallsToWorld(rfWalls, world.totalW, world.totalD).forEach((w, i) => {
+    const horiz = w.z1 === w.z2;
+    const half = w.thickness / 2;
+    const a0 = horiz ? Math.min(w.x1, w.x2) : Math.min(w.z1, w.z2);
+    const a1 = horiz ? Math.max(w.x1, w.x2) : Math.max(w.z1, w.z2);
+    const doors = (cuts.get(i) ?? []).filter(c => c.type === "door");
+    for (const [f, t] of wallPieces(a0, a1, doors).solids) {
+      out.push(horiz
+        ? { minX: f, maxX: t, minZ: w.z1 - half, maxZ: w.z1 + half, top: WALL_H }
+        : { minX: w.x1 - half, maxX: w.x1 + half, minZ: f, maxZ: t, top: WALL_H });
+    }
+  });
+  for (const f of furniture) {
+    const cat = f.modelId ? catalogById(f.modelId) : undefined;
+    if ((f.mountType ?? cat?.mountType ?? "floor") !== "floor") continue;
+    const scale = f.sizeScale ?? 1;
+    const w = (f.width ?? (cat ? cat.size.w * scale : 0)) / 100;
+    const d = (f.depth ?? (cat ? cat.size.d * scale : 0)) / 100;
+    const h = (f.height ?? (cat ? cat.size.h * scale : 0)) / 100;
+    if (w <= 0 || d <= 0) continue;
+    const [hx, hz] = halfExtents({ w, d, rotation: f.rotation ?? 0 });
+    out.push({
+      minX: f.position[0] - hx, maxX: f.position[0] + hx,
+      minZ: f.position[2] - hz, maxZ: f.position[2] + hz,
+      top: (f.position[1] ?? 0) + h,
+    });
+  }
+  return out;
+}
+
+/** Push a walker at `p` out of every obstacle it overlaps. Resolving each
+ *  overlap along its own normal is what makes the walker slide along a wall
+ *  rather than stop dead against it. */
+function resolveWalker(p: THREE.Vector3, obstacles: WalkObstacle[]) {
+  const feet = Math.max(0, p.y - BODY_H);
+  for (let iter = 0; iter < 3; iter++) {
+    let moved = false;
+    for (const o of obstacles) {
+      if (o.top <= feet + STEP_H) continue;
+      const cx = Math.max(o.minX, Math.min(o.maxX, p.x));
+      const cz = Math.max(o.minZ, Math.min(o.maxZ, p.z));
+      const dx = p.x - cx, dz = p.z - cz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= BODY_R * BODY_R) continue;
+      if (d2 > 1e-10) {
+        const d = Math.sqrt(d2);
+        p.x += (dx / d) * (BODY_R - d);
+        p.z += (dz / d) * (BODY_R - d);
+      } else {
+        // centre inside the box: leave by the nearest face
+        const l = p.x - o.minX, r = o.maxX - p.x, b = p.z - o.minZ, f = o.maxZ - p.z;
+        const m = Math.min(l, r, b, f);
+        if (m === l) p.x = o.minX - BODY_R;
+        else if (m === r) p.x = o.maxX + BODY_R;
+        else if (m === b) p.z = o.minZ - BODY_R;
+        else p.z = o.maxZ + BODY_R;
+      }
+      moved = true;
+    }
+    if (!moved) break;
+  }
+}
+
+function WalkControls({
+  world, active, obstacles, roomPolys,
+}: {
+  world: World; active: boolean; obstacles: WalkObstacle[];
+  /** Room outlines in metres; walk mode always starts inside one. */
+  roomPolys: [number, number][][];
+}) {
   const { camera, gl, controls } = useThree() as any;
   const targetYaw = useRef(0);
   const targetPitch = useRef(0);
@@ -955,15 +1750,40 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     p.y = Math.max(0.15, Math.min(WALL_H - 0.05, p.y));
   };
 
-  // entering: glide down to eye height inside the plan, facing the interior
+  // entering: glide down to eye height INSIDE A ROOM, facing the way the
+  // camera was already looking.
+  //
+  // This used to clamp the orbit camera's position to 45% of the plan's
+  // extent, which for most plans is still outside the outer walls — the walker
+  // then started outside the building and, now that walls block, could only
+  // walk round it. The room under the camera wins; otherwise the room whose
+  // centre is nearest.
   useEffect(() => {
     if (!active) return;
     const to = camera.position.clone();
     const bx = world.totalW * 0.45, bz = world.totalD * 0.45;
     to.x = Math.max(-bx, Math.min(bx, to.x));
     to.z = Math.max(-bz, Math.min(bz, to.z));
+    if (roomPolys.length > 0 && !roomPolys.some(poly => pointInPoly(to.x, to.z, poly))) {
+      let best: [number, number] | null = null;
+      let bestD = Infinity;
+      for (const poly of roomPolys) {
+        const xs = poly.map(q => q[0]), zs = poly.map(q => q[1]);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+        const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+        const d = Math.hypot(cx - camera.position.x, cz - camera.position.z);
+        if (d < bestD) { bestD = d; best = [cx, cz]; }
+      }
+      if (best) { to.x = best[0]; to.z = best[1]; }
+    }
     to.y = EYE_HEIGHT;
-    const dir = new THREE.Vector3(-to.x, 0, -to.z);
+    // never arrive inside a wall or a sofa
+    resolveWalker(to, obstacles);
+    // keep the orbit camera's heading, so you step into what you were viewing
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    dir.y = 0;
+    if (dir.lengthSq() < 0.01) dir.set(-to.x, 0, -to.z);
     if (dir.lengthSq() < 0.01) dir.set(0, 0, -1);
     dir.normalize();
     const initYaw = Math.atan2(-dir.x, -dir.z);
@@ -979,6 +1799,16 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     enter.current = {
       from: camera.position.clone(), to,
       fromQ: camera.quaternion.clone(), toQ, t: 0,
+    };
+
+    // wider view on foot; the orbit FOV comes back on exit
+    const cam = camera as THREE.PerspectiveCamera;
+    const prevFov = cam.fov;
+    cam.fov = WALK_FOV;
+    cam.updateProjectionMatrix();
+    return () => {
+      cam.fov = prevFov;
+      cam.updateProjectionMatrix();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
@@ -1047,8 +1877,11 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, gl]);
 
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
     if (!active) return;
+    // walking is continuous: keep frames coming while in walk mode
+    state.invalidate();
+    const delta = frameDt(rawDelta);
     if (controls) controls.enabled = false;
 
     const a = enter.current;
@@ -1099,7 +1932,14 @@ function WalkControls({ world, active }: { world: World; active: boolean }) {
     const posFactor = 1 - Math.exp(-12 * delta);
     velocity.current.lerp(targetVel, posFactor);
 
-    camera.position.addScaledVector(velocity.current, delta);
+    // Move in steps of at most 10 cm, resolving collisions after each, so a
+    // fast scroll-flight cannot jump clean through a thin wall in one frame.
+    const travel = velocity.current.length() * delta;
+    const steps = Math.max(1, Math.ceil(travel / 0.1));
+    for (let i = 0; i < steps; i++) {
+      camera.position.addScaledVector(velocity.current, delta / steps);
+      resolveWalker(camera.position, obstacles);
+    }
     clampPos(camera.position);
 
     camera.quaternion.setFromEuler(new THREE.Euler(currentPitch.current, currentYaw.current, 0, "YXZ"));
@@ -1268,8 +2108,9 @@ function CameraRig({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [world.totalW, world.totalD, controls]);
 
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
     if (suspended) { anim.current = null; return; }
+    const delta = frameDt(rawDelta);
 
     // Keyboard camera position shifting (WASD / Arrows / Q / E / Space / Shift)
     const k = keys.current;
@@ -1339,6 +2180,12 @@ function CameraRig({
       if (t.y > maxY) t.y += (maxY - t.y) * pullFactor;
       else if (t.y < minY) t.y += (minY - t.y) * pullFactor;
     }
+
+    // on-demand rendering: ask for the next frame while anything here moves
+    const t = controls?.target;
+    const outside = !!t && (Math.abs(t.x) > world.totalW * 1.35 + 1e-3
+      || Math.abs(t.z) > world.totalD * 1.35 + 1e-3 || t.y > WALL_H * 2 + 1e-3 || t.y < -0.5 - 1e-3);
+    if (mvF !== 0 || mvR !== 0 || mvU !== 0 || anim.current || outside) state.invalidate();
   });
 
   return null;
@@ -1373,7 +2220,7 @@ function ExportBridge({
         // map spans the full 0–255 range instead of collapsing to flat white.
         const box = new THREE.Box3();
         scene.traverse((o: any) => {
-          if (o.isMesh && o.visible && o.name !== "nooi-noexport") {
+          if (o.isMesh && o.visible && o.name !== "nooi-noexport" && o.name !== "nooi-ui") {
             box.expandByObject(o);
           }
         });
@@ -1467,11 +2314,27 @@ function ExportBridge({
         // which relights anyway — but it does mean "Export as image" differs
         // from what is on screen. Rendering through the composer instead needs
         // a ref to it, which is the next step if anyone notices.
+        //
+        // TONE MAPPING. On WebGL the post-processing composer sets
+        // gl.toneMapping = NoToneMapping while it is mounted (it tone-maps in
+        // its own pass instead). This direct render skips the composer, so
+        // without restoring ACES here the AI received an untone-mapped image:
+        // sunlit floor and lamp pools clipped to flat white, which the model
+        // then reproduced as glare. WebGPU applies its own ACES here already.
+        // Editor UI (selection brackets) is not part of the room.
+        const hiddenUi: THREE.Object3D[] = [];
+        scene.traverse((o) => {
+          if (o.name === "nooi-ui" && o.visible) { o.visible = false; hiddenUi.push(o); }
+        });
         const prevTarget = gl.getRenderTarget();
+        const prevToneMapping = gl.toneMapping;
+        gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.setRenderTarget(null);
         gl.render(scene, camera);
         const url = gl.domElement.toDataURL("image/png");
+        gl.toneMapping = prevToneMapping;
         gl.setRenderTarget(prevTarget);
+        for (const o of hiddenUi) o.visible = true;
         return url;
       },
       exportGlb: () =>
@@ -1479,7 +2342,7 @@ function ExportBridge({
           // temporarily hide helper-only objects (e.g. contact shadows)
           const hidden: THREE.Object3D[] = [];
           scene.traverse((o) => {
-            if (o.name === "nooi-noexport" && o.visible) {
+            if ((o.name === "nooi-noexport" || o.name === "nooi-ui") && o.visible) {
               o.visible = false;
               hidden.push(o);
             }
@@ -1503,11 +2366,14 @@ function ExportBridge({
 
 function SceneContent({
   rooms, rfWalls, openings, furniture, world,
-  onFurnitureSelect, onFurnitureMove, onFurnitureRotate, selectedFurnitureId,
+  onFurnitureSelect, onFurnitureMove, onFurnitureRotate, onFurnitureToggleLight, selectedFurnitureId,
   wallColors, wallSurfaces, selectedWallSide, onWallSelect,
   floorSurfaces, selectedFloorRoomId, onFloorSelect,
   doorFinishes, selectedDoorKey, onDoorSelect, onDoorKeys,
   insideMode = false,
+  wallCutaway = false,
+  showDimensions = false,
+  onWallHandleDrag,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -1515,6 +2381,8 @@ function SceneContent({
   onFurnitureMove?: (id: string, position: [number, number, number]) => void;
   /** fired when wall-snapping re-orients an item so its back faces the wall */
   onFurnitureRotate?: (id: string, rotation: number) => void;
+  /** double-click on a lamp: switch it on or off */
+  onFurnitureToggleLight?: (id: string) => void;
   selectedFurnitureId?: string | null;
   wallColors?: Record<string, string>;
   wallSurfaces?: Record<string, string>;
@@ -1528,6 +2396,10 @@ function SceneContent({
   onDoorSelect?: (key: string | null) => void;
   onDoorKeys?: (keys: string[]) => void;
   insideMode?: boolean;
+  /** Lower the walls between the camera and the rooms (orbit views only). */
+  wallCutaway?: boolean;
+  showDimensions?: boolean;
+  onWallHandleDrag?: (e: WallHandleDragEvent) => void;
 }) {
   // drei's ContactShadows is built on GLSL ShaderMaterials, which WebGPU
   // cannot run. On WebGPU the AO pass covers the same contact darkening.
@@ -1564,6 +2436,7 @@ function SceneContent({
   const draggingCat = draggingItem?.modelId ? catalogById(draggingItem.modelId) : undefined;
   const draggingMountType = draggingItem?.mountType ?? draggingCat?.mountType ?? "floor";
   const isDraggingCeiling = draggingMountType === "ceiling";
+  const isDraggingWall = draggingMountType === "wall";
   useEffect(() => {
     const up = () => {
       setDraggingId(null);
@@ -1635,6 +2508,81 @@ function SceneContent({
     [rfWalls, world],
   );
 
+  // The selected wall face ("wallKey:A") → its index in rfWalls.
+  const selectedWallIndexFromSide = useMemo(() => {
+    if (!selectedWallSide) return -1;
+    const key = selectedWallSide.slice(0, selectedWallSide.lastIndexOf(":"));
+    return rfWalls.findIndex((wl, i) => (wl.id ?? `wi${i}`) === key);
+  }, [selectedWallSide, rfWalls]);
+
+  // Rooms with their names, in metres, for the area labels.
+  const namedRoomPolys = useMemo(() => rooms.flatMap(r => {
+    let poly: [number, number][] | null = null;
+    if (r.polygon && r.polygon.length >= 3) {
+      poly = r.polygon.map(([x, y]) => [world.px(x), world.pz(y)] as [number, number]);
+    } else if (r.box) {
+      const x0 = world.px(r.box.left), z0 = world.pz(r.box.top);
+      const x1 = world.px(r.box.left + r.box.width), z1 = world.pz(r.box.top + r.box.height);
+      poly = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+    }
+    return poly ? [{ id: r.id, name: r.name, poly }] : [];
+  }), [rooms, world]);
+
+  // The item to measure: whatever is being dragged, else the selection when
+  // dimensions are switched on. Ceiling mounts have nothing useful to show.
+  const measuredItem = useMemo(() => {
+    const f = (draggingId && furniture.find(i => i.id === draggingId))
+      || (showDimensions && selectedFurnitureId && furniture.find(i => i.id === selectedFurnitureId))
+      || null;
+    if (!f) return null;
+    const cat = f.modelId ? catalogById(f.modelId) : undefined;
+    const mountType = f.mountType ?? cat?.mountType ?? "floor";
+    if (mountType === "ceiling") return null;
+    const size = itemSizeM(f);
+    return { position: f.position, rotation: f.rotation, mountType, ...size };
+  }, [draggingId, showDimensions, selectedFurnitureId, furniture]);
+
+  // Wall-mount drag path: the pointer ray is cast against the wall faces, so
+  // a TV slides along its wall, moves up or down with the pointer, and can be
+  // carried round a corner onto the next wall.
+  useEffect(() => {
+    if (!draggingId || !isDraggingWall || !draggingItem) return;
+    const el = gl.domElement as HTMLCanvasElement;
+    const ray = new THREE.Raycaster();
+    const size = itemSizeM(draggingItem);
+    const flags = window as unknown as { __nooiFurnitureDrag?: boolean; __nooiWalkMode?: boolean };
+    const end = () => {
+      setDraggingId(null);
+      dragStart.current = null;
+      dragArmed.current = false;
+      flags.__nooiFurnitureDrag = false;
+      if (controls && !flags.__nooiWalkMode) controls.enabled = true;
+    };
+    const move = (e: PointerEvent) => {
+      if ((e.buttons ?? 0) === 0) { end(); return; }
+      const rect = el.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      const hit = wallHitFromRay(ray.ray, worldWalls);
+      if (!hit) return;
+      if (!dragStart.current) { dragStart.current = { x: hit.x, z: hit.z }; return; }
+      if (!dragArmed.current) {
+        if (Math.hypot(hit.x - dragStart.current.x, hit.z - dragStart.current.z) < 0.04) return;
+        dragArmed.current = true;
+      }
+      const placed = placeOnWall(hit, size, hit.y);
+      onFurnitureMove?.(draggingId, placed.position);
+      if (Math.abs(placed.rotation - (draggingItem.rotation ?? 0)) > 1e-3) {
+        onFurnitureRotate?.(draggingId, placed.rotation);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    return () => window.removeEventListener("pointermove", move);
+    // draggingItem changes on every move; its id and size are what matter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingId, isDraggingWall, camera, gl, controls, onFurnitureMove, onFurnitureRotate, worldWalls]);
+
   const startDrag = (id: string) => {
     setDraggingId(id);
     dragStart.current = null;
@@ -1668,7 +2616,7 @@ function SceneContent({
       {/* invisible drag plane: active only while moving an item.
            Ceiling-mount items (chandeliers) use a plane at WALL_H so the
            pointer tracks at the right height in Inside mode. */}
-      {draggingId && !isDraggingCeiling && (
+      {draggingId && !isDraggingCeiling && !isDraggingWall && (
         <mesh
           rotation={[-Math.PI / 2, 0, 0]}
           position={[0, isDraggingCeiling ? WALL_H - 0.001 : 0.001, 0]}
@@ -1703,8 +2651,9 @@ function SceneContent({
             // it would overlap. Both are no-ops when nothing is close, so a
             // free-standing item still follows the pointer exactly.
             let nx = e.point.x, nz = e.point.z, rot = draggingItem?.rotation ?? 0;
-            const dw = (draggingItem?.width ?? 0) / 100;
-            const dd = (draggingItem?.depth ?? 0) / 100;
+            // the size it is actually drawn at, size slider included
+            const dSize = draggingItem ? itemSizeM(draggingItem) : null;
+            const dw = dSize?.w ?? 0, dd = dSize?.d ?? 0;
 
             if (dw > 0 && dd > 0) {
               const snap = snapToWall(
@@ -1716,19 +2665,24 @@ function SceneContent({
 
               const others: Footprint[] = furniture
                 .filter(f => f.id !== draggingId && (f.mountType ?? "floor") === "floor")
-                .map(f => ({
-                  x: f.position[0], z: f.position[2],
-                  w: (f.width ?? 0) / 100, d: (f.depth ?? 0) / 100,
-                  rotation: f.rotation ?? 0, id: f.id,
-                }))
+                .map(f => {
+                  const sz = itemSizeM(f);
+                  return {
+                    x: f.position[0], z: f.position[2], w: sz.w, d: sz.d,
+                    rotation: f.rotation ?? 0, id: f.id,
+                  };
+                })
                 .filter(f => f.w > 0 && f.d > 0);
 
-              let solved = resolveCollision(
+              const solved = resolveCollision(
                 { x: nx, z: nz, w: dw, d: dd, rotation: rot, id: draggingId }, others,
               );
-              // never leave an item embedded in a wall
-              solved = pushOutOfWalls(solved, worldWalls);
-              nx = solved.x; nz = solved.z;
+              // Walls are solid: step clear of them, and if there is no
+              // wall-free spot here (a gap narrower than the item) do not
+              // move at all — the item waits where it last fitted.
+              const clear = settleClearOfWalls(solved, worldWalls);
+              if (!clear) return;
+              nx = clear.x; nz = clear.z;
             }
 
             onFurnitureMove?.(draggingId, [nx, keepY, nz]);
@@ -1754,7 +2708,8 @@ function SceneContent({
       {rfWalls.map((wl, i) => {
         const wallKey = wl.id ?? `wi${i}`;
         return (
-          <WallWithOpenings key={wallKey} wall={wl}
+          <CutawayWall key={wallKey} wall={wl} wallKey={wallKey} world={world} enabled={wallCutaway}>
+          <WallWithOpenings wall={wl}
             cuts={cuts.get(i) ?? []} world={world}
             wallKey={wallKey}
             colors={{
@@ -1775,6 +2730,7 @@ function SceneContent({
             selectedDoorKey={selectedDoorKey}
             onDoorSelect={onDoorSelect}
           />
+          </CutawayWall>
         );
       })}
 
@@ -1786,10 +2742,25 @@ function SceneContent({
         // are hidden to keep the dollhouse layout clean and unobstructed.
         if (mountType === "ceiling" && !insideMode) return null;
         return (
-          <FurnitureItem key={f.id} item={f} world={world}
-            selected={f.id === selectedFurnitureId} />
+          <FurnitureItem key={f.id} item={f} world={world} walls={worldWalls}
+            selected={f.id === selectedFurnitureId}
+            onToggleLight={onFurnitureToggleLight} />
         );
       })}
+
+      {/* ── wall editing handles (orbit views) ── */}
+      {onWallHandleDrag && wallCutaway && selectedWallIndexFromSide >= 0 && rfWalls[selectedWallIndexFromSide] && (
+        <WallHandles
+          wall={rfWalls[selectedWallIndexFromSide]}
+          index={selectedWallIndexFromSide}
+          world={world}
+          onDrag={onWallHandleDrag}
+        />
+      )}
+
+      {/* ── measurements ── */}
+      {showDimensions && !insideMode && <RoomAreaLabels rooms={namedRoomPolys} areaScale={1 / (world.frame.visualScale ** 2)} />}
+      {measuredItem && <ItemDimensions item={measuredItem} walls={worldWalls} />}
 
       {!isWebGPU && (
         <group name="nooi-noexport">
@@ -1895,32 +2866,63 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   onFurnitureSelect,
   onFurnitureMove,
   onFurnitureRotate,
+  onFurnitureToggleLight,
   selectedFurnitureId = null,
   walkthroughActive = false,
   walkthroughPaused = false,
   onWalkthroughProgress,
   aoEnabled = true,
+  showDimensions = false,
+  onWallHandleDrag,
+  visualScale = 1,
   lighting = DEFAULT_LIGHTING,
   pathTracing = false,
   onPathTracerStats,
 }, ref) {
   const world = useMemo(
-    () => makeWorld(roomWidthCm / 100, roomDepthCm / 100),
-    [roomWidthCm, roomDepthCm],
+    () => makeWorld(roomWidthCm / 100, roomDepthCm / 100, visualScale),
+    [roomWidthCm, roomDepthCm, visualScale],
   );
   const controlsRef = useRef(null);
+  // After every update of the scene's props, keep drawing briefly: children
+  // apply some changes in their own effects (materials, textures) after the
+  // commit R3F already redrew for.
+  const kickRef = useRef<((ms: number) => void) | null>(null);
+  useEffect(() => { kickRef.current?.(KICK_MS.update); });
   const raycastFn = useRef<((nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null) | null>(null);
+  const wallPlaceFn = useRef<ThreeSceneHandle["wallPlacementFromNdc"] | null>(null);
   const exportApi = useRef<SceneExportApi | null>(null);
   const cameraViewFn = useRef<((v: CameraViewPreset) => void) | null>(null);
   const [insideMode, setInsideMode] = useState(false);
   // WebGPU when the browser supports it, WebGL otherwise (or ?renderer=webgl).
   // null for the first few ms while the adapter is probed.
   const backend = useRendererBackend();
+  const worldWallsRoot = useMemo(
+    () => planWallsToWorld(rfWalls, world.totalW, world.totalD),
+    [rfWalls, world],
+  );
+  // Everything the walker cannot pass through in Inside mode.
+  const walkObstacles = useMemo(
+    () => buildWalkObstacles(rfWalls, openings, world, furniture),
+    [rfWalls, openings, world, furniture],
+  );
+
+  const roomPolys = useMemo(() => roomPolysWorld(rooms, world), [rooms, world]);
+  // Room centres in metres, for the night preset's per-room ceiling lights.
+  const roomCentres = useMemo(
+    () => roomPolys.map((poly): [number, number] => {
+      const xs = poly.map(p => p[0]), zs = poly.map(p => p[1]);
+      return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2];
+    }),
+    [roomPolys],
+  );
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 
   useImperativeHandle(ref, () => ({
     floorPointFromNdc: (nx: number, ny: number, mountType?: "floor" | "ceiling") =>
       raycastFn.current ? raycastFn.current(nx, ny, mountType) : null,
+    wallPlacementFromNdc: (nx, ny, item, nearestIfMissed) =>
+      wallPlaceFn.current ? wallPlaceFn.current(nx, ny, item, nearestIfMissed) : null,
     captureImage: () =>
       exportApi.current ? exportApi.current.capture() : null,
     captureDepthMap: () =>
@@ -1945,6 +2947,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       // A different backend is a different renderer on a fresh canvas; the key
       // forces a clean remount when WebGPU fails over to WebGL.
       key={backend}
+      // draw only when something changed — see DemandDriver
+      frameloop="demand"
       // "soft" selects PCFSoftShadowMap. The default (plain `shadows`) is
       // PCFShadowMap, whose hard edges are the main reason a three.js interior
       // reads as a diagram rather than a room.
@@ -1985,47 +2989,20 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         wallHeight={WALL_H}
         settings={lighting}
         insideMode={insideMode}
+        world={world}
+        roomCentres={roomCentres}
       />
 
-      <directionalLight
-        position={[world.totalW * 0.8, world.maxDim * 1.4, world.totalD * 0.5]}
-        /* Was 1.9 when it was effectively the only light. The interior rig
-           now carries the room, so the sun's job is the hard shadow and the
-           sense of a time of day — not illumination. */
-        /* Was 1.25. The per-window spotlights are gone, so the sun is again
-           the main light — it is what shines through the window holes. */
-        color="#fff1c8"
-        intensity={2.8 * lighting.brightness}
-        castShadow
-        shadow-mapSize={[2048, 2048]}
-        /*
-          THE BUG: without these, three.js uses a ±5 unit shadow camera. This
-          plan is tens of metres across, so shadows rendered only in a 10m
-          square at the centre and the rest of the building had none at all —
-          which is why the scene read flat no matter what else was tuned.
+      {/* The sun and its fill now live in LightingRig, driven by the
+          time-of-day preset alongside every other light. */}
 
-          Sized to the world, so it scales with the plan.
-        */
-        shadow-camera-left={-world.maxDim}
-        shadow-camera-right={world.maxDim}
-        shadow-camera-top={world.maxDim}
-        shadow-camera-bottom={-world.maxDim}
-        shadow-camera-near={0.5}
-        shadow-camera-far={world.maxDim * 5}
-        /* normalBias beats bias for thin geometry: walls here are ~12cm and a
-           plain depth bias makes them self-shadow in stripes. */
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.025}
-      />
-      <directionalLight
-        position={[-world.totalW, world.maxDim, -world.totalD]}
-        color="#dde5ff"
-        intensity={0.4 * lighting.brightness}
-      />
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }}
                        rooms={rooms} world={world} />
+      <WallPlacementBridge register={(fn) => { wallPlaceFn.current = fn; }}
+                           walls={worldWallsRoot} />
       <ExportBridge register={(api) => { exportApi.current = api; }} world={world} />
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
+      <DemandDriver kickRef={kickRef} />
       <SurfaceTextureRefresh />
       <CameraRig
         world={world}
@@ -2037,6 +3014,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       <WalkControls
         world={world}
         active={insideMode && !(walkthroughActive && !walkthroughPaused)}
+        obstacles={walkObstacles}
+        roomPolys={roomPolys}
       />
       <WalkthroughCamera
         rooms={rooms}
@@ -2054,9 +3033,15 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           furniture={furniture}
           world={world}
           insideMode={insideMode}
+          // Orbit views only: inside, and during the guided walkthrough, the
+          // camera is in a room and every wall around it must stand.
+          wallCutaway={!insideMode && !(walkthroughActive && !walkthroughPaused)}
+          showDimensions={showDimensions}
+          onWallHandleDrag={onWallHandleDrag}
           onFurnitureSelect={onFurnitureSelect}
           onFurnitureMove={onFurnitureMove}
           onFurnitureRotate={onFurnitureRotate}
+          onFurnitureToggleLight={onFurnitureToggleLight}
           selectedFurnitureId={selectedFurnitureId}
           wallColors={wallColors}
           wallSurfaces={wallSurfaces}

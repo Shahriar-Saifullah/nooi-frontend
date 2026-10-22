@@ -39,6 +39,12 @@ import * as THREE from "three";
  *  catalogue grows and a new lamp should work without touching this file. */
 const LIGHT_PATTERN = /lamp|light|chandelier|pendant|sconce|lantern/i;
 
+/** Does this placed item emit light? Shared with the inspector, so the
+ *  on/off and dimmer controls appear on exactly the items that light up. */
+export function isLightFixture(f: { name: string; modelId?: string }): boolean {
+  return LIGHT_PATTERN.test(f.name) || LIGHT_PATTERN.test(f.modelId ?? "");
+}
+
 /** Real lights available to lamps at any moment. Constant on purpose — see the
  *  header note on shader recompiles. */
 const POOL_SIZE = 8;
@@ -48,14 +54,72 @@ const REASSIGN_S = 0.2;
 /** Environment (IBL) strength at brightness 1. */
 const ENV_INTENSITY = 0.6;
 
+export type TimeOfDay = "day" | "sunset" | "night";
+
 export interface LightingSettings {
   /** 0.4 dim, 1 normal, 2 bright. Scales everything together. */
   brightness: number;
   /** 0 cool daylight, 0.5 neutral, 1 warm tungsten. */
   warmth: number;
+  /** Sun, sky and lamps together. Optional so older saved settings load. */
+  timeOfDay?: TimeOfDay;
 }
 
-export const DEFAULT_LIGHTING: LightingSettings = { brightness: 1, warmth: 0.45 };
+export const DEFAULT_LIGHTING: LightingSettings = { brightness: 1, warmth: 0.45, timeOfDay: "day" };
+
+/**
+ * One row per time of day. Every light in the scene reads from here, so a
+ * preset changes the whole mood at once instead of one dial at a time.
+ *
+ *  - day:    high sun, neutral sky. The look the app has always had.
+ *  - sunset: a low, orange sun that rakes through the windows and throws long
+ *            shadows across the floor; a warm sky and a cooler fill opposite.
+ *  - night:  no sun, a dark blue sky; the lamps carry the room, and rooms with
+ *            no lamp get a soft ceiling light so nothing goes black.
+ *
+ * Light COUNT never changes between presets (the sun is dimmed to 0 at night,
+ * not removed): three.js recompiles every material when the number of lights
+ * changes, which would freeze the view for a moment on every switch.
+ */
+interface Preset {
+  sun: { elevationDeg: number; azimuthDeg: number; color: string; intensity: number };
+  fill: { color: string; intensity: number };
+  hemi: { sky: string; ground: string; intensity: number };
+  ambient: { color: string; intensity: number };
+  env: number;
+  lampBoost: number;
+  roomLights: boolean;
+}
+
+export const TIME_OF_DAY: Record<TimeOfDay, Preset> = {
+  day: {
+    sun: { elevationDeg: 55, azimuthDeg: 32, color: "#fff1c8", intensity: 2.8 },
+    fill: { color: "#dde5ff", intensity: 0.4 },
+    hemi: { sky: "#fff5e6", ground: "#ddd5c8", intensity: 0.5 },
+    ambient: { color: "#fff9eb", intensity: 0.3 },
+    env: 1,
+    lampBoost: 1,
+    roomLights: false,
+  },
+  sunset: {
+    sun: { elevationDeg: 10, azimuthDeg: 205, color: "#ffa45c", intensity: 3.2 },
+    fill: { color: "#8fa6d8", intensity: 0.32 },
+    hemi: { sky: "#ffcfa8", ground: "#c9b29a", intensity: 0.4 },
+    ambient: { color: "#ffe2c4", intensity: 0.22 },
+    env: 0.7,
+    lampBoost: 1.25,
+    roomLights: false,
+  },
+  night: {
+    sun: { elevationDeg: 40, azimuthDeg: 32, color: "#9fb6d8", intensity: 0 },
+    fill: { color: "#8fa6d8", intensity: 0.08 },
+    hemi: { sky: "#26304a", ground: "#3a3028", intensity: 0.18 },
+    ambient: { color: "#ffe8cc", intensity: 0.08 },
+    env: 0.12,
+    lampBoost: 1.8,
+    roomLights: true,
+  },
+};
 
 interface PlacedLike {
   id: string;
@@ -64,6 +128,8 @@ interface PlacedLike {
   position: [number, number, number];
   height?: number;
   mountType?: "floor" | "ceiling" | "wall";
+  /** 0 = off … 1 = full. Absent means on at full. */
+  lightLevel?: number;
 }
 
 interface Props {
@@ -72,6 +138,11 @@ interface Props {
   settings?: LightingSettings;
   /** Ceiling mounts only render inside; their lights should match. */
   insideMode?: boolean;
+  /** Plan size in metres; the sun and its shadow camera are sized from it. */
+  world: { totalW: number; totalD: number; maxDim: number };
+  /** Room centres [x, z] in metres. At night a room with no lamp gets a soft
+   *  ceiling light at its centre. */
+  roomCentres?: Array<[number, number]>;
 }
 
 /** Warm tungsten through to cool daylight. */
@@ -151,13 +222,19 @@ function SceneEnvironment({ intensity }: { intensity: number }) {
 
 export default function LightingRig({
   furniture, wallHeight, settings = DEFAULT_LIGHTING, insideMode = false,
+  world, roomCentres = [],
 }: Props) {
   const b = Math.max(0.1, settings.brightness);
-  const bulb = useMemo(() => temperature(settings.warmth), [settings.warmth]);
+  const preset = TIME_OF_DAY[settings.timeOfDay ?? "day"];
+  // At night lamps are the room's only light, and a neutral bulb reads as
+  // cold and clinical. Lean them warm (at least 0.75) so the room feels lived
+  // in; the warmth dial still goes further if the user asks for it.
+  const bulbWarmth = settings.timeOfDay === "night" ? Math.max(settings.warmth, 0.75) : settings.warmth;
+  const bulb = useMemo(() => temperature(bulbWarmth), [bulbWarmth]);
 
   const fixtures = useMemo(() => {
-    return furniture
-      .filter(f => LIGHT_PATTERN.test(f.name) || LIGHT_PATTERN.test(f.modelId ?? ""))
+    const lamps = furniture
+      .filter(f => isLightFixture(f))
       .filter(f => (f.mountType ?? "floor") !== "ceiling" || insideMode)
       .map(f => {
         const ceiling = (f.mountType ?? "floor") === "ceiling";
@@ -171,28 +248,51 @@ export default function LightingRig({
           id: f.id,
           pos: new THREE.Vector3(f.position[0], y, f.position[2]),
           ceiling,
+          virtual: false,
+          level: Math.max(0, Math.min(1, f.lightLevel ?? 1)),
         };
       });
-  }, [furniture, insideMode, wallHeight]);
+
+    if (!preset.roomLights) return lamps;
+
+    // Night: a soft ceiling light in every room that has no lamp of its own,
+    // switched-off lamps included (a lamp turned off still means the owner
+    // chose the lighting for that room, so no stand-in is added there).
+    // so an unlit room reads as "lights on" rather than a black hole. They go
+    // through the same nearest-to-camera pool as real lamps.
+    const virtual = roomCentres
+      .filter(([x, z]) => !lamps.some(l => Math.hypot(l.pos.x - x, l.pos.z - z) < 2))
+      .map(([x, z], i) => ({
+        id: `room-light-${i}`,
+        pos: new THREE.Vector3(x, wallHeight - 0.15, z),
+        ceiling: true,
+        virtual: true,
+        level: 1,
+      }));
+    return [...lamps, ...virtual];
+  }, [furniture, insideMode, wallHeight, preset.roomLights, roomCentres]);
 
   // ── Pool assignment ──
   const poolRefs = useRef<Array<THREE.PointLight | null>>([]);
   const sinceAssign = useRef(Infinity); // assign on the first frame
-  const lastFixtures = useRef(fixtures);
+  const lastKey = useRef<unknown[]>([]);
 
   useFrame(({ camera, invalidate }, dt) => {
-    // reassign at once when the lamps change, otherwise on the timer
-    if (lastFixtures.current !== fixtures) {
-      lastFixtures.current = fixtures;
+    // reassign at once when the lamps or the preset change, else on the timer
+    const key = [fixtures, preset, b];
+    if (key.some((k, i) => k !== lastKey.current[i])) {
+      lastKey.current = key;
       sinceAssign.current = Infinity;
     }
     sinceAssign.current += dt;
     if (sinceAssign.current < REASSIGN_S) return;
     sinceAssign.current = 0;
 
-    const nearest = fixtures.length <= POOL_SIZE
-      ? fixtures
-      : [...fixtures]
+    // switched-off lamps take no light from the pool
+    const lit = fixtures.filter(f => f.level > 0);
+    const nearest = lit.length <= POOL_SIZE
+      ? lit
+      : [...lit]
           .sort((a, c) =>
             a.pos.distanceToSquared(camera.position) - c.pos.distanceToSquared(camera.position))
           .slice(0, POOL_SIZE);
@@ -206,10 +306,12 @@ export default function LightingRig({
         if (light.intensity !== 0) { light.intensity = 0; changed = true; }
         continue;
       }
-      // Ceiling fittings light a room; a table lamp pools.
-      const intensity = (f.ceiling ? 5 : 2.6) * b;
-      const distance = f.ceiling ? 9 : 5;
-      if (!light.position.equals(f.pos) || light.intensity !== intensity) {
+      // Ceiling fittings light a room; a table lamp pools. A room light is a
+      // broad soft wash, so it is weaker but reaches further.
+      const base = f.virtual ? 3.2 : f.ceiling ? 5 : 2.6;
+      const intensity = base * preset.lampBoost * b * f.level;
+      const distance = f.virtual ? 8 : f.ceiling ? 9 : 5;
+      if (!light.position.equals(f.pos) || light.intensity !== intensity || light.distance !== distance) {
         light.position.copy(f.pos);
         light.intensity = intensity;
         light.distance = distance;
@@ -219,21 +321,64 @@ export default function LightingRig({
     if (changed) invalidate();
   });
 
+  // ── Sun ──
+  const sunPos = useMemo((): [number, number, number] => {
+    const el = THREE.MathUtils.degToRad(preset.sun.elevationDeg);
+    const az = THREE.MathUtils.degToRad(preset.sun.azimuthDeg);
+    const d = world.maxDim * 1.6;
+    return [Math.cos(el) * Math.cos(az) * d, Math.sin(el) * d, Math.cos(el) * Math.sin(az) * d];
+  }, [preset, world.maxDim]);
+
   return (
     <group name="nooi-lighting">
-      <SceneEnvironment intensity={ENV_INTENSITY * b} />
+      <SceneEnvironment intensity={ENV_INTENSITY * preset.env * b} />
 
       {/* Sky above, floor bounce below — tells the renderer which way is up,
-          which a flat ambient term cannot. */}
+          which a flat ambient term cannot. The ground colour is the light
+          bounced up off the floor, which is what lights a ceiling. */}
       <hemisphereLight
-        args={["#fff5e6", "#b9a98f", 0.45 * b]}
+        args={[preset.hemi.sky, preset.hemi.ground, preset.hemi.intensity * b]}
         position={[0, wallHeight, 0]}
       />
 
       {/* Flat fill so rooms under a ceiling (where the sun cannot reach) are
           not left to the hemisphere alone. Ambient occlusion in post puts the
           form back into corners and under furniture. */}
-      <ambientLight color="#fff9eb" intensity={0.3 * b} />
+      <ambientLight color={preset.ambient.color} intensity={preset.ambient.intensity * b} />
+
+      {/*
+        The sun. Its job is the hard shadows and the light that falls through
+        the window and door openings — at sunset, long raking patches across
+        the floor.
+      */}
+      <directionalLight
+        position={sunPos}
+        color={preset.sun.color}
+        intensity={preset.sun.intensity * b}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        /*
+          Without these three.js uses a ±5 unit shadow camera. The plan is
+          tens of metres across, so shadows rendered only in a 10 m square at
+          the centre. Sized to the world, so it scales with the plan.
+        */
+        shadow-camera-left={-world.maxDim}
+        shadow-camera-right={world.maxDim}
+        shadow-camera-top={world.maxDim}
+        shadow-camera-bottom={-world.maxDim}
+        shadow-camera-near={0.5}
+        shadow-camera-far={world.maxDim * 5}
+        /* normalBias beats bias for thin geometry: walls here are ~12 cm and a
+           plain depth bias makes them self-shadow in stripes. */
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.025}
+      />
+      {/* Fill from the opposite side, so shadowed faces are not dead. */}
+      <directionalLight
+        position={[-world.totalW, world.maxDim, -world.totalD]}
+        color={preset.fill.color}
+        intensity={preset.fill.intensity * b}
+      />
 
       {/*
         The lamp pool. Always POOL_SIZE lights, assigned in useFrame above.
@@ -252,9 +397,9 @@ export default function LightingRig({
         />
       ))}
 
-      {/* A visible glow per lamp, pooled or not, so a fitting never looks
+      {/* A visible glow per real lamp, pooled or not, so a fitting never looks
           switched off. Small, unlit, never occludes. */}
-      {fixtures.map(f => (
+      {fixtures.filter(f => !f.virtual && f.level > 0).map(f => (
         <mesh
           key={`${f.id}-glow`}
           position={f.pos}
@@ -266,7 +411,7 @@ export default function LightingRig({
             color={bulb}
             toneMapped={false}
             transparent
-            opacity={0.9}
+            opacity={0.25 + 0.65 * f.level}
             depthWrite={false}
           />
         </mesh>

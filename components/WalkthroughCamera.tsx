@@ -221,8 +221,12 @@ export default function WalkthroughCamera({
   }, [active, camera, dollyPos]);
 
   // Per-frame camera animation loop
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
     if (!active || paused || tour.length === 0) return;
+    // the tour is continuous motion; keep frames coming (on-demand canvas),
+    // and cap delta so resuming after an idle stretch does not skip ahead
+    state.invalidate();
+    const delta = Math.min(rawDelta, 1 / 20);
 
     // Advance time (wraps smoothly if user lets it run continuously)
     elapsedRef.current = (elapsedRef.current + delta) % totalDuration;
