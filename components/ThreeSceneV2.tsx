@@ -22,6 +22,7 @@ import WallDecor from "@/components/decor/WallDecor";
 import { RoomAreaLabels, ItemDimensions } from "@/components/Measurements";
 import { Html } from "@react-three/drei";
 import { installBvh, buildBoundsTrees } from "@/lib/three/bvh";
+import { outsideSides, type OutsideSide } from "@/lib/walls/exterior";
 import { makeFrame, sceneToReal, snapSceneToRealCm, type PlanFrame } from "@/lib/geometry/planFrame";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
@@ -632,6 +633,10 @@ function WallWithOpenings({
 // rises again as the camera moves round. The ledge keeps the plan readable;
 // hiding the wall outright made rooms look like they had no walls at all.
 //
+// Only OUTER walls are cut (lib/walls/exterior). Lowering interior
+// partitions too flattened the whole plan into ledges and the rooms lost
+// their shape; with them standing, the house reads as a house.
+//
 // Scaled, not hidden: the wall group shrinks towards the floor, so selection,
 // painting and door clicks keep working on what is left, and the change can
 // animate instead of popping.
@@ -658,9 +663,12 @@ function wallLine(wall: VWall, world: World) {
 }
 
 function CutawayWall({
-  wall, wallKey, world, enabled, children,
+  wall, wallKey, world, enabled, outside, children,
 }: {
-  wall: VWall; wallKey: string; world: World; enabled: boolean; children: React.ReactNode;
+  wall: VWall; wallKey: string; world: World; enabled: boolean;
+  /** which side of this wall faces outside; 0 = interior, never cut */
+  outside: OutsideSide;
+  children: React.ReactNode;
 }) {
   const ref = useRef<THREE.Group>(null);
   const line = useMemo(() => wallLine(wall, world), [wall, world]);
@@ -671,12 +679,10 @@ function CutawayWall({
     const dt = frameDt(rawDt);
 
     let cut = false;
-    if (enabled) {
+    if (enabled && outside !== 0) {
       const cam = camera.position;
-      // signed distance of the camera and of the plan's centre (the origin)
-      // from the wall's line, along the wall's normal
+      // signed distance of the camera from the wall's line, along its normal
       const camSide = line.horiz ? cam.z - line.c : cam.x - line.c;
-      const centreSide = -line.c;
       // horizontal distance from the camera to the wall's midpoint
       const dx = (line.horiz ? line.mid : line.c) - cam.x;
       const dz = (line.horiz ? line.c : line.mid) - cam.z;
@@ -684,8 +690,8 @@ function CutawayWall({
       const elevation = Math.atan2(cam.y - 1, flat);
 
       cut =
-        Math.abs(centreSide) > 0.15 &&               // a wall through the middle stays up
-        Math.sign(camSide) !== Math.sign(centreSide) &&
+        // the camera is out on this wall's outside, looking in
+        (outside === 2 || Math.sign(camSide) === outside) &&
         Math.abs(camSide) / Math.max(flat, 1e-3) > 0.3 && // facing the camera, not edge-on
         elevation < CUTAWAY_MAX_ELEVATION;
     }
@@ -2507,6 +2513,8 @@ function SceneContent({
     () => planWallsToWorld(rfWalls, world.totalW, world.totalD),
     [rfWalls, world],
   );
+  // outer walls and which way they face — only these are cut away
+  const wallOutside = useMemo(() => outsideSides(worldWalls), [worldWalls]);
 
   // The selected wall face ("wallKey:A") → its index in rfWalls.
   const selectedWallIndexFromSide = useMemo(() => {
@@ -2708,7 +2716,8 @@ function SceneContent({
       {rfWalls.map((wl, i) => {
         const wallKey = wl.id ?? `wi${i}`;
         return (
-          <CutawayWall key={wallKey} wall={wl} wallKey={wallKey} world={world} enabled={wallCutaway}>
+          <CutawayWall key={wallKey} wall={wl} wallKey={wallKey} world={world} enabled={wallCutaway}
+            outside={wallOutside[i] ?? 0}>
           <WallWithOpenings wall={wl}
             cuts={cuts.get(i) ?? []} world={world}
             wallKey={wallKey}
