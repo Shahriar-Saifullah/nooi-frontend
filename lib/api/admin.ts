@@ -158,6 +158,10 @@ export interface OrderSearchRow {
   customer_name: string | null;
   vendors: string[];
   payment_intent_id: string | null;
+  currency?: string;
+  payment_provider?: string;
+  /** Set once an admin approved the order for vendor payment. */
+  approved_at?: string | null;
   /** Set when someone has already acted on this order. */
   intervened_at: string | null;
 }
@@ -174,6 +178,8 @@ export interface OrderIntervention {
     metadata: Record<string, any>;
   }[];
   returns: { id: string; status: string; reason: string; order_item_id: string; created_at: string }[];
+  /** What each vendor earns on this order and whether it is payable yet. */
+  earnings?: OrderEarning[];
   already_refunded_count: number;
   /** Cancelling refunds the customer, so it is super_admin only. The backend
    *  enforces this; the flag just keeps the UI honest about it. */
@@ -665,4 +671,106 @@ export function waitingBand(days: number): "fresh" | "due" | "overdue" {
   if (days >= 5) return "overdue";
   if (days >= 2) return "due";
   return "fresh";
+}
+// ─── Payments: approval and vendor payouts ───────────────────────────────────
+// Amounts in SAR (major units). The backend keeps the ledger in halalas.
+
+export interface OrderEarning {
+  id: string;
+  vendor_id: string;
+  retailer_id: string | null;
+  kind: "sale" | "shipping" | "reversal";
+  gross_minor: number;
+  commission_rate: number;
+  commission_minor: number;
+  net_minor: number;
+  status: "pending" | "payable" | "in_payout" | "paid" | "reversed";
+  payout_id: string | null;
+  payable_at: string | null;
+  paid_at: string | null;
+}
+
+/** Approve an order for vendor payment. Vendors' shares become payable once
+ *  their shipment is also delivered. */
+export async function approveOrder(id: string): Promise<ApiResponse<{ approved_at: string }>> {
+  return requestApi<{ approved_at: string }>({
+    path: `/admin/orders/${encodeURIComponent(id)}/approve`,
+    method: "POST",
+  });
+}
+
+export interface PaymentsVendorRow {
+  vendor_id: string;
+  name: string;
+  pending: number;
+  payable: number;
+  in_payout: number;
+  paid: number;
+  commission: number;
+  account: { holder: string; iban_masked: string; bank_name: string | null; verified: boolean } | null;
+  last_payout: { status: string; amount_minor: number; created_at: string } | null;
+}
+
+export interface PaymentsOverview {
+  currency: string;
+  hold_days: number;
+  totals: {
+    collected: number;
+    vat_collected: number;
+    commission: number;
+    owed_pending: number;
+    owed_payable: number;
+    in_payout: number;
+    paid_out: number;
+    orders_awaiting_approval: number;
+  };
+  vendors: PaymentsVendorRow[];
+}
+
+export interface PayoutRow {
+  id: string;
+  vendor_id: string;
+  amount: number;
+  currency: string;
+  status: "creating" | "queued" | "initiated" | "paid" | "failed" | "canceled" | "returned";
+  channel: string | null;
+  sequence_number: string;
+  provider_payout_id: string | null;
+  destination: { name: string; iban: string; city: string };
+  earnings_count: number;
+  failure_reason: string | null;
+  last_error: string | null;
+  created_at: string;
+  paid_at: string | null;
+}
+
+export async function getPaymentsOverview(): Promise<ApiResponse<PaymentsOverview>> {
+  return requestApi<PaymentsOverview>({ path: "/admin/payments/overview", method: "GET" });
+}
+
+export async function listPayouts(vendorId?: string): Promise<ApiResponse<{ payouts: PayoutRow[] }>> {
+  const q = vendorId ? `?vendor_id=${encodeURIComponent(vendorId)}` : "";
+  return requestApi<{ payouts: PayoutRow[] }>({ path: `/admin/payouts${q}`, method: "GET" });
+}
+
+/** Pay a vendor everything payable. Super admin only. */
+export async function createPayout(vendorId: string): Promise<ApiResponse<{ payout: PayoutRow }>> {
+  return requestApi<{ payout: PayoutRow }>({ path: "/admin/payouts", method: "POST", body: { vendor_id: vendorId } });
+}
+
+export async function refreshPayout(id: string): Promise<ApiResponse<{ payout: PayoutRow }>> {
+  return requestApi<{ payout: PayoutRow }>({ path: `/admin/payouts/${encodeURIComponent(id)}/refresh`, method: "POST" });
+}
+
+export async function getVendorPayoutAccount(vendorId: string): Promise<ApiResponse<{ account: any | null }>> {
+  return requestApi<{ account: any | null }>({ path: `/admin/vendors/${encodeURIComponent(vendorId)}/payout-account`, method: "GET" });
+}
+
+/** Mark the vendor's IBAN as checked. `iban` is the one the admin looked at. */
+export async function verifyVendorPayoutAccount(vendorId: string, iban: string): Promise<ApiResponse<unknown>> {
+  return requestApi<unknown>({
+    path: `/admin/vendors/${encodeURIComponent(vendorId)}/payout-account/verify`,
+    method: "POST",
+    body: { iban },
+  });
 }

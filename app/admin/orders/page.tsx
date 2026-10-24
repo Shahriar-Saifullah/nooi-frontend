@@ -30,8 +30,9 @@ import {
 } from "lucide-react";
 
 import AdminShell from "@/components/admin/AdminShell";
+import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import {
-  searchOrders, getOrderForIntervention, overrideOrderStatus, cancelOrderAsAdmin,
+  searchOrders, getOrderForIntervention, overrideOrderStatus, cancelOrderAsAdmin, approveOrder,
   type OrderSearchRow, type OrderIntervention,
 } from "@/lib/api/admin";
 
@@ -50,8 +51,8 @@ const OVERRIDE_OPTIONS = [
   { value: "fulfilled", label: "Fulfilled", hint: "Everything has been delivered" },
 ];
 
-function money(v: number): string {
-  return `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function money(v: number, currency?: string): string {
+  return formatMoney(v, currency || DEFAULT_CURRENCY);
 }
 
 function fmtWhen(iso: string | null): string {
@@ -163,13 +164,18 @@ function OrderSearch({ onOpen }: { onOpen: (id: string) => void }) {
             </span>
 
             <span className="text-[12.5px] tabular-nums text-[#101212]">
-              {money(o.total_amount)}
+              {money(o.total_amount, o.currency)}
             </span>
 
             <span className="flex items-center gap-1.5">
               <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-medium capitalize ${STATUS_STYLE[o.status] ?? "bg-[#F1F4F4] text-[#646968]"}`}>
                 {o.status}
               </span>
+              {!o.approved_at && o.status !== "cancelled" && o.status !== "cancelling" && (
+                <span className="rounded-full bg-[#FFF6E5] px-2 py-0.5 text-[10.5px] font-medium text-[#8A5A00]">
+                  to approve
+                </span>
+              )}
               {o.intervened_at && (
                 <span title="Has been intervened on" className="text-[#8a6d1f]">
                   <History size={11} />
@@ -242,6 +248,24 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
     }
   }, [id, newStatus, note, load, reset]);
 
+  const doApprove = useCallback(async () => {
+    setWorking(true);
+    setActionError(null);
+    try {
+      const res = await approveOrder(id);
+      if (!res.success) {
+        setActionError(typeof res.error === "string" ? res.error : "Could not approve this order.");
+      } else {
+        setDone("Order approved. Vendors are paid for it once their shipment is delivered.");
+      }
+      await load();
+    } catch {
+      setActionError("Could not approve this order.");
+    } finally {
+      setWorking(false);
+    }
+  }, [id, load]);
+
   const doCancel = useCallback(async () => {
     if (!note.trim()) return;
     setWorking(true);
@@ -303,7 +327,7 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>
           <span className="text-[11.5px] text-[#8E9493]">
-            Placed {fmtWhen(o.created_at)} · {money(o.total_amount)}
+            Placed {fmtWhen(o.created_at)} · {money(o.total_amount, o.currency)}
           </span>
           <h1 className="mt-0.5 font-mono text-[24px] text-[#101212]">{o.order_number}</h1>
           <span className="text-[12.5px] text-[#646968]">
@@ -377,7 +401,7 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
                       {it.product_variants?.products?.title ?? "Item"}
                     </span>
                     <span className="block text-[11px] text-[#8E9493]">
-                      {it.retailers?.name ?? "—"} · qty {it.quantity} · {money(it.total_price)}
+                      {it.retailers?.name ?? "—"} · qty {it.quantity} · {money(it.total_price, o.currency)}
                     </span>
                   </span>
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium capitalize ${
@@ -416,6 +440,47 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
                 </div>
               ))}
             </div>
+          </section>
+
+          {/* Approval and vendor payment */}
+          <section className="rounded-2xl border border-[#D5DBDA] bg-white p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-[13px] font-medium text-[#101212]">Vendor payment</h2>
+              {o.approved_at ? (
+                <span className="rounded-full bg-[#E7FBEB] px-2.5 py-0.5 text-[11px] font-medium text-[#28603A]">
+                  Approved {fmtWhen(o.approved_at)}
+                </span>
+              ) : !settled && o.status !== "cancelling" ? (
+                <button
+                  onClick={doApprove}
+                  disabled={working}
+                  className="rounded-full bg-[#004643] px-4 py-1.5 text-[12px] font-medium text-white hover:bg-[#003836] disabled:opacity-60"
+                >
+                  Approve order
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-1 text-[11.5px] text-[#8E9493]">
+              Paid through {o.payment_provider ?? "stripe"}. Each vendor&apos;s share becomes payable when the order is approved and their shipment is delivered.
+            </p>
+            {(data.earnings ?? []).length > 0 && (
+              <div className="mt-3 divide-y divide-[#F1F4F4]">
+                {(data.earnings ?? []).map(e => (
+                  <div key={e.id} className="flex items-center justify-between gap-3 py-2 text-[12px]">
+                    <span className="text-[#646968]">
+                      {e.kind === "sale" ? "Item" : e.kind === "shipping" ? "Shipping" : "Reversal"}
+                      {e.commission_minor ? ` · ${money(e.gross_minor / 100, o.currency)} less ${e.commission_rate}%` : ""}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="font-medium text-[#101212]">{money(e.net_minor / 100, o.currency)}</span>
+                      <span className="rounded-full bg-[#F1F4F4] px-2 py-0.5 text-[10.5px] font-medium capitalize text-[#646968]">
+                        {e.status.replace("_", " ")}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           {/* What has already been done */}
