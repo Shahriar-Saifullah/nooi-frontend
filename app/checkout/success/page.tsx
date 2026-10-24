@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import { getOrderByPaymentIntent } from "@/lib/api/checkout";
+import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import { useCartStore } from "@/lib/store/cart.store";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 
@@ -124,16 +125,9 @@ function SuccessContent() {
   const clearCartRef = useRef(clearCart);
   clearCartRef.current = clearCart;
 
-  const toArabicDigits = useCallback(
-    (s: string) => (isRtl ? s.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[+d]) : s),
-    [isRtl],
-  );
   const money = useCallback(
-    (v: number) =>
-      toArabicDigits(
-        `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      ),
-    [toArabicDigits],
+    (v: number) => formatMoney(v, order?.currency || DEFAULT_CURRENCY, isRtl),
+    [order?.currency, isRtl],
   );
   const shortDate = useCallback(
     (iso?: string | null) => {

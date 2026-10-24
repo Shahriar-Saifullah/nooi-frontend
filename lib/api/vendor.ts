@@ -402,3 +402,84 @@ export async function updateVendorOrderStage(
     };
   }
 }
+
+// ── Earnings and payouts ────────────────────────────────────────────────────
+// Amounts in SAR. "pending" = sold, waiting for Nooi to approve the order and
+// for delivery; "payable" = goes out in the next payout.
+
+export interface VendorPayoutAccount {
+  account_holder: string;
+  iban_masked: string;
+  bank_name: string | null;
+  city: string;
+  mobile: string;
+  verified: boolean;
+}
+
+export interface VendorEarningLine {
+  id: string;
+  order_id: string;
+  order_number: string | null;
+  kind: "sale" | "shipping" | "reversal";
+  gross: number;
+  commission_rate: number;
+  commission: number;
+  net: number;
+  status: "pending" | "payable" | "in_payout" | "paid" | "reversed";
+  waiting_for: "approval" | "delivery" | null;
+  created_at: string;
+  payable_at: string | null;
+  paid_at: string | null;
+  note: string | null;
+}
+
+export interface VendorPayoutRow {
+  id: string;
+  amount: number;
+  currency: string;
+  status: "creating" | "queued" | "initiated" | "paid" | "failed" | "canceled" | "returned";
+  sequence_number: string;
+  failure_reason: string | null;
+  created_at: string;
+  paid_at: string | null;
+  destination: { name: string; iban: string };
+}
+
+export interface VendorPaymentsData {
+  currency: string;
+  hold_days: number;
+  balance: { pending: number; payable: number; in_payout: number; paid: number; gross_sales: number; commission: number };
+  commission_rates: { name: string; commission_rate: number }[];
+  account: VendorPayoutAccount | null;
+  lines: VendorEarningLine[];
+  payouts: VendorPayoutRow[];
+}
+
+export async function getVendorPayments(): Promise<ApiResponse<VendorPaymentsData>> {
+  try {
+    const res = await requestJson<{ success: boolean; data: VendorPaymentsData; error?: string }>({
+      path: "/vendor/payments",
+      method: "GET",
+    });
+    if (!res.success) return { success: false, error: res.error || "Could not load payments" };
+    return { success: true, data: res.data };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Network error loading payments" };
+  }
+}
+
+export async function saveVendorPayoutAccount(payload: {
+  account_holder: string; iban: string; bank_name?: string; mobile: string; city: string;
+}): Promise<ApiResponse<{ account: VendorPayoutAccount; message?: string }>> {
+  try {
+    const res = await requestJson<{ success: boolean; data: { account: VendorPayoutAccount }; message?: string; error?: string }, typeof payload>({
+      path: "/vendor/payout-account",
+      method: "PUT",
+      body: payload,
+    });
+    if (!res.success) return { success: false, error: res.error || "Could not save the bank account" };
+    return { success: true, data: { account: res.data.account, message: res.message } };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Network error saving the bank account" };
+  }
+}

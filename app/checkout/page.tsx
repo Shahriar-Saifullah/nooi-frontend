@@ -42,9 +42,14 @@ import { useCartStore } from "@/lib/store/cart.store";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import {
   createPaymentIntent,
+  createMoyasarCheckout,
+  PAYMENT_PROVIDER,
   ShippingAddress,
   CheckoutSummary,
+  MoyasarFormConfig,
 } from "@/lib/api/checkout";
+import MoyasarPaymentForm from "@/components/checkout/MoyasarPaymentForm";
+import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 
 const COPY = {
   en: {
@@ -82,6 +87,7 @@ const COPY = {
     total: "Total",
     atPayment: "Calculated at payment",
     qty: "Qty",
+    formLoadFailed: "The payment form could not load. Check your connection and refresh the page.",
     promoDropped: (code: string) =>
       `The code ${code} could not be applied to this order — it may have expired or reached its limit. The total below is what you'll be charged.`,
   },
@@ -120,6 +126,7 @@ const COPY = {
     total: "الإجمالي",
     atPayment: "يُحسب عند الدفع",
     qty: "الكمية",
+    formLoadFailed: "تعذّر تحميل نموذج الدفع. تحقق من اتصالك وأعد تحميل الصفحة.",
     promoDropped: (code: string) =>
       `تعذّر تطبيق الرمز ${code} على هذا الطلب — ربما انتهت صلاحيته أو بلغ حدّه. الإجمالي أدناه هو المبلغ الذي سيُخصم.`,
   },
@@ -231,12 +238,14 @@ function CheckoutInner() {
   const { items, totalItems, subtotal } = useCartStore();
 
   const [address, setAddress] = useState<ShippingAddress>({
-    fullName: "", street: "", city: "", state: "", zipCode: "", country: "US",
+    fullName: "", street: "", city: "", state: "", zipCode: "",
+    country: PAYMENT_PROVIDER === "moyasar" ? "SA" : "US",
   });
 
   const [isLoadingIntent, setIsLoadingIntent] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [checkoutSummary, setCheckoutSummary] = useState<CheckoutSummary | null>(null);
+  const [moyasar, setMoyasar] = useState<{ form: MoyasarFormConfig; attemptId: string } | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [step, setStep] = useState<"shipping" | "payment">("shipping");
 
@@ -246,12 +255,10 @@ function CheckoutInner() {
     (s: string) => (isRtl ? s.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[+d]) : s),
     [isRtl],
   );
+  const currency = checkoutSummary?.currency || DEFAULT_CURRENCY;
   const money = useCallback(
-    (v: number) =>
-      toArabicDigits(
-        `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      ),
-    [toArabicDigits],
+    (v: number) => formatMoney(v, currency, isRtl),
+    [currency, isRtl],
   );
   const num = useCallback((v: number) => toArabicDigits(String(v)), [toArabicDigits]);
 
@@ -278,6 +285,22 @@ function CheckoutInner() {
 
     try {
       // The code only. The server derives the amount.
+      if (PAYMENT_PROVIDER === "moyasar") {
+        const response = await createMoyasarCheckout(address, promoCode);
+        if (!response.success) {
+          setGeneralError(typeof response.error === "string" ? response.error : t.initFailed);
+          setIsLoadingIntent(false);
+          return;
+        }
+        const { form, summary, checkout_attempt_id } = response.data;
+        setMoyasar({ form, attemptId: checkout_attempt_id });
+        // Lets the step header and empty-cart guard treat it like Stripe's secret.
+        setClientSecret(checkout_attempt_id);
+        setCheckoutSummary(summary);
+        setStep("payment");
+        return;
+      }
+
       const response = await createPaymentIntent(address, promoCode);
 
       if (!response.success) {
@@ -430,7 +453,7 @@ function CheckoutInner() {
                         onChange={e => setAddress({ ...address, country: e.target.value })}
                         className="mt-1 w-full rounded-xl border border-[#D5DBDA] bg-white px-3.5 py-2.5 text-[13px] transition focus:border-[#87DDD7] focus:outline-none"
                       >
-                        <option value="US">United States (USD)</option>
+                        <option value="US">United States</option>
                         <option value="CA">Canada</option>
                         <option value="GB">United Kingdom</option>
                         <option value="AE">United Arab Emirates</option>
@@ -458,6 +481,18 @@ function CheckoutInner() {
                   )}
                 </button>
               </form>
+            ) : moyasar && checkoutSummary ? (
+              <MoyasarPaymentForm
+                config={moyasar.form}
+                checkoutAttemptId={moyasar.attemptId}
+                language={language === "ar" ? "ar" : "en"}
+                labels={{
+                  paymentMethod: t.paymentMethod,
+                  encrypted: t.encrypted,
+                  loadFailed: t.formLoadFailed,
+                  terms: t.terms,
+                }}
+              />
             ) : (
               clientSecret && checkoutSummary && (
                 <Elements

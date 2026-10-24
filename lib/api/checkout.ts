@@ -157,3 +157,82 @@ export async function getOrderByPaymentIntent(
     return toFailure(err);
   }
 }
+// ── Moyasar (Saudi Arabia) ──────────────────────────────────────────────────
+// The card form is Moyasar's own; we only start a checkout, tell the server
+// the payment id before 3-D Secure, and ask it to confirm on return. The
+// server re-reads every payment from Moyasar — nothing here is trusted.
+
+export const PAYMENT_PROVIDER: "moyasar" | "stripe" =
+  process.env.NEXT_PUBLIC_PAYMENT_PROVIDER === "moyasar" ? "moyasar" : "stripe";
+
+/** Options for Moyasar.init, built by the server (amount in halalas). */
+export interface MoyasarFormConfig {
+  publishable_api_key: string;
+  amount: number;
+  currency: string;
+  description: string;
+  callback_url: string;
+  supported_networks: string[];
+  methods: string[];
+  metadata: Record<string, string>;
+  apple_pay?: { country: string; label: string; validate_merchant_url: string };
+}
+
+export interface MoyasarCheckoutResponse {
+  success: boolean;
+  provider: "moyasar";
+  checkout_attempt_id: string;
+  summary: CheckoutSummary;
+  form: MoyasarFormConfig;
+  error?: string;
+}
+
+export interface MoyasarConfirmResponse {
+  success: boolean;
+  status: "succeeded" | "processing" | "payment_failed" | "refunded";
+  order_id?: string;
+  message?: string;
+  error?: string;
+}
+
+export async function createMoyasarCheckout(
+  shippingAddress: ShippingAddress,
+  promoCode?: string | null,
+): Promise<ApiResponse<MoyasarCheckoutResponse>> {
+  try {
+    const body = await requestJson<MoyasarCheckoutResponse>({
+      path: "/orders/moyasar/checkout",
+      method: "POST",
+      body: { shipping_address: shippingAddress, promo_code: promoCode ?? null },
+    });
+    return wrap(body);
+  } catch (err) {
+    return toFailure(err);
+  }
+}
+
+export async function bindMoyasarPayment(checkoutAttemptId: string, paymentId: string) {
+  try {
+    const body = await requestJson<{ success: boolean; error?: string }>({
+      path: "/orders/moyasar/bind",
+      method: "POST",
+      body: { checkout_attempt_id: checkoutAttemptId, payment_id: paymentId },
+    });
+    return wrap(body);
+  } catch (err) {
+    return toFailure(err);
+  }
+}
+
+export async function confirmMoyasarPayment(paymentId: string): Promise<ApiResponse<MoyasarConfirmResponse>> {
+  try {
+    const body = await requestJson<MoyasarConfirmResponse>({
+      path: "/orders/moyasar/confirm",
+      method: "POST",
+      body: { payment_id: paymentId },
+    });
+    return wrap(body);
+  } catch (err) {
+    return toFailure(err);
+  }
+}
