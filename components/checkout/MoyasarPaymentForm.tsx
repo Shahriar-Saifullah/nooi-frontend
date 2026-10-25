@@ -74,6 +74,11 @@ export default function MoyasarPaymentForm({
           element: ".mysr-form",
           language,
           ...config,
+          // Back to the site the shopper is actually on. The server's guess
+          // (first FRONTEND_URL entry) may be localhost or another domain,
+          // which Moyasar rejects as "Callback URL is invalid". Safe: the
+          // callback page only asks the server, which verifies with Moyasar.
+          callback_url: `${window.location.origin}/checkout/callback`,
           on_completed: async (payment: { id: string }) => {
             // Must succeed before the redirect, or the order can only be
             // recovered by the webhook. Throwing here stops the redirect.

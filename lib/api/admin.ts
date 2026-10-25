@@ -774,3 +774,13 @@ export async function verifyVendorPayoutAccount(vendorId: string, iban: string):
     body: { iban },
   });
 }
+
+/** Confirm a shipment was delivered (no carrier scan). Makes the vendor's
+ *  share payable if the order is approved. `note` says how it was confirmed. */
+export async function markShipmentDelivered(orderId: string, shipmentId: string, note: string): Promise<ApiResponse<unknown>> {
+  return requestApi<unknown>({
+    path: `/admin/orders/${encodeURIComponent(orderId)}/shipments/${encodeURIComponent(shipmentId)}/delivered`,
+    method: "POST",
+    body: { note },
+  });
+}

@@ -43,9 +43,8 @@ export async function POST(req: Request) {
       updated_at: nowIso,
     };
 
-    if (payload.payoutConnected !== undefined) {
-      updatePayload.payout_connected = Boolean(payload.payoutConnected);
-    }
+    // payout_connected is NOT set here. It means "Nooi has verified this
+    // vendor's IBAN" and only the admin verify endpoint may set it.
 
     if (payload.taxId && typeof payload.taxId === "string" && payload.taxId.trim()) {
       updatePayload.tax_id = payload.taxId.trim();

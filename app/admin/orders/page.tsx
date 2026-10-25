@@ -32,7 +32,7 @@ import {
 import AdminShell from "@/components/admin/AdminShell";
 import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import {
-  searchOrders, getOrderForIntervention, overrideOrderStatus, cancelOrderAsAdmin, approveOrder,
+  searchOrders, getOrderForIntervention, overrideOrderStatus, cancelOrderAsAdmin, approveOrder, markShipmentDelivered,
   type OrderSearchRow, type OrderIntervention,
 } from "@/lib/api/admin";
 
@@ -248,6 +248,25 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
     }
   }, [id, newStatus, note, load, reset]);
 
+  const [deliverFor, setDeliverFor] = useState<string | null>(null);
+  const [deliverNote, setDeliverNote] = useState("");
+
+  const doDeliver = useCallback(async (shipmentId: string) => {
+    if (!deliverNote.trim()) return;
+    setWorking(true);
+    setActionError(null);
+    try {
+      const res = await markShipmentDelivered(id, shipmentId, deliverNote.trim());
+      if (!res.success) setActionError(typeof res.error === "string" ? res.error : "Could not mark it delivered.");
+      else { setDone("Shipment marked delivered."); setDeliverFor(null); setDeliverNote(""); }
+      await load();
+    } catch {
+      setActionError("Could not mark it delivered.");
+    } finally {
+      setWorking(false);
+    }
+  }, [id, deliverNote, load]);
+
   const doApprove = useCallback(async () => {
     setWorking(true);
     setActionError(null);
@@ -423,7 +442,7 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
             </h2>
             <div className="mt-3 divide-y divide-[#F1F4F4]">
               {shipments.map(s => (
-                <div key={s.id} className="flex items-center justify-between gap-3 py-2.5">
+                <div key={s.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
                   <span className="min-w-0">
                     <span className="block truncate text-[12.5px] text-[#101212]">
                       {s.retailers?.name ?? "Vendor"}
@@ -434,9 +453,31 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
                       </span>
                     )}
                   </span>
-                  <span className="shrink-0 rounded-full bg-[#F1F4F4] px-2 py-0.5 text-[10.5px] font-medium text-[#646968]">
-                    {String(s.shipment_status).replace(/_/g, " ")}
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full bg-[#F1F4F4] px-2 py-0.5 text-[10.5px] font-medium text-[#646968]">
+                      {String(s.shipment_status).replace(/_/g, " ")}
+                    </span>
+                    {!settled && s.shipment_status !== "delivered" && s.shipment_status !== "cancelled" && (
+                      <button onClick={() => { setDeliverFor(deliverFor === s.id ? null : s.id); setDeliverNote(""); }}
+                        className="text-[11px] font-medium text-[#004643] hover:underline">
+                        Mark delivered
+                      </button>
+                    )}
                   </span>
+                  {deliverFor === s.id && (
+                    <div className="mt-2 w-full basis-full rounded-xl bg-[#FBFCFC] p-3">
+                      <input value={deliverNote} onChange={e => setDeliverNote(e.target.value)}
+                        placeholder="How was delivery confirmed? e.g. customer confirmed by phone, SMSA proof of delivery"
+                        className="w-full rounded-lg border border-[#D5DBDA] px-3 py-2 text-[12px] focus:outline-none" />
+                      <div className="mt-2 flex gap-2">
+                        <button disabled={working || !deliverNote.trim()} onClick={() => void doDeliver(s.id)}
+                          className="rounded-full bg-[#004643] px-3.5 py-1.5 text-[11.5px] font-medium text-white disabled:opacity-50">
+                          Confirm delivered
+                        </button>
+                        <button onClick={() => setDeliverFor(null)} className="px-2 text-[11.5px] text-[#646968]">Cancel</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

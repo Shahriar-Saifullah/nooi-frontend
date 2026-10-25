@@ -1834,7 +1834,7 @@ export default function VendorDashboardView({
                         </div>
                       </div>
 
-                      {/* Step 2: Connect Stripe */}
+                      {/* Step 2: Bank account for payouts */}
                       <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
                         <span
                           style={{
@@ -1856,10 +1856,10 @@ export default function VendorDashboardView({
                         </span>
                         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
                           <span style={{ fontSize: "14px", fontWeight: 600, color: "#101212" }}>
-                            Connect Stripe
+                            Add your bank account
                           </span>
                           <span style={{ fontSize: "12px", color: "#646968" }}>
-                            Payouts go to the bank account you add in Stripe
+                            Payouts go to your Saudi bank account (IBAN)
                           </span>
                         </div>
                         {!stripeConnected && (
@@ -3147,70 +3147,18 @@ export default function VendorDashboardView({
                 </div>
               )}
 
-              {/* Subtab 3: Payout account */}
+              {/* Subtab 3: Payout account — managed on the Payments page */}
               {settingsTab === "payout" && (
-                <div
-                  style={{
-                    background: "#FFFFFF",
-                    border: "1px solid #EAEDEC",
-                    borderRadius: "12px",
-                    padding: "20px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "14px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: "15px", fontWeight: 600, color: "#101212" }}>Payout account</span>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        background: "#EAF7F5",
-                        color: "#004643",
-                        fontSize: "13px",
-                        fontWeight: 500,
-                        padding: "6px 14px",
-                        borderRadius: "999px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Connected
-                    </span>
-                  </div>
-
+                <div style={{ background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "12px", padding: "20px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <span style={{ fontSize: "15px", fontWeight: 600, color: "#101212" }}>Payout account</span>
                   <span style={{ fontSize: "13px", color: "#4B4F4F", lineHeight: 1.5 }}>
-                    Your bank account, payout schedule and withdrawals are managed in Stripe.
+                    Nooi pays your earnings to your Saudi bank account (IBAN). Add or change it, and see your balance and payouts, on the Payments page.
                   </span>
-
-                  <div style={{ display: "flex", marginTop: "4px" }}>
-                    <a
-                      href="https://connect.stripe.com/express_login"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "10px",
-                        height: "40px",
-                        padding: "0 18px",
-                        border: "1px solid #D5DBDA",
-                        borderRadius: "8px",
-                        background: "#FFFFFF",
-                        color: "#101212",
-                        fontSize: "14px",
-                        fontWeight: 500,
-                        textDecoration: "none",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Stripe Dashboard
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M15 3h6v6" />
-                        <path d="M10 14 21 3" />
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                      </svg>
-                    </a>
+                  <div>
+                    <button type="button" onClick={() => setActiveNav("payments")}
+                      style={{ height: "40px", padding: "0 18px", border: "1px solid #D5DBDA", borderRadius: "8px", background: "#FFFFFF", color: "#004643", fontSize: "14px", fontWeight: 500, cursor: "pointer" }}>
+                      Go to Payments
+                    </button>
                   </div>
                 </div>
               )}
