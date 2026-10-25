@@ -585,8 +585,8 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
             </h2>
             <p className={`mt-2 text-[12.5px] ${vendor.payout_connected ? "text-[#28603A]" : "text-[#8a6d1f]"}`}>
               {vendor.payout_connected
-                ? "Connected"
-                : "Not connected. They can be approved, but can't be paid until it's set up."}
+                ? "Bank account (IBAN) verified"
+                : "No verified bank account yet. They can be approved, but can't be paid until they add an IBAN and it's verified in Payouts."}
             </p>
           </section>
 

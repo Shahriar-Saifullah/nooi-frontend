@@ -11,7 +11,7 @@
  * refund amount a browser could choose.
  *
  * Refunding asks for confirmation. Every other decision in this console is
- * reversible or merely administrative — this one sends money, and Stripe will
+ * reversible or merely administrative — this one sends money, and the gateway will
  * not give it back. The confirm step names the amount and the customer so the
  * last thing an admin reads before paying is what they are paying.
  */
@@ -437,7 +437,7 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
                     Refund {money(amount)} to {order?.shipping_address?.fullName ?? "the customer"}?
                   </strong>
                   <span className="mt-1 block text-[11.5px]">
-                    This sends money through Stripe and cannot be undone from
+                    This sends money through the payment provider and cannot be undone from
                     here. Stock for this item goes back on the shelf.
                   </span>
                 </div>

@@ -208,7 +208,7 @@ function SubmittedPageContent() {
               </div>
               <div style={{ display: "flex", gap: "10px", fontSize: "14px", color: "#101212" }}>
                 <span style={{ color: "#437E54", fontWeight: "bold" }}>✓</span>
-                <span style={{ flex: 1 }}>Payouts via Stripe</span>
+                <span style={{ flex: 1 }}>Payouts to your bank account (IBAN)</span>
               </div>
             </div>
 

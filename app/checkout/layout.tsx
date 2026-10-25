@@ -3,7 +3,7 @@ import React from 'react';
 
 export const metadata: Metadata = {
   title: 'Secure Checkout | Nooi',
-  description: 'Complete your luxury interior order with end-to-end encrypted Stripe checkout.',
+  description: 'Complete your luxury interior order with secure checkout with mada, Visa, Mastercard and STC Pay.',
 };
 
 export default function CheckoutLayout({

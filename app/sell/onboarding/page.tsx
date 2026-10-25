@@ -11,6 +11,7 @@ import {
   saveVendorStoreProfile,
   saveVendorLegalDocs,
   uploadVendorDocument,
+  saveVendorPayoutAccount,
 } from "@/lib/api/vendor";
 import { createClient } from "@/utils/supabase/client";
 
@@ -36,6 +37,9 @@ function VendorOnboardingInner() {
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [connectingStripe, setConnectingStripe] = useState(false);
+  // `stripeConnected` (store) now means "payout bank account added".
+  const [bank, setBank] = useState({ account_holder: "", iban: "", bank_name: "", mobile: "", city: "" });
+  const [bankError, setBankError] = useState<string | null>(null);
 
   // Error states for Image 2 and Image 3
   const [duplicateCrError, setDuplicateCrError] = useState(false);
@@ -208,35 +212,19 @@ function VendorOnboardingInner() {
     handleStepChange(4);
   };
 
-  const handleConnectStripe = async () => {
+  /** Save the payout IBAN (optional at this step). Nooi verifies it before
+   *  any payout, so a saved account is "added", not "connected". */
+  const handleSaveBank = async () => {
+    setBankError(null);
     setConnectingStripe(true);
-    await new Promise((r) => setTimeout(r, 1400));
-    setStripeConnected(true);
+    const res = await saveVendorPayoutAccount(bank);
     setConnectingStripe(false);
-
-    try {
-      const supabase = createClient();
-      let token = (await supabase.auth.getSession()).data.session?.access_token;
-      if (!token && accountData.workEmail && accountData.password) {
-        await supabase.auth.signInWithPassword({
-          email: accountData.workEmail,
-          password: accountData.password,
-        });
-        token = (await supabase.auth.getSession()).data.session?.access_token;
-      }
-      await fetch("/api/vendor/submit", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          workEmail: accountData.workEmail,
-          businessName: accountData.businessName,
-          payoutConnected: true,
-        }),
-      });
-    } catch {}
+    if (!res.success) {
+      setBankError(typeof res.error === "string" ? res.error : "Could not save the bank account. You can add it later in Payments.");
+      return;
+    }
+    setStripeConnected(true);
+    handleStepChange(5);
   };
 
   const handleFinalSubmit = async (e: React.FormEvent) => {
@@ -277,7 +265,6 @@ function VendorOnboardingInner() {
           vatNumber: legalDocs.vatNumber,
           taxId: legalDocs.taxId,
           registeredAddress: legalDocs.registeredAddress,
-          payoutConnected: stripeConnected,
         }),
       });
     } catch {
@@ -696,45 +683,55 @@ function VendorOnboardingInner() {
             {currentStep === 4 && (
               <div className="flex flex-col gap-6">
                 <div>
-                  <h1 className="text-[26px] font-semibold text-[#101212] mb-1.5 leading-tight">Get paid with Stripe</h1>
-                  <p className="text-[14px] text-[#4B4F4F] m-0">Nooi pays out through Stripe. You add your bank account and withdrew there.</p>
+                  <h1 className="text-[26px] font-semibold text-[#101212] mb-1.5 leading-tight">How you get paid</h1>
+                  <p className="text-[14px] text-[#4B4F4F] m-0">Customers pay Nooi. Nooi pays your share of each delivered order to your Saudi bank account.</p>
                 </div>
 
-                {/* Stripe account card */}
                 <div className="border border-gray-300 rounded-lg p-5 flex flex-col gap-4 bg-white">
                   <div className="flex items-center justify-between">
-                    <span className="text-[14px] font-semibold text-[#101212]">Stripe account</span>
+                    <span className="text-[14px] font-semibold text-[#101212]">Bank account (IBAN)</span>
                     <span className={["text-[12px] font-medium px-2.5 py-1 rounded-full", stripeConnected ? "bg-[#EAF7F5] text-[#004643]" : "bg-[#F4F5F5] text-[#646968]"].join(" ")}>
-                      {stripeConnected ? "Connected" : "Not connected"}
+                      {stripeConnected ? "Added" : "Not added"}
                     </span>
                   </div>
                   {stripeConnected ? (
-                    <div className="flex items-center gap-2 text-[13px] text-[#28603A]">
-                      <span className="w-5 h-5 rounded-full bg-[#004643] text-white flex items-center justify-center text-[10px] shrink-0 font-bold">✓</span>
-                      Your Stripe account is connected. Payouts start after approval.
-                    </div>
+                    <div className="text-[13px] text-[#28603A]">Your bank account is saved. Nooi verifies it before your first payout.</div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={handleConnectStripe}
-                      disabled={connectingStripe}
-                      className="self-start bg-[#004643] hover:bg-[#003836] text-white border-0 rounded-lg px-5 py-[10px] text-[14px] font-semibold transition-colors cursor-pointer disabled:opacity-60 flex items-center gap-2"
-                    >
-                      {connectingStripe && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                      {connectingStripe ? "Connecting..." : "Connect with Stripe"}
-                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="sm:col-span-2 text-[12px] font-medium text-[#646968]">Account holder (exactly as on the bank account)
+                        <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1" value={bank.account_holder} onChange={e => setBank({ ...bank, account_holder: e.target.value })} />
+                      </label>
+                      <label className="sm:col-span-2 text-[12px] font-medium text-[#646968]">IBAN
+                        <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1 font-mono" placeholder="SA00 0000 0000 0000 0000 0000" value={bank.iban} onChange={e => setBank({ ...bank, iban: e.target.value })} />
+                      </label>
+                      <label className="text-[12px] font-medium text-[#646968]">Bank name
+                        <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1" value={bank.bank_name} onChange={e => setBank({ ...bank, bank_name: e.target.value })} />
+                      </label>
+                      <label className="text-[12px] font-medium text-[#646968]">City
+                        <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1" value={bank.city} onChange={e => setBank({ ...bank, city: e.target.value })} />
+                      </label>
+                      <label className="text-[12px] font-medium text-[#646968]">Mobile
+                        <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1" placeholder="+9665XXXXXXXX" value={bank.mobile} onChange={e => setBank({ ...bank, mobile: e.target.value })} />
+                      </label>
+                      <div className="flex items-end">
+                        <button type="button" onClick={handleSaveBank} disabled={connectingStripe}
+                          className="bg-[#004643] hover:bg-[#003836] text-white border-0 rounded-lg px-5 py-[10px] text-[14px] font-semibold cursor-pointer disabled:opacity-60 flex items-center gap-2">
+                          {connectingStripe && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                          {connectingStripe ? "Saving..." : "Save bank account"}
+                        </button>
+                      </div>
+                      {bankError && <p className="sm:col-span-2 text-[13px] text-[#812F28] m-0">{bankError}</p>}
+                    </div>
                   )}
                 </div>
 
-                {/* Info note */}
                 <div className="bg-[#F8FAF9] border border-[#EAEDEC] rounded-lg px-4 py-3 text-[13px] text-[#4B4F4F] leading-relaxed">
-                  You can skip this and connect later from Payments. Payouts start once Stripe verifies your account.
+                  You can skip this and add it later from Payments. Payouts start once Nooi has verified the account.
                 </div>
 
-                {/* Nav */}
                 <div className="flex items-center justify-between gap-3 flex-wrap pt-4 border-t border-gray-300">
                   <button type="button" onClick={() => handleStepChange(3)} className="bg-transparent border-0 py-2.5 text-[14px] text-[#4B4F4F] hover:text-[#101212] transition-colors cursor-pointer">← Back</button>
-                  <button type="button" onClick={() => handleStepChange(5)} className="bg-[#004643] hover:bg-[#003836] text-white border-0 rounded-lg px-5 py-[12px] text-[15px] font-medium cursor-pointer">Continue</button>
+                  <button type="button" onClick={() => handleStepChange(5)} className="bg-[#004643] hover:bg-[#003836] text-white border-0 rounded-lg px-5 py-[12px] text-[15px] font-medium cursor-pointer">{stripeConnected ? "Continue" : "Skip for now"}</button>
                 </div>
               </div>
             )}
@@ -778,12 +775,12 @@ function VendorOnboardingInner() {
                     <button type="button" onClick={() => handleStepChange(3)} className="text-[13px] font-medium text-[#004643] hover:underline shrink-0 cursor-pointer bg-transparent border-0">Edit</button>
                   </div>
 
-                  {/* Stripe payouts */}
+                  {/* Payout bank account */}
                   <div className="border border-gray-300 rounded-lg px-5 py-4 flex items-start justify-between gap-4 bg-white">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[14px] font-semibold text-[#101212]">Stripe payouts</span>
+                      <span className="text-[14px] font-semibold text-[#101212]">Payout bank account</span>
                       <span className="text-[13px] text-[#646968]">
-                        {stripeConnected ? "Stripe account connected" : "Not connected — you can connect after approval"}
+                        {stripeConnected ? "Bank account added — Nooi verifies it before your first payout" : "Not added — you can add it later in Payments"}
                       </span>
                     </div>
                     <button type="button" onClick={() => handleStepChange(4)} className="text-[13px] font-medium text-[#004643] hover:underline shrink-0 cursor-pointer bg-transparent border-0">Edit</button>
