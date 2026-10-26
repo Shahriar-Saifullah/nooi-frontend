@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import VendorPaymentsPanel from "@/components/vendor/VendorPaymentsPanel";
+import VendorSupportPanel from "@/components/support/SupportCenter";
+import ListingReviewActions, { listingUiStatus } from "@/components/vendor/ListingReviewActions";
 import { useVendorStore } from "@/lib/store";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -11,6 +13,7 @@ import {
   dispatchVendorShipment,
   updateVendorShipmentStatus,
   updateVendorOrderStage,
+  requestShipmentCancellation,
   type VendorShipment,
   type VendorOrdersData,
 } from "@/lib/api/vendor";
@@ -167,6 +170,8 @@ export default function VendorDashboardView({
     vars: Array<{ id: string; name: string; sku: string; stock: string }>;
     imgCount: number;
     status: "pending_review" | "live" | "changes_requested" | "draft" | "deactivated";
+    /** Why Nooi sent it back or took it off sale. */
+    reviewNote?: string | null;
     updatedAt: Date;
   }>>([]);
   const productsRef = useRef(products);
@@ -548,8 +553,9 @@ export default function VendorDashboardView({
               stock: String(v.stock_quantity || "10"),
             })),
             imgCount: (p.product_variants?.[0]?.images || []).length || 1,
-            status: "live" as const,
-            updatedAt: new Date(p.created_at || Date.now()),
+            status: listingUiStatus(p.listing_status),
+            reviewNote: p.review_note ?? null,
+            updatedAt: new Date(p.reviewed_at || p.submitted_at || p.created_at || Date.now()),
           }));
           setProducts((prev) => {
             const apiIds = new Set(apiProducts.map((p: any) => p.id));
@@ -1112,14 +1118,15 @@ export default function VendorDashboardView({
           stock: String(v.stock_quantity || v.stock || "10"),
         })),
         imgCount: finalImages.length,
-        status: "live" as const,
+        status: listingUiStatus(created.listing_status ?? "pending"),
+        reviewNote: null,
         updatedAt: new Date(created.created_at || Date.now()),
       };
 
       setProducts((prev) => [newProductEntry, ...prev.filter((p) => p.id !== created.id)]);
       setIsNewListingOpen(false);
       setActiveNav("products");
-      showToast("Listing published! Your furniture is now live on the marketplace.");
+      showToast("Listing submitted. Nooi reviews new listings within 1 business day.");
 
       // Align state with backend
       syncVendorListingsAndOrders();
@@ -2734,8 +2741,8 @@ export default function VendorDashboardView({
 
                   {/* Product rows */}
                   {filtered.map((p, i) => (
+                    <Fragment key={p.id}>
                     <div
-                      key={p.id}
                       style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 20px", borderTop: i === 0 ? "none" : "1px solid #F1F4F4", cursor: "pointer", transition: "background 0.1s" }}
                       onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#FBFCFC"; }}
                       onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ""; }}
@@ -2792,6 +2799,16 @@ export default function VendorDashboardView({
                         {relativeTime(p.updatedAt)}
                       </span>
                     </div>
+                    {(p.status === "changes_requested" || p.status === "deactivated") && (
+                      <ListingReviewActions
+                        product={{ id: p.id, title: p.title, price: p.price, status: p.status, reviewNote: p.reviewNote ?? null }}
+                        onChanged={(next) => {
+                          setProducts((prev) => prev.map((x) => x.id === p.id ? { ...x, ...next, updatedAt: new Date() } : x));
+                          showToast("Sent to Nooi for review.");
+                        }}
+                      />
+                    )}
+                    </Fragment>
                   ))}
                 </div>
               </div>
@@ -2814,116 +2831,7 @@ export default function VendorDashboardView({
           {activeNav === "payments" && <VendorPaymentsPanel />}
 
           {/* ── SECTION 6: SUPPORT ── */}
-          {activeNav === "support" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-                <div>
-                  <h1 style={{ fontSize: "24px", fontWeight: 600, margin: 0, color: "#101212" }}>Support</h1>
-                  <p style={{ margin: "2px 0 0", color: "#646968", fontSize: "14px" }}>
-                    Conversations with the Nooi team. Replies within 1 business day.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  style={{
-                    background: "#004643",
-                    color: "#FFFFFF",
-                    border: "none",
-                    borderRadius: "8px",
-                    padding: "9px 14px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  New message
-                </button>
-              </div>
-
-              <div style={{ background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "12px", overflow: "hidden" }}>
-                {/* Thread 1 */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                    padding: "16px 20px",
-                    borderBottom: "1px solid #F1F4F4",
-                  }}
-                >
-                  <div style={{ flex: "1 1 260px", display: "flex", flexDirection: "column", minWidth: 0 }}>
-                    <span style={{ fontSize: "14px", fontWeight: 600, color: "#101212" }}>
-                      Cancellation request - NO-10477
-                    </span>
-                    <span style={{ fontSize: "12px", color: "#646968", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      Thanks. We have asked the shopper whether they will wait until 28 Oct. Keep the order on hold until we reply.
-                    </span>
-                  </div>
-                  <span style={{ flex: "0 1 110px", fontSize: "12px", color: "#4B4F4F" }}>Cancellation</span>
-                  <span style={{ flex: "0 1 160px" }}>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "5px",
-                        background: "#EAF7F5",
-                        color: "#00635E",
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        padding: "2px 8px",
-                        borderRadius: "999px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      <span style={{ width: "5px", height: "5px", borderRadius: "999px", background: "#00635E" }} />
-                      With Nooi admin
-                    </span>
-                  </span>
-                  <span style={{ flex: "0 1 90px", fontSize: "12px", color: "#646968", textAlign: "right" }}>Yesterday</span>
-                </div>
-
-                {/* Thread 2 */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                    padding: "16px 20px",
-                  }}
-                >
-                  <div style={{ flex: "1 1 260px", display: "flex", flexDirection: "column", minWidth: 0 }}>
-                    <span style={{ fontSize: "14px", fontWeight: 600, color: "#101212" }}>
-                      Second outlet registration
-                    </span>
-                    <span style={{ fontSize: "12px", color: "#646968", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      Done — Jeddah is now linked as an outlet of Atelier Rawda. Listings stay under one store.
-                    </span>
-                  </div>
-                  <span style={{ flex: "0 1 110px", fontSize: "12px", color: "#4B4F4F" }}>Account</span>
-                  <span style={{ flex: "0 1 160px" }}>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "5px",
-                        background: "#F4FFF6",
-                        color: "#28603A",
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        padding: "2px 8px",
-                        borderRadius: "999px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      <span style={{ width: "5px", height: "5px", borderRadius: "999px", background: "#28603A" }} />
-                      Resolved
-                    </span>
-                  </span>
-                  <span style={{ flex: "0 1 90px", fontSize: "12px", color: "#646968", textAlign: "right" }}>12 Sep</span>
-                </div>
-              </div>
-            </div>
-          )}
+          {activeNav === "support" && <VendorSupportPanel audience="vendor" />}
 
           {/* ── SECTION 7: SETTINGS ── */}
           {activeNav === "settings" && (
@@ -4260,7 +4168,8 @@ export default function VendorDashboardView({
         const hasNext = !!NEXT_LABEL[o.status];
         const needsTrack = next === "shipped";
         const isRts = o.status === "rts";
-        const canCancel = ["paid", "processing", "materials"].includes(o.status);
+        // Any time before delivery the vendor can ask Nooi to cancel their part.
+        const canCancel = o.status !== "delivered";
         const OX_addrAuto = !!(o.addr && o.addr.auto);
         const OX_addrAdmin = !!(o.addr && !o.addr.auto);
         const deltas = o.lines.filter(l => l.now).map(l => ({ n: l.n, paid: sar(l.p), now: sar(l.now!), diff: "+" + sar(l.now! - l.p) }));
@@ -4439,7 +4348,13 @@ export default function VendorDashboardView({
                       <textarea rows={3} value={cancelReason} onChange={e => { setCancelReason(e.target.value); setCancelErr(""); }} style={{ padding: "10px", border: "1px solid #D5DBDA", borderRadius: "8px", fontSize: "13px", resize: "vertical", fontFamily: "inherit" }} />
                       {cancelErr && <div style={{ fontSize: "12px", color: "#812F28" }}>{cancelErr}</div>}
                       <div style={{ display: "flex", gap: "8px" }}>
-                        <button type="button" onClick={() => { if (cancelReason.trim().length < 10) { setCancelErr("Add a reason of at least 10 characters. Nooi admin reads it before deciding."); return; } setCancelMode(false); setCancelReason(""); showToast(`Request sent to Nooi admin. Keep the order on hold until they decide.`); }} style={{ background: "#A0483E", color: "#FFFFFF", border: "none", borderRadius: "8px", padding: "8px 14px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Send request</button>
+                        <button type="button" onClick={async () => {
+                          if (cancelReason.trim().length < 10) { setCancelErr("Add a reason of at least 10 characters. Nooi admin reads it before deciding."); return; }
+                          const res = await requestShipmentCancellation(o.shipmentId || o.rawOrderId || o.id, cancelReason.trim());
+                          if (!res.success) { setCancelErr(typeof res.error === "string" ? res.error : "Could not send the request."); return; }
+                          setCancelMode(false); setCancelReason("");
+                          showToast("Request sent to Nooi admin. Keep the order on hold until they decide.");
+                        }} style={{ background: "#A0483E", color: "#FFFFFF", border: "none", borderRadius: "8px", padding: "8px 14px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Send request</button>
                         <button type="button" onClick={() => { setCancelMode(false); setCancelErr(""); }} style={{ background: "none", border: "1px solid #D5DBDA", borderRadius: "8px", padding: "8px 14px", fontSize: "13px", cursor: "pointer" }}>Keep order</button>
                       </div>
                     </div>

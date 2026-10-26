@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { Package, ChevronRight, Loader2, AlertCircle, Truck, Check } from "lucide-react";
 
 import ShopHeader from "@/components/marketplace/ShopHeader";
+import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import {
   getUserOrders, deriveOrderStage,
@@ -104,7 +105,7 @@ function OrdersInner() {
   const money = useCallback(
     (v: number) =>
       toArabicDigits(
-        `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        formatMoney(v, DEFAULT_CURRENCY),
       ),
     [toArabicDigits],
   );

@@ -784,3 +784,151 @@ export async function markShipmentDelivered(orderId: string, shipmentId: string,
     body: { note },
   });
 }
+
+
+// ─── Operations: listings, cancellations, support, settings ──────────────────
+
+export interface OpsCounts { listings: number; cancellations: number; support: number }
+export async function getOpsCounts(): Promise<ApiResponse<OpsCounts>> {
+  return requestApi<OpsCounts>({ path: "/admin/ops/counts", method: "GET" });
+}
+
+export type ListingStatus = "pending" | "approved" | "rejected" | "deactivated";
+export interface ListingRow {
+  id: string;
+  title: string;
+  category: string | null;
+  type_id: string | null;
+  base_price: number;
+  listing_status: ListingStatus;
+  review_note: string | null;
+  submitted_at: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  specs_json: Record<string, unknown> | null;
+  retailers: { id: string; name: string; vendor_id: string | null } | null;
+  product_variants: { id: string; sku: string; images: string[] | null; stock_quantity: number; price: number }[];
+}
+export async function listListings(tab: string, search?: string): Promise<ApiResponse<{ listings: ListingRow[]; counts: Record<string, number> }>> {
+  const q = new URLSearchParams({ tab });
+  if (search) q.set("search", search);
+  return requestApi({ path: `/admin/listings?${q.toString()}`, method: "GET" });
+}
+export type ListingDetail = Omit<ListingRow, "retailers"> & {
+  description: string | null;
+  lead_time_days: number | null;
+  is_returnable: boolean;
+  canvas_model_id: string;
+  retailers: { id: string; name: string; vendor_id: string | null; commission_rate: number } | null;
+};
+export async function getListing(id: string): Promise<ApiResponse<{ listing: ListingDetail }>> {
+  return requestApi({ path: `/admin/listings/${encodeURIComponent(id)}`, method: "GET" });
+}
+export async function decideListing(id: string, action: "approve" | "reject" | "deactivate" | "reactivate", note?: string): Promise<ApiResponse<{ listing_status: ListingStatus }>> {
+  return requestApi({ path: `/admin/listings/${encodeURIComponent(id)}/decision`, method: "POST", body: { action, note } });
+}
+
+export interface CancellationRow {
+  id: string;
+  order_id: string;
+  shipment_id: string | null;
+  requester_role: "customer" | "vendor";
+  reason: string;
+  status: "requested" | "processing" | "approved" | "declined";
+  refund_amount: number | null;
+  decision_note: string | null;
+  created_at: string;
+  decided_at: string | null;
+  orders: { order_number: string; total_amount: number; currency: string; status: string; shipping_address: { fullName?: string } | null } | null;
+  order_shipments: { shipment_status: string; retailers: { name: string } | null } | null;
+}
+export async function listCancellations(tab: string): Promise<ApiResponse<{ requests: CancellationRow[]; open_count: number }>> {
+  return requestApi({ path: `/admin/cancellations?tab=${encodeURIComponent(tab)}`, method: "GET" });
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- nested order/ticket shape, read loosely by the page
+export async function getCancellation(id: string): Promise<ApiResponse<{ request: any; refund_preview: number | null }>> {
+  return requestApi({ path: `/admin/cancellations/${encodeURIComponent(id)}`, method: "GET" });
+}
+export async function approveCancellation(id: string, note?: string): Promise<ApiResponse<{ refunded: number; refund_id: string | null }>> {
+  return requestApi({ path: `/admin/cancellations/${encodeURIComponent(id)}/approve`, method: "POST", body: { note } });
+}
+export async function declineCancellation(id: string, note: string): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: `/admin/cancellations/${encodeURIComponent(id)}/decline`, method: "POST", body: { note } });
+}
+
+export interface TicketRow {
+  id: string;
+  number: number;
+  subject: string;
+  category: string;
+  status: "open" | "waiting" | "resolved";
+  requester_role: "customer" | "vendor";
+  requester_name: string | null;
+  order_id: string | null;
+  admin_unread: boolean;
+  last_message_at: string;
+  created_at: string;
+  orders: { order_number: string } | null;
+}
+export interface TicketMessage { id: string; author_role: "customer" | "vendor" | "admin"; body: string; created_at: string }
+export async function listSupportTickets(tab: string, search?: string): Promise<ApiResponse<{ tickets: TicketRow[]; counts: Record<string, number> }>> {
+  const q = new URLSearchParams({ tab });
+  if (search) q.set("search", search);
+  return requestApi({ path: `/admin/support?${q.toString()}`, method: "GET" });
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- nested order/ticket shape, read loosely by the page
+export async function getSupportTicket(id: string): Promise<ApiResponse<{ ticket: any; messages: TicketMessage[]; requester: { name: string | null; role: string | null; email: string | null } }>> {
+  return requestApi({ path: `/admin/support/${encodeURIComponent(id)}`, method: "GET" });
+}
+export async function replySupportTicket(id: string, body: string, status: "waiting" | "resolved"): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: `/admin/support/${encodeURIComponent(id)}/reply`, method: "POST", body: { body, status } });
+}
+export async function setSupportStatus(id: string, status: "open" | "waiting" | "resolved"): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: `/admin/support/${encodeURIComponent(id)}/status`, method: "POST", body: { status } });
+}
+
+export interface PlatformSettings {
+  default_commission_rate: number;
+  payout_hold_days: number;
+  return_window_days: number;
+  min_payout_sar: number;
+  support_email: string | null;
+  support_phone: string | null;
+  legal_name: string | null;
+  legal_address: string | null;
+  vat_number: string | null;
+  cr_number: string | null;
+  updated_at?: string | null;
+}
+export async function getPlatformSettings(): Promise<ApiResponse<{ settings: PlatformSettings; can_edit: boolean }>> {
+  return requestApi({ path: "/admin/settings", method: "GET" });
+}
+export async function updatePlatformSettings(patch: Partial<PlatformSettings>): Promise<ApiResponse<{ settings: PlatformSettings }>> {
+  return requestApi({ path: "/admin/settings", method: "PUT", body: patch });
+}
+export interface PaymentStatus {
+  provider: string;
+  mode: "live" | "test" | "unset";
+  currency: string;
+  keys: { secret: boolean; publishable: boolean };
+  webhook_secret_set: boolean;
+  payout_source_set: boolean;
+  payout_purpose: string;
+  methods: string[];
+  last_webhook: { event_type: string; status: string; created_at: string } | null;
+  failed_webhooks_7d: number;
+  last_payout: { status: string; created_at: string } | null;
+  warnings: string[];
+}
+export async function getPaymentStatus(): Promise<ApiResponse<PaymentStatus>> {
+  return requestApi({ path: "/admin/settings/payments", method: "GET" });
+}
+export async function getMe(): Promise<ApiResponse<{ id: string; email: string; full_name: string | null; role: string }>> {
+  return requestApi({ path: "/admin/me", method: "GET" });
+}
+export async function updateMe(full_name: string): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: "/admin/me", method: "PUT", body: { full_name } });
+}
+export async function changeMyPassword(current_password: string, new_password: string): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: "/admin/me/password", method: "PUT", body: { current_password, new_password } });
+}

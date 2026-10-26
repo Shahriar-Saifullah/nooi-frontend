@@ -483,3 +483,15 @@ export async function saveVendorPayoutAccount(payload: {
     return { success: false, error: err?.message || "Network error saving the bank account" };
   }
 }
+
+// ── Cancellation requests (vendor) ──────────────────────────────────────────
+// A vendor who can't fulfil their part of an order asks Nooi to cancel it;
+// Nooi refunds the customer and removes it from the vendor's list.
+
+export async function getShipmentCancellation(shipmentId: string): Promise<ApiResponse<{ request: { id: string; status: string; reason: string; decision_note: string | null; created_at: string } | null }>> {
+  return requestApi({ path: `/vendor/orders/${encodeURIComponent(shipmentId)}/cancellation`, method: "GET" });
+}
+
+export async function requestShipmentCancellation(shipmentId: string, reason: string): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: `/vendor/orders/${encodeURIComponent(shipmentId)}/cancellation`, method: "POST", body: { reason } });
+}

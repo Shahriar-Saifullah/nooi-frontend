@@ -139,6 +139,10 @@ export async function GET(req: Request) {
         lead_time_days,
         specs_json,
         created_at,
+        listing_status,
+        review_note,
+        submitted_at,
+        reviewed_at,
         product_variants (*)
       `)
       .in("retailer_id", retailerIds)
@@ -216,7 +220,7 @@ export async function POST(req: Request) {
     }
 
     // 1. Verify or initialize vendor profile.
-    let { data: vendorProfile, error: vpErr } = await adminClient
+    const { data: vendorProfile, error: vpErr } = await adminClient
       .from("vendor_profiles")
       .select("status, business_name, store_name, business_email")
       .eq("id", userId)
@@ -230,32 +234,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // Only an approved vendor can list. This route used to create an approved
+    // profile on the fly, and to approve a pending application on the spot
+    // ("so product can be listed immediately") — which let anyone skip vendor
+    // review by posting a listing. Approval belongs to admins only.
     if (!vendorProfile) {
-      const vStoreName = body.storeName || body.businessName || "Vendor Store";
-      const { data: newVp, error: createVpErr } = await adminClient
-        .from("vendor_profiles")
-        .insert({
-          id: userId,
-          business_name: body.businessName || vStoreName,
-          store_name: vStoreName,
-          business_email: body.workEmail || undefined,
-          status: "approved",
-        })
-        .select("status, business_name, store_name, business_email")
-        .single();
-
-      if (createVpErr) {
-        console.error("[Vendor Listings POST] Failed to initialize vendor profile:", createVpErr.message);
-      } else {
-        vendorProfile = newVp;
-      }
-    } else if (vendorProfile.status === "pending" || vendorProfile.status === "draft") {
-      // Auto-approve vendor application so product can be listed immediately
-      await adminClient
-        .from("vendor_profiles")
-        .update({ status: "approved" })
-        .eq("id", userId);
-      vendorProfile.status = "approved";
+      return NextResponse.json(
+        { success: false, error: "Finish your vendor application before creating listings." },
+        { status: 403 }
+      );
+    }
+    if (vendorProfile.status === "pending" || vendorProfile.status === "draft") {
+      return NextResponse.json(
+        { success: false, error: "Your vendor application is still being reviewed. You can add listings once it's approved." },
+        { status: 403 }
+      );
     } else if (vendorProfile.status === "rejected" || vendorProfile.status === "suspended") {
       const reason =
         vendorProfile.status === "rejected"
@@ -322,12 +315,15 @@ export async function POST(req: Request) {
         // and the order confirmation email. Made-to-order and custom sizes are
         // non-returnable by design; In stock items follow the standard window.
         is_returnable: Boolean(is_returnable),
+        // Hidden from shoppers until a Nooi admin approves it (/admin/listings).
+        listing_status: "pending",
+        submitted_at: new Date().toISOString(),
         specs_json: {
           kind: type || "Made to order",
           stock: stock || "4",
           model_url: model_url || undefined,
           has_3d: Boolean(model_url),
-          published_immediately: true,
+          published_immediately: false,
         },
       })
       .select()
@@ -403,7 +399,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "Listing published to marketplace successfully.",
+      message: "Listing submitted. Nooi reviews new listings within 1 business day.",
       product: {
         ...newProduct,
         variants: createdVariants || variantRows,
@@ -416,5 +412,87 @@ export async function POST(req: Request) {
       { success: false, error: err.message || "Failed to create listing." },
       { status: 500 }
     );
+  }
+}
+
+/**
+ * PATCH /api/vendor/listings  { id, action: "resubmit" | "deactivate", title?, description?, price? }
+ *
+ *   resubmit    a listing sent back for changes (or taken off sale) goes back
+ *               into the admin review queue, with any edits applied.
+ *   deactivate  the vendor takes their own live listing off sale.
+ *
+ * Editing a live listing's title, description or price also sends it back to
+ * review: what shoppers see must always be something an admin approved.
+ */
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+    const { id, action } = body || {};
+    if (!id || !["resubmit", "deactivate", "edit"].includes(action)) {
+      return NextResponse.json({ success: false, error: "id and a valid action are required." }, { status: 400 });
+    }
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json({ success: false, error: "Supabase service role credentials not configured." }, { status: 500 });
+    }
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+    const { userId, role } = await resolveVendorUser(req, {});
+    if (!userId || role !== "vendor") {
+      return NextResponse.json({ success: false, error: "Not authenticated as a vendor." }, { status: 401 });
+    }
+
+    const { data: product } = await adminClient
+      .from("products")
+      .select("id, listing_status, retailer_id, retailers!inner ( vendor_id )")
+      .eq("id", id)
+      .maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (!product || (product as any).retailers?.vendor_id !== userId) {
+      return NextResponse.json({ success: false, error: "Listing not found." }, { status: 404 });
+    }
+
+    const now = new Date().toISOString();
+    const edits: Record<string, unknown> = {};
+    if (typeof body.title === "string" && body.title.trim()) edits.title = body.title.trim().slice(0, 140);
+    if (typeof body.description === "string") edits.description = body.description.trim().slice(0, 4000);
+    const price = body.price !== undefined ? parseFloat(body.price) : NaN;
+    if (!Number.isNaN(price)) {
+      if (!(price > 0)) return NextResponse.json({ success: false, error: "Price must be above zero." }, { status: 400 });
+      edits.base_price = price;
+    }
+
+    let next: string;
+    if (action === "deactivate") {
+      if (product.listing_status !== "approved" && product.listing_status !== "pending") {
+        return NextResponse.json({ success: false, error: "Only a live or waiting listing can be taken off sale." }, { status: 409 });
+      }
+      next = "deactivated";
+    } else {
+      // resubmit, or an edit — both go (back) to review
+      next = "pending";
+    }
+
+    const { data: updated, error } = await adminClient
+      .from("products")
+      .update({ ...edits, listing_status: next, ...(next === "pending" ? { submitted_at: now, review_note: null } : {}) })
+      .eq("id", id)
+      .select("id, title, base_price, description, listing_status, review_note, submitted_at")
+      .single();
+    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+
+    if (!Number.isNaN(price) && price > 0) {
+      await adminClient.from("product_variants").update({ price }).eq("product_id", id);
+    }
+    return NextResponse.json({
+      success: true,
+      product: updated,
+      message: next === "pending" ? "Sent to Nooi for review." : "Taken off sale.",
+    });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
+    console.error("[Vendor Listings PATCH Exception]:", err);
+    return NextResponse.json({ success: false, error: err.message || "Failed to update listing." }, { status: 500 });
   }
 }

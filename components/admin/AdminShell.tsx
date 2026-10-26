@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
-import { getVendorQueue } from "@/lib/api/admin";
+import { getVendorQueue, getOpsCounts, type OpsCounts } from "@/lib/api/admin";
 
 interface NavItem {
   label: string;
@@ -51,6 +51,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checking, setChecking] = useState(true);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [ops, setOps] = useState<OpsCounts | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = async () => {
@@ -85,6 +86,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         if (!cancelled && res.success) setPendingCount(res.data.counts.pending);
       })
       .catch(() => {});
+    getOpsCounts()
+      .then(res => { if (!cancelled && res.success) setOps(res.data); })
+      .catch(() => {});
     return () => { cancelled = true; };
   }, [isAdmin, pathname]);
 
@@ -105,7 +109,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           badge: pendingCount ?? undefined,
           ready: true,
         },
-        { label: "Listings", href: "/admin/listings", icon: <PackageCheck size={17} />, ready: false },
+        { label: "Listings", href: "/admin/listings", icon: <PackageCheck size={17} />, badge: ops?.listings || undefined, ready: true },
       ],
     },
     {
@@ -113,8 +117,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       items: [
         { label: "Refunds", href: "/admin/refunds", icon: <RotateCcw size={17} />, ready: true },
         { label: "Orders", href: "/admin/orders", icon: <ShoppingBag size={17} />, ready: true },
-        { label: "Cancellations", href: "/admin/cancellations", icon: <XCircle size={17} />, ready: false },
-        { label: "Support", href: "/admin/support", icon: <LifeBuoy size={17} />, ready: false },
+        { label: "Cancellations", href: "/admin/cancellations", icon: <XCircle size={17} />, badge: ops?.cancellations || undefined, ready: true },
+        { label: "Support", href: "/admin/support", icon: <LifeBuoy size={17} />, badge: ops?.support || undefined, ready: true },
       ],
     },
     {
@@ -129,7 +133,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       items: [
         { label: "Team", href: "/admin/team", icon: <UsersRound size={17} />, ready: true },
         { label: "Audit log", href: "/admin/audit", icon: <ScrollText size={17} />, ready: true },
-        { label: "Settings", href: "/admin/settings", icon: <Settings size={17} />, ready: false },
+        { label: "Settings", href: "/admin/settings", icon: <Settings size={17} />, ready: true },
       ],
     },
   ];

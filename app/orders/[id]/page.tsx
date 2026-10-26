@@ -30,6 +30,8 @@ import {
 } from "lucide-react";
 
 import ShopHeader from "@/components/marketplace/ShopHeader";
+import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
+import OrderCancelHelp from "@/components/orders/OrderCancelHelp";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import {
   getOrderById, submitReturnRequest, deriveOrderStage,
@@ -195,7 +197,7 @@ function TrackingInner() {
   const money = useCallback(
     (v: number) =>
       toArabicDigits(
-        `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        formatMoney(v, DEFAULT_CURRENCY),
       ),
     [toArabicDigits],
   );
@@ -373,6 +375,8 @@ function TrackingInner() {
             />
           ))}
         </div>
+
+        <OrderCancelHelp order={order} money={money} />
       </main>
 
       {/* Return dialog */}
