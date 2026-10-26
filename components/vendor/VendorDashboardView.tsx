@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import VendorPaymentsPanel from "@/components/vendor/VendorPaymentsPanel";
+import VendorSupportPanel from "@/components/support/SupportCenter";
+import ListingReviewActions, { listingUiStatus } from "@/components/vendor/ListingReviewActions";
 import { useVendorStore } from "@/lib/store";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -11,6 +13,7 @@ import {
   dispatchVendorShipment,
   updateVendorShipmentStatus,
   updateVendorOrderStage,
+  requestShipmentCancellation,
   type VendorShipment,
   type VendorOrdersData,
 } from "@/lib/api/vendor";
@@ -182,6 +185,8 @@ export default function VendorDashboardView({
     images: string[];
     description: string;
     status: "pending_review" | "live" | "changes_requested" | "draft" | "deactivated";
+    /** Why Nooi sent it back or took it off sale. */
+    reviewNote?: string | null;
     updatedAt: Date;
   }>>([]);
   const productsRef = useRef(products);
@@ -301,23 +306,37 @@ export default function VendorDashboardView({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Listing actions go through /api/vendor/listings, which checks the vendor
+  // owns each listing. Statuses come back from the server (listing review
+  // decides them), never guessed here.
+  const listingRequest = async (method: "PATCH" | "DELETE", body: Record<string, unknown>) => {
+    const supabase = createClient();
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+    const res = await fetch('/api/vendor/listings', {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok && data.success, data };
+  };
+  type ListingStatusResult = { id: string; status: "pending_review" | "live" | "changes_requested" | "draft" | "deactivated" };
+  const applyStatuses = (rows: ListingStatusResult[] | undefined) => {
+    if (!rows?.length) return;
+    const byId = new Map(rows.map(r => [r.id, r.status]));
+    setProducts(prev => prev.map(p => byId.has(p.id) ? { ...p, status: byId.get(p.id)!, updatedAt: new Date() } : p));
+  };
+
   const handleUnlistProduct = async (id: string, title: string) => {
     setOpenProductMenuId(null);
+    const wasOff = products.find(p => p.id === id)?.status === 'deactivated';
     try {
-      const res = await fetch('/api/vendor/listings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: 'toggle_unlist' }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setProducts(prev => prev.map(p =>
-          p.id === id ? { ...p, status: p.status === 'deactivated' ? 'live' : 'deactivated' } : p
-        ));
-        showToast(`"${title}" ${products.find(p => p.id === id)?.status === 'deactivated' ? 'relisted' : 'unlisted from marketplace'}.`);
-      } else {
-        showToast('Failed to update listing.');
-      }
+      const { ok, data } = await listingRequest('PATCH', { id, action: 'toggle_unlist' });
+      if (!ok) { showToast(data.error || 'Failed to update listing.'); return; }
+      applyStatuses(data.products);
+      const now = (data.products as ListingStatusResult[] | undefined)?.[0]?.status;
+      showToast(!wasOff ? `"${title}" unlisted from marketplace.`
+        : now === 'live' ? `"${title}" relisted.` : `"${title}" sent to Nooi for review before it goes live again.`);
     } catch { showToast('Failed to update listing.'); }
   };
 
@@ -325,18 +344,10 @@ export default function VendorDashboardView({
     setOpenProductMenuId(null);
     if (!confirm(`Delete "${title}"? This cannot be undone.`)) return;
     try {
-      const res = await fetch('/api/vendor/listings', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setProducts(prev => prev.filter(p => p.id !== id));
-        showToast(`"${title}" deleted.`);
-      } else {
-        showToast('Failed to delete listing.');
-      }
+      const { ok, data } = await listingRequest('DELETE', { id });
+      if (!ok) { showToast(data.error || 'Failed to delete listing.'); return; }
+      setProducts(prev => prev.filter(p => p.id !== id));
+      showToast(`"${title}" deleted.`);
     } catch { showToast('Failed to delete listing.'); }
   };
 
@@ -344,17 +355,11 @@ export default function VendorDashboardView({
     const ids = Object.keys(selectedProductIds);
     if (ids.length === 0) return;
     try {
-      const res = await fetch('/api/vendor/listings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, action: 'unlist' }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setProducts(prev => prev.map(p => ids.includes(p.id) ? { ...p, status: 'deactivated' } : p));
-        setSelectedProductIds({});
-        showToast(`${ids.length} listing${ids.length > 1 ? 's' : ''} unlisted.`);
-      } else { showToast('Failed to unlist listings.'); }
+      const { ok, data } = await listingRequest('PATCH', { ids, action: 'unlist' });
+      if (!ok) { showToast(data.error || 'Failed to unlist listings.'); return; }
+      applyStatuses(data.products);
+      setSelectedProductIds({});
+      showToast(`${ids.length} listing${ids.length > 1 ? 's' : ''} unlisted.`);
     } catch { showToast('Failed to unlist listings.'); }
   };
 
@@ -363,17 +368,12 @@ export default function VendorDashboardView({
     if (ids.length === 0) return;
     if (!confirm(`Delete ${ids.length} listing${ids.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
     try {
-      const res = await fetch('/api/vendor/listings', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setProducts(prev => prev.filter(p => !ids.includes(p.id)));
-        setSelectedProductIds({});
-        showToast(`${ids.length} listing${ids.length > 1 ? 's' : ''} deleted.`);
-      } else { showToast('Failed to delete listings.'); }
+      const { ok, data } = await listingRequest('DELETE', { ids });
+      if (!ok) { showToast(data.error || 'Failed to delete listings.'); return; }
+      const deleted: string[] = data.deleted || ids;
+      setProducts(prev => prev.filter(p => !deleted.includes(p.id)));
+      setSelectedProductIds({});
+      showToast(data.message && data.kept?.length ? data.message : `${deleted.length} listing${deleted.length > 1 ? 's' : ''} deleted.`);
     } catch { showToast('Failed to delete listings.'); }
   };
 
@@ -687,8 +687,9 @@ export default function VendorDashboardView({
               return imgs;
             })(),
             description: p.description || "",
-            status: (p.specs_json?.status || "live") as "pending_review" | "live" | "changes_requested" | "draft" | "deactivated",
-            updatedAt: new Date(p.created_at || Date.now()),
+            status: listingUiStatus(p.listing_status),
+            reviewNote: p.review_note ?? null,
+            updatedAt: new Date(p.reviewed_at || p.submitted_at || p.created_at || Date.now()),
           }));
           setProducts((prev) => {
             const apiIds = new Set(apiProducts.map((p: any) => p.id));
@@ -1255,14 +1256,15 @@ export default function VendorDashboardView({
         imgCount: finalImages.length,
         images: finalImages.map((img: any) => (typeof img === 'string' ? img : (img?.url || img?.src || ''))).filter((u: any): u is string => !!u),
         description: created.description || "",
-        status: "live" as const,
+        status: listingUiStatus(created.listing_status ?? "pending"),
+        reviewNote: null,
         updatedAt: new Date(created.created_at || Date.now()),
       };
 
       setProducts((prev) => [newProductEntry, ...prev.filter((p) => p.id !== created.id)]);
       setIsNewListingOpen(false);
       setActiveNav("products");
-      showToast("Listing published! Your furniture is now live on the marketplace.");
+      showToast("Listing submitted. Nooi reviews new listings within 1 business day.");
 
       // Align state with backend
       syncVendorListingsAndOrders();
@@ -3049,8 +3051,8 @@ export default function VendorDashboardView({
                     const isProdChecked = !!selectedProductIds[p.id];
                     const isProdMenuOpen = openProductMenuId === p.id;
                     return (
+                      <Fragment key={p.id}>
                       <div
-                        key={p.id}
                         style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 20px", borderTop: i === 0 ? "none" : "1px solid #F1F4F4", cursor: "pointer", transition: "background 0.1s", position: "relative" }}
                         onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#FBFCFC"; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ""; }}
@@ -3152,6 +3154,16 @@ export default function VendorDashboardView({
                           )}
                         </div>
                       </div>
+                    {(p.status === "changes_requested" || (p.status === "deactivated" && p.reviewNote)) && (
+                      <ListingReviewActions
+                        product={{ id: p.id, title: p.title, price: p.price, status: p.status, reviewNote: p.reviewNote ?? null }}
+                        onChanged={(next) => {
+                          setProducts((prev) => prev.map((x) => x.id === p.id ? { ...x, ...next, updatedAt: new Date() } : x));
+                          showToast("Sent to Nooi for review.");
+                        }}
+                      />
+                    )}
+                      </Fragment>
                     );
                   })}
                 </div>
@@ -3189,72 +3201,7 @@ export default function VendorDashboardView({
           {activeNav === "payments" && <VendorPaymentsPanel />}
 
           {/* ── SECTION 6: SUPPORT ── */}
-          {activeNav === "support" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
-                <div>
-                  <h1 style={{ fontSize: "24px", fontWeight: 600, margin: 0, color: "#101212" }}>Support</h1>
-                  <p style={{ margin: "2px 0 0", color: "#646968", fontSize: "14px" }}>
-                    Conversations with the Nooi team. Replies within 1 business day.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  style={{
-                    background: "#004643",
-                    color: "#FFFFFF",
-                    border: "none",
-                    borderRadius: "8px",
-                    padding: "9px 14px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  New message
-                </button>
-              </div>
-
-              <div
-                style={{
-                  background: "#FFFFFF",
-                  border: "1px solid #EAEDEC",
-                  borderRadius: "12px",
-                  padding: "48px 24px",
-                  textAlign: "center",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "8px",
-                }}
-              >
-                <div
-                  style={{
-                    width: "40px",
-                    height: "40px",
-                    borderRadius: "50%",
-                    background: "#F4F6F6",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#646968",
-                    marginBottom: "4px",
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
-                </div>
-                <span style={{ fontSize: "15px", fontWeight: 600, color: "#101212" }}>
-                  No messages yet
-                </span>
-                <span style={{ fontSize: "13px", color: "#646968", maxWidth: "340px", lineHeight: "1.5" }}>
-                  Conversations with the Nooi support team will appear here. Start a conversation if you need assistance.
-                </span>
-              </div>
-            </div>
-          )}
+          {activeNav === "support" && <VendorSupportPanel audience="vendor" />}
 
           {/* ── SECTION 7: SETTINGS ── */}
           {activeNav === "settings" && (
@@ -4646,7 +4593,8 @@ export default function VendorDashboardView({
         const hasNext = !!NEXT_LABEL[o.status];
         const needsTrack = next === "shipped";
         const isRts = o.status === "rts";
-        const canCancel = ["paid", "processing", "materials"].includes(o.status);
+        // Any time before delivery the vendor can ask Nooi to cancel their part.
+        const canCancel = o.status !== "delivered";
         const OX_addrAuto = !!(o.addr && o.addr.auto);
         const OX_addrAdmin = !!(o.addr && !o.addr.auto);
         const deltas = o.lines.filter(l => l.now).map(l => ({ n: l.n, paid: sar(l.p), now: sar(l.now!), diff: "+" + sar(l.now! - l.p) }));
@@ -4825,7 +4773,13 @@ export default function VendorDashboardView({
                       <textarea rows={3} value={cancelReason} onChange={e => { setCancelReason(e.target.value); setCancelErr(""); }} style={{ padding: "10px", border: "1px solid #D5DBDA", borderRadius: "8px", fontSize: "13px", resize: "vertical", fontFamily: "inherit" }} />
                       {cancelErr && <div style={{ fontSize: "12px", color: "#812F28" }}>{cancelErr}</div>}
                       <div style={{ display: "flex", gap: "8px" }}>
-                        <button type="button" onClick={() => { if (cancelReason.trim().length < 10) { setCancelErr("Add a reason of at least 10 characters. Nooi admin reads it before deciding."); return; } setCancelMode(false); setCancelReason(""); showToast(`Request sent to Nooi admin. Keep the order on hold until they decide.`); }} style={{ background: "#A0483E", color: "#FFFFFF", border: "none", borderRadius: "8px", padding: "8px 14px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Send request</button>
+                        <button type="button" onClick={async () => {
+                          if (cancelReason.trim().length < 10) { setCancelErr("Add a reason of at least 10 characters. Nooi admin reads it before deciding."); return; }
+                          const res = await requestShipmentCancellation(o.shipmentId || o.rawOrderId || o.id, cancelReason.trim());
+                          if (!res.success) { setCancelErr(typeof res.error === "string" ? res.error : "Could not send the request."); return; }
+                          setCancelMode(false); setCancelReason("");
+                          showToast("Request sent to Nooi admin. Keep the order on hold until they decide.");
+                        }} style={{ background: "#A0483E", color: "#FFFFFF", border: "none", borderRadius: "8px", padding: "8px 14px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Send request</button>
                         <button type="button" onClick={() => { setCancelMode(false); setCancelErr(""); }} style={{ background: "none", border: "1px solid #D5DBDA", borderRadius: "8px", padding: "8px 14px", fontSize: "13px", cursor: "pointer" }}>Keep order</button>
                       </div>
                     </div>

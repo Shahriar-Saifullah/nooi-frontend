@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 import AdminShell from "@/components/admin/AdminShell";
+import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import {
   getReturnsQueue, getReturnForReview, refundReturn, declineReturn,
   type ReturnRow, type ReturnCounts, type ReturnDetail,
@@ -43,7 +44,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 function money(v: number): string {
-  return `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatMoney(v, DEFAULT_CURRENCY);
 }
 
 function ageLabel(iso: string): string {

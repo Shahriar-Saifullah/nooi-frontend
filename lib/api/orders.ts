@@ -19,7 +19,7 @@
  * as complete as its slowest parcel.
  */
 
-import { requestJson, ApiError, ApiResponse } from './http';
+import { requestJson, requestApi, ApiError, ApiResponse } from './http';
 
 export interface OrderItem {
   id: string;
@@ -208,4 +208,24 @@ export async function submitReturnRequest(
   } catch (err) {
     return toFailure(err);
   }
+}
+// ── Cancellation requests (customer) ────────────────────────────────────────
+// The customer asks; Nooi approves and refunds. Only before anything ships.
+
+export interface CancellationRequest {
+  id: string;
+  status: "requested" | "processing" | "approved" | "declined";
+  reason: string;
+  decision_note: string | null;
+  refund_amount: number | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export async function getOrderCancellation(orderId: string): Promise<ApiResponse<{ request: CancellationRequest | null }>> {
+  return requestApi({ path: `/orders/${encodeURIComponent(orderId)}/cancellation`, method: "GET" });
+}
+
+export async function requestOrderCancellation(orderId: string, reason: string): Promise<ApiResponse<{ request: CancellationRequest }>> {
+  return requestApi({ path: `/orders/${encodeURIComponent(orderId)}/cancellation`, method: "POST", body: { reason } });
 }

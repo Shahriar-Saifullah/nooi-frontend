@@ -139,6 +139,10 @@ export async function GET(req: Request) {
         lead_time_days,
         specs_json,
         created_at,
+        listing_status,
+        review_note,
+        submitted_at,
+        reviewed_at,
         product_variants (*)
       `)
       .in("retailer_id", retailerIds)
@@ -216,7 +220,7 @@ export async function POST(req: Request) {
     }
 
     // 1. Verify or initialize vendor profile.
-    let { data: vendorProfile, error: vpErr } = await adminClient
+    const { data: vendorProfile, error: vpErr } = await adminClient
       .from("vendor_profiles")
       .select("status, business_name, store_name, business_email")
       .eq("id", userId)
@@ -230,32 +234,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // Only an approved vendor can list. This route used to create an approved
+    // profile on the fly, and to approve a pending application on the spot
+    // ("so product can be listed immediately") — which let anyone skip vendor
+    // review by posting a listing. Approval belongs to admins only.
     if (!vendorProfile) {
-      const vStoreName = body.storeName || body.businessName || "Vendor Store";
-      const { data: newVp, error: createVpErr } = await adminClient
-        .from("vendor_profiles")
-        .insert({
-          id: userId,
-          business_name: body.businessName || vStoreName,
-          store_name: vStoreName,
-          business_email: body.workEmail || undefined,
-          status: "approved",
-        })
-        .select("status, business_name, store_name, business_email")
-        .single();
-
-      if (createVpErr) {
-        console.error("[Vendor Listings POST] Failed to initialize vendor profile:", createVpErr.message);
-      } else {
-        vendorProfile = newVp;
-      }
-    } else if (vendorProfile.status === "pending" || vendorProfile.status === "draft") {
-      // Auto-approve vendor application so product can be listed immediately
-      await adminClient
-        .from("vendor_profiles")
-        .update({ status: "approved" })
-        .eq("id", userId);
-      vendorProfile.status = "approved";
+      return NextResponse.json(
+        { success: false, error: "Finish your vendor application before creating listings." },
+        { status: 403 }
+      );
+    }
+    if (vendorProfile.status === "pending" || vendorProfile.status === "draft") {
+      return NextResponse.json(
+        { success: false, error: "Your vendor application is still being reviewed. You can add listings once it's approved." },
+        { status: 403 }
+      );
     } else if (vendorProfile.status === "rejected" || vendorProfile.status === "suspended") {
       const reason =
         vendorProfile.status === "rejected"
@@ -322,12 +315,15 @@ export async function POST(req: Request) {
         // and the order confirmation email. Made-to-order and custom sizes are
         // non-returnable by design; In stock items follow the standard window.
         is_returnable: Boolean(is_returnable),
+        // Hidden from shoppers until a Nooi admin approves it (/admin/listings).
+        listing_status: "pending",
+        submitted_at: new Date().toISOString(),
         specs_json: {
           kind: type || "Made to order",
           stock: stock || "4",
           model_url: model_url || undefined,
           has_3d: Boolean(model_url),
-          published_immediately: true,
+          published_immediately: false,
         },
       })
       .select()
@@ -403,7 +399,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "Listing published to marketplace successfully.",
+      message: "Listing submitted. Nooi reviews new listings within 1 business day.",
       product: {
         ...newProduct,
         variants: createdVariants || variantRows,
@@ -419,64 +415,214 @@ export async function POST(req: Request) {
   }
 }
 
+/**
+ * Vendor listing actions — one PATCH, one DELETE, both authenticated.
+ * ----------------------------------------------------------------------------
+ * PATCH /api/vendor/listings  { id | ids, action, title?, description?, price? }
+ *
+ *   unlist          take listings off sale (vendor's choice)
+ *   relist          put them back: a listing the vendor took down returns to
+ *                   whatever it was before (on sale, or still in review);
+ *                   one an admin took down goes back into review instead
+ *   toggle_unlist   unlist if on sale / in review, relist if off sale
+ *   resubmit        send a listing that needs changes (or was taken down)
+ *                   back to Nooi's review queue, with any edits applied
+ *
+ * The status lives in products.listing_status (see /admin/listings). Only
+ * 'approved' listings are visible in the marketplace. specs_json.status is
+ * kept in step for older screens that still read it.
+ *
+ * DELETE /api/vendor/listings  { id | ids }
+ *   Only listings that have never been ordered can be deleted. A sold product
+ *   is part of order history (and of the vendor's earnings), so it can only be
+ *   taken off sale.
+ */
+
+type ListingRow = {
+  id: string;
+  title: string;
+  listing_status: string;
+  review_note: string | null;
+  specs_json: Record<string, unknown> | null;
+};
+
+async function vendorContext(req: Request) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return { error: NextResponse.json({ success: false, error: "Database not configured" }, { status: 500 }) };
+  }
+  const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+  const { userId, role } = await resolveVendorUser(req, {});
+  if (!userId || role !== "vendor") {
+    return { error: NextResponse.json({ success: false, error: "Not authenticated as a vendor." }, { status: 401 }) };
+  }
+  return { adminClient, userId };
+}
+
+/** The vendor's own listings among `ids` — anything else is silently not theirs. */
+async function ownListings(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  adminClient: any, userId: string, ids: string[],
+): Promise<ListingRow[]> {
+  const { data: retailers } = await adminClient.from("retailers").select("id").eq("vendor_id", userId);
+  const retailerIds = (retailers || []).map((r: { id: string }) => r.id);
+  if (retailerIds.length === 0 || ids.length === 0) return [];
+  const { data } = await adminClient
+    .from("products")
+    .select("id, title, listing_status, review_note, specs_json")
+    .in("id", ids)
+    .in("retailer_id", retailerIds);
+  return (data || []) as ListingRow[];
+}
+
+const idsFrom = (body: { ids?: unknown; id?: unknown }): string[] =>
+  (Array.isArray(body.ids) ? body.ids : body.id ? [body.id] : []).filter((x): x is string => typeof x === "string").slice(0, 200);
+
+/** listing_status → what the vendor dashboard shows (same mapping as ListingReviewActions). */
+const uiStatus = (s: string) =>
+  s === "approved" ? "live" : s === "rejected" ? "changes_requested" : s === "deactivated" ? "deactivated" : "pending_review";
+
 export async function PATCH(req: Request) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !serviceRoleKey) {
-      return NextResponse.json({ success: false, error: "Database not configured" }, { status: 500 });
-    }
-    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+    const ctx = await vendorContext(req);
+    if ("error" in ctx) return ctx.error;
+    const { adminClient, userId } = ctx;
+
     const body = await req.json();
-    const ids: string[] = body.ids || (body.id ? [body.id] : []);
-    if (ids.length === 0) {
-      return NextResponse.json({ success: false, error: "No product IDs specified" }, { status: 400 });
-    }
-    const action = body.action || "unlist";
-
-    for (const id of ids) {
-      const { data: p } = await adminClient.from("products").select("specs_json").eq("id", id).maybeSingle();
-      const currentSpecs = p?.specs_json || {};
-      const nextStatus = action === "toggle_unlist"
-        ? (currentSpecs.status === "deactivated" ? "live" : "deactivated")
-        : (action === "relist" ? "live" : "deactivated");
-
-      await adminClient.from("products").update({
-        specs_json: { ...currentSpecs, status: nextStatus },
-      }).eq("id", id);
-
-      await adminClient.from("product_variants").update({
-        is_active: nextStatus === "live",
-      }).eq("product_id", id);
+    const ids = idsFrom(body);
+    const action = String(body.action || "unlist");
+    if (ids.length === 0) return NextResponse.json({ success: false, error: "No product IDs specified" }, { status: 400 });
+    if (!["unlist", "deactivate", "relist", "toggle_unlist", "resubmit", "edit"].includes(action)) {
+      return NextResponse.json({ success: false, error: "Unknown action" }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, message: "Products updated" });
+    const listings = await ownListings(adminClient, userId, ids);
+    if (listings.length === 0) return NextResponse.json({ success: false, error: "Listing not found." }, { status: 404 });
+
+    // Edits (resubmit only, one listing at a time)
+    const edits: Record<string, unknown> = {};
+    let newPrice = NaN;
+    if (action === "resubmit" || action === "edit") {
+      if (typeof body.title === "string" && body.title.trim()) edits.title = body.title.trim().slice(0, 140);
+      if (typeof body.description === "string" && body.description.trim()) edits.description = body.description.trim().slice(0, 4000);
+      newPrice = body.price !== undefined ? parseFloat(body.price) : NaN;
+      if (!Number.isNaN(newPrice)) {
+        if (!(newPrice > 0)) return NextResponse.json({ success: false, error: "Price must be above zero." }, { status: 400 });
+        edits.base_price = newPrice;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const results: { id: string; status: string; listing_status: string }[] = [];
+
+    for (const p of listings) {
+      const specs = { ...(p.specs_json || {}) } as Record<string, unknown>;
+      const cur = p.listing_status;
+      let next = cur;
+      const wantsUnlist = action === "unlist" || action === "deactivate" || (action === "toggle_unlist" && cur !== "deactivated");
+      const wantsRelist = action === "relist" || (action === "toggle_unlist" && cur === "deactivated");
+
+      if (wantsUnlist) {
+        if (cur === "approved" || cur === "pending") {
+          next = "deactivated";
+          specs.unlisted_by_vendor = true;
+          specs.status_before_unlist = cur;
+        }
+      } else if (wantsRelist) {
+        if (cur === "deactivated") {
+          // Back to how it was if the vendor took it down; otherwise (an
+          // admin took it down) it has to be reviewed again.
+          next = specs.unlisted_by_vendor && !p.review_note && specs.status_before_unlist === "approved" ? "approved" : "pending";
+          delete specs.unlisted_by_vendor;
+          delete specs.status_before_unlist;
+        }
+      } else {
+        // resubmit / edit → review
+        next = "pending";
+        delete specs.unlisted_by_vendor;
+        delete specs.status_before_unlist;
+      }
+
+      specs.status = uiStatus(next);
+      const { error } = await adminClient.from("products").update({
+        ...edits,
+        listing_status: next,
+        specs_json: specs,
+        ...(next === "pending" && cur !== "pending" ? { submitted_at: now, review_note: null } : {}),
+      }).eq("id", p.id);
+      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+
+      await adminClient.from("product_variants")
+        .update({ is_active: next !== "deactivated", ...(!Number.isNaN(newPrice) && newPrice > 0 ? { price: newPrice } : {}) })
+        .eq("product_id", p.id);
+      results.push({ id: p.id, status: uiStatus(next), listing_status: next });
+    }
+
+    const single = results.length === 1 ? results[0] : null;
+    const { data: one } = single
+      ? await adminClient.from("products").select("id, title, base_price, description, listing_status, review_note, submitted_at").eq("id", single.id).single()
+      : { data: null };
+    return NextResponse.json({
+      success: true,
+      products: results,
+      ...(one ? { product: one } : {}),
+      message: results.some(r => r.listing_status === "pending") && !results.some(r => r.listing_status === "deactivated")
+        ? "Sent to Nooi for review."
+        : "Products updated",
+    });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error("[Vendor Listings PATCH Exception]:", err);
+    return NextResponse.json({ success: false, error: err.message || "Failed to update listing." }, { status: 500 });
   }
 }
 
 export async function DELETE(req: Request) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !serviceRoleKey) {
-      return NextResponse.json({ success: false, error: "Database not configured" }, { status: 500 });
-    }
-    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+    const ctx = await vendorContext(req);
+    if ("error" in ctx) return ctx.error;
+    const { adminClient, userId } = ctx;
+
     const body = await req.json();
-    const ids: string[] = body.ids || (body.id ? [body.id] : []);
-    if (ids.length === 0) {
-      return NextResponse.json({ success: false, error: "No product IDs specified" }, { status: 400 });
+    const ids = idsFrom(body);
+    if (ids.length === 0) return NextResponse.json({ success: false, error: "No product IDs specified" }, { status: 400 });
+
+    const listings = await ownListings(adminClient, userId, ids);
+    if (listings.length === 0) return NextResponse.json({ success: false, error: "Listing not found." }, { status: 404 });
+
+    // Never delete something that has been ordered: order items cascade with
+    // the product, so it would erase the sale from the customer's order.
+    const { data: sold } = await adminClient.from("order_items").select("product_id").in("product_id", listings.map(l => l.id));
+    const soldIds = new Set((sold || []).map((r: { product_id: string }) => r.product_id));
+    const deletable = listings.filter(l => !soldIds.has(l.id));
+    const kept = listings.filter(l => soldIds.has(l.id));
+
+    for (const p of deletable) {
+      await adminClient.from("product_variants").delete().eq("product_id", p.id);
+      const { error } = await adminClient.from("products").delete().eq("id", p.id);
+      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 });
     }
 
-    for (const id of ids) {
-      await adminClient.from("product_variants").delete().eq("product_id", id);
-      await adminClient.from("products").delete().eq("id", id);
+    if (deletable.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: kept.length === 1
+          ? `"${kept[0].title}" has been ordered, so it can't be deleted. Unlist it instead.`
+          : "These listings have been ordered, so they can't be deleted. Unlist them instead.",
+      }, { status: 409 });
     }
-
-    return NextResponse.json({ success: true, message: "Products deleted" });
+    return NextResponse.json({
+      success: true,
+      deleted: deletable.map(l => l.id),
+      kept: kept.map(l => l.id),
+      message: kept.length
+        ? `${deletable.length} deleted. ${kept.length} ha${kept.length === 1 ? "s" : "ve"} orders, so ${kept.length === 1 ? "it was" : "they were"} kept — unlist instead.`
+        : "Products deleted",
+    });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error("[Vendor Listings DELETE Exception]:", err);
+    return NextResponse.json({ success: false, error: err.message || "Failed to delete listing." }, { status: 500 });
   }
 }
