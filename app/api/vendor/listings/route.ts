@@ -418,3 +418,65 @@ export async function POST(req: Request) {
     );
   }
 }
+
+export async function PATCH(req: Request) {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json({ success: false, error: "Database not configured" }, { status: 500 });
+    }
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+    const body = await req.json();
+    const ids: string[] = body.ids || (body.id ? [body.id] : []);
+    if (ids.length === 0) {
+      return NextResponse.json({ success: false, error: "No product IDs specified" }, { status: 400 });
+    }
+    const action = body.action || "unlist";
+
+    for (const id of ids) {
+      const { data: p } = await adminClient.from("products").select("specs_json").eq("id", id).maybeSingle();
+      const currentSpecs = p?.specs_json || {};
+      const nextStatus = action === "toggle_unlist"
+        ? (currentSpecs.status === "deactivated" ? "live" : "deactivated")
+        : (action === "relist" ? "live" : "deactivated");
+
+      await adminClient.from("products").update({
+        specs_json: { ...currentSpecs, status: nextStatus },
+      }).eq("id", id);
+
+      await adminClient.from("product_variants").update({
+        is_active: nextStatus === "live",
+      }).eq("product_id", id);
+    }
+
+    return NextResponse.json({ success: true, message: "Products updated" });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRoleKey) {
+      return NextResponse.json({ success: false, error: "Database not configured" }, { status: 500 });
+    }
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey);
+    const body = await req.json();
+    const ids: string[] = body.ids || (body.id ? [body.id] : []);
+    if (ids.length === 0) {
+      return NextResponse.json({ success: false, error: "No product IDs specified" }, { status: 400 });
+    }
+
+    for (const id of ids) {
+      await adminClient.from("product_variants").delete().eq("product_id", id);
+      await adminClient.from("products").delete().eq("id", id);
+    }
+
+    return NextResponse.json({ success: true, message: "Products deleted" });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
