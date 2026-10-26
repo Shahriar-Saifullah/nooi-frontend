@@ -158,6 +158,19 @@ export default function VendorDashboardView({
   const [vendorStage, setVendorStage] = useState<VendorJourneyStage>("pending");
   const [deliveryRegionsDone, setDeliveryRegionsDone] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [userMenuOpen]);
 
   // Products list state
   const [products, setProducts] = useState<Array<{
@@ -169,6 +182,8 @@ export default function VendorDashboardView({
     stock: string;
     vars: Array<{ id: string; name: string; sku: string; stock: string }>;
     imgCount: number;
+    images: string[];
+    description: string;
     status: "pending_review" | "live" | "changes_requested" | "draft" | "deactivated";
     /** Why Nooi sent it back or took it off sale. */
     reviewNote?: string | null;
@@ -271,6 +286,114 @@ export default function VendorDashboardView({
   const [cancelErr, setCancelErr] = useState("");
   const [showPackingModal, setShowPackingModal] = useState(false);
   const [packingExported, setPackingExported] = useState(false);
+
+  // ── PRODUCT ACTION MENUS ──────────────────────────────────────────────────
+  const [selectedProductIds, setSelectedProductIds] = useState<Record<string, boolean>>({});
+  const [openProductMenuId, setOpenProductMenuId] = useState<string | null>(null);
+  const [openOrderMenuId, setOpenOrderMenuId] = useState<string | null>(null);
+  const [openProductId, setOpenProductId] = useState<string | null>(null);
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-row-menu]')) {
+        setOpenProductMenuId(null);
+        setOpenOrderMenuId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Listing actions go through /api/vendor/listings, which checks the vendor
+  // owns each listing. Statuses come back from the server (listing review
+  // decides them), never guessed here.
+  const listingRequest = async (method: "PATCH" | "DELETE", body: Record<string, unknown>) => {
+    const supabase = createClient();
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+    const res = await fetch('/api/vendor/listings', {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok && data.success, data };
+  };
+  type ListingStatusResult = { id: string; status: "pending_review" | "live" | "changes_requested" | "draft" | "deactivated" };
+  const applyStatuses = (rows: ListingStatusResult[] | undefined) => {
+    if (!rows?.length) return;
+    const byId = new Map(rows.map(r => [r.id, r.status]));
+    setProducts(prev => prev.map(p => byId.has(p.id) ? { ...p, status: byId.get(p.id)!, updatedAt: new Date() } : p));
+  };
+
+  const handleUnlistProduct = async (id: string, title: string) => {
+    setOpenProductMenuId(null);
+    const wasOff = products.find(p => p.id === id)?.status === 'deactivated';
+    try {
+      const { ok, data } = await listingRequest('PATCH', { id, action: 'toggle_unlist' });
+      if (!ok) { showToast(data.error || 'Failed to update listing.'); return; }
+      applyStatuses(data.products);
+      const now = (data.products as ListingStatusResult[] | undefined)?.[0]?.status;
+      showToast(!wasOff ? `"${title}" unlisted from marketplace.`
+        : now === 'live' ? `"${title}" relisted.` : `"${title}" sent to Nooi for review before it goes live again.`);
+    } catch { showToast('Failed to update listing.'); }
+  };
+
+  const handleDeleteProduct = async (id: string, title: string) => {
+    setOpenProductMenuId(null);
+    if (!confirm(`Delete "${title}"? This cannot be undone.`)) return;
+    try {
+      const { ok, data } = await listingRequest('DELETE', { id });
+      if (!ok) { showToast(data.error || 'Failed to delete listing.'); return; }
+      setProducts(prev => prev.filter(p => p.id !== id));
+      showToast(`"${title}" deleted.`);
+    } catch { showToast('Failed to delete listing.'); }
+  };
+
+  const handleBatchUnlistProducts = async () => {
+    const ids = Object.keys(selectedProductIds);
+    if (ids.length === 0) return;
+    try {
+      const { ok, data } = await listingRequest('PATCH', { ids, action: 'unlist' });
+      if (!ok) { showToast(data.error || 'Failed to unlist listings.'); return; }
+      applyStatuses(data.products);
+      setSelectedProductIds({});
+      showToast(`${ids.length} listing${ids.length > 1 ? 's' : ''} unlisted.`);
+    } catch { showToast('Failed to unlist listings.'); }
+  };
+
+  const handleBatchDeleteProducts = async () => {
+    const ids = Object.keys(selectedProductIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} listing${ids.length > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    try {
+      const { ok, data } = await listingRequest('DELETE', { ids });
+      if (!ok) { showToast(data.error || 'Failed to delete listings.'); return; }
+      const deleted: string[] = data.deleted || ids;
+      setProducts(prev => prev.filter(p => !deleted.includes(p.id)));
+      setSelectedProductIds({});
+      showToast(data.message && data.kept?.length ? data.message : `${deleted.length} listing${deleted.length > 1 ? 's' : ''} deleted.`);
+    } catch { showToast('Failed to delete listings.'); }
+  };
+
+  const handleCannotCompleteOrder = (id: string) => {
+    setOpenOrderMenuId(null);
+    setOpenOrderId(id);
+    setTrackingInput('');
+    setTrackingErr('');
+    setCancelMode(true);
+    setCancelReason('');
+    setCancelErr('');
+  };
+
+  const handleDeleteOrder = (id: string) => {
+    setOpenOrderMenuId(null);
+    if (!confirm(`Remove order ${id} from your list? This only hides it locally.`)) return;
+    setOrders(prev => prev.filter(o => o.id !== id));
+    setSelectedOrderIds(prev => { const n = { ...prev }; delete n[id]; return n; });
+    showToast(`${id} removed from list.`);
+  };
 
   // ── ORDER HELPERS ─────────────────────────────────────────────────────────
   const FLOW_FACTORY: OrderStatus[] = ["paid", "materials", "production", "qc", "ready", "shipped", "delivered"];
@@ -553,6 +676,17 @@ export default function VendorDashboardView({
               stock: String(v.stock_quantity || "10"),
             })),
             imgCount: (p.product_variants?.[0]?.images || []).length || 1,
+            images: (() => {
+              const imgs: string[] = [];
+              (p.product_variants || []).forEach((v: any) => {
+                (v.images || []).forEach((img: any) => {
+                  const url = typeof img === 'string' ? img : (img?.url || img?.src || '');
+                  if (url && !imgs.includes(url)) imgs.push(url);
+                });
+              });
+              return imgs;
+            })(),
+            description: p.description || "",
             status: listingUiStatus(p.listing_status),
             reviewNote: p.review_note ?? null,
             updatedAt: new Date(p.reviewed_at || p.submitted_at || p.created_at || Date.now()),
@@ -1035,6 +1169,8 @@ export default function VendorDashboardView({
           stock: nlStock,
           vars: nlVars,
           imgCount: validImages.length,
+          images: validImages.map(img => img.url).filter((u): u is string => !!u),
+          description: "",
           status: "draft" as const,
           updatedAt: new Date(),
         },
@@ -1118,6 +1254,8 @@ export default function VendorDashboardView({
           stock: String(v.stock_quantity || v.stock || "10"),
         })),
         imgCount: finalImages.length,
+        images: finalImages.map((img: any) => (typeof img === 'string' ? img : (img?.url || img?.src || ''))).filter((u: any): u is string => !!u),
+        description: created.description || "",
         status: listingUiStatus(created.listing_status ?? "pending"),
         reviewNote: null,
         updatedAt: new Date(created.created_at || Date.now()),
@@ -1156,14 +1294,15 @@ export default function VendorDashboardView({
       <aside
         style={{
           width: "248px",
-          flexShrink: 0,
+          height: "100vh",
+          position: "fixed",
+          top: 0,
+          left: 0,
           background: "#FFFFFF",
           borderRight: "1px solid #EAEDEC",
           display: "flex",
           flexDirection: "column",
-          position: "sticky",
-          top: 0,
-          height: "100vh",
+          zIndex: 20,
         }}
       >
         {/* Header section */}
@@ -1242,7 +1381,7 @@ export default function VendorDashboardView({
         </div>
 
         {/* Navigation */}
-        <nav style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: "2px" }}>
+        <nav style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: "2px", flex: 1, overflowY: "auto" }}>
           {NAV_ITEMS.map((item) => {
             const active = activeNav === item.id;
             const badgeCount =
@@ -1296,19 +1435,147 @@ export default function VendorDashboardView({
           })}
         </nav>
 
-        {/* Bottom Profile & Logout */}
+        {/* Bottom Profile & Drop-up Menu */}
         <div
+          ref={userMenuRef}
           style={{
             marginTop: "auto",
-            padding: "14px 16px",
+            padding: "12px 14px",
             borderTop: "1px solid #EAEDEC",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "8px",
+            position: "relative",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
+          {/* Drop-up Menu */}
+          {userMenuOpen && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: "calc(100% + 8px)",
+                left: "12px",
+                right: "12px",
+                background: "#FFFFFF",
+                border: "1px solid #EAEDEC",
+                borderRadius: "12px",
+                boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                padding: "8px",
+                zIndex: 50,
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+              }}
+            >
+              {/* User info header */}
+              <div
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  background: "#F8FAF9",
+                  border: "1px solid #F1F4F4",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: "#101212",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {ownerName}
+                </div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "#646968",
+                    marginTop: "2px",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                  title={accountData.workEmail || "vendor@nooi.com"}
+                >
+                  {accountData.workEmail || "vendor@nooi.com"}
+                </div>
+              </div>
+
+              {/* Logout action */}
+              <button
+                type="button"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  handleLogout();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "transparent",
+                  color: "#DC2626",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "background 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#FEF2F2";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Log out</span>
+              </button>
+            </div>
+          )}
+
+          {/* Vendor Name trigger in bottom left corner */}
+          <button
+            type="button"
+            onClick={() => setUserMenuOpen((prev) => !prev)}
+            aria-expanded={userMenuOpen}
+            title={ownerName}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              width: "100%",
+              padding: "6px 8px",
+              borderRadius: "8px",
+              border: "1px solid",
+              borderColor: userMenuOpen ? "#004643" : "transparent",
+              background: userMenuOpen ? "#F3FEFD" : "transparent",
+              cursor: "pointer",
+              textAlign: "left",
+              transition: "all 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              if (!userMenuOpen) e.currentTarget.style.background = "#F8FAF9";
+            }}
+            onMouseLeave={(e) => {
+              if (!userMenuOpen) e.currentTarget.style.background = "transparent";
+            }}
+          >
             <span
               style={{
                 width: "32px",
@@ -1326,7 +1593,7 @@ export default function VendorDashboardView({
             >
               {ownerInitials}
             </span>
-            <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
               <span
                 style={{
                   fontSize: "13px",
@@ -1341,50 +1608,29 @@ export default function VendorDashboardView({
               </span>
               <span style={{ fontSize: "11px", color: "#646968" }}>Owner</span>
             </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            title="Log out"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "5px",
-              background: "#F8FAF9",
-              border: "1px solid #E5E7EB",
-              borderRadius: "6px",
-              padding: "5px 8px",
-              fontSize: "11px",
-              fontWeight: 500,
-              color: "#4B4F4F",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = "#DC2626";
-              e.currentTarget.style.borderColor = "#FCA5A5";
-              e.currentTarget.style.background = "#FEF2F2";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#4B4F4F";
-              e.currentTarget.style.borderColor = "#E5E7EB";
-              e.currentTarget.style.background = "#F8FAF9";
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#8E9493"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                transform: userMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+                transition: "transform 0.2s ease",
+                flexShrink: 0,
+              }}
+            >
+              <polyline points="18 15 12 9 6 15" />
             </svg>
-            <span>Log out</span>
           </button>
         </div>
       </aside>
 
       {/* ── Main Area ── */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, minWidth: 0, marginLeft: "248px", display: "flex", flexDirection: "column" }}>
         {/* Top Header */}
         <header
           style={{
@@ -2477,6 +2723,8 @@ export default function VendorDashboardView({
                       <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", background: "#101212", color: "#FFFFFF", borderRadius: "12px", padding: "10px 16px" }}>
                         <span style={{ fontSize: "13px", fontWeight: 600, flex: 1 }}>{selN} selected</span>
                         <button type="button" onClick={() => { setShowPackingModal(true); setPackingExported(false); }} style={{ background: "#FFFFFF", color: "#101212", border: "none", borderRadius: "8px", padding: "7px 12px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Export packing list</button>
+                        <button type="button" onClick={() => { const ids = Object.keys(selectedOrderIds); ids.forEach(id => handleCannotCompleteOrder(id)); }} style={{ background: "#812F28", color: "#FFFFFF", border: "none", borderRadius: "8px", padding: "7px 12px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Can't complete</button>
+                        <button type="button" onClick={() => { const ids = Object.keys(selectedOrderIds); if (!confirm(`Remove ${ids.length} order${ids.length > 1 ? 's' : ''} from list?`)) return; setOrders(prev => prev.filter(o => !selectedOrderIds[o.id])); setSelectedOrderIds({}); showToast(`${ids.length} order${ids.length > 1 ? 's' : ''} removed.`); }} style={{ background: "#A0483E", color: "#FFFFFF", border: "none", borderRadius: "8px", padding: "7px 12px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Delete</button>
                         <button type="button" onClick={() => setSelectedOrderIds({})} style={{ background: "none", border: "none", color: "#D5DBDA", fontSize: "13px", cursor: "pointer" }}>Clear</button>
                       </div>
                     )}
@@ -2501,15 +2749,16 @@ export default function VendorDashboardView({
                     </div>
 
                     {/* Orders table */}
-                    <div style={{ background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "12px", overflow: "hidden" }}>
+                    <div style={{ background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "12px", overflow: "visible" }}>
                       {/* Table header */}
-                      <div style={{ display: "flex", gap: "12px", padding: "10px 20px", background: "#FBFCFC", fontSize: "12px", fontWeight: 600, color: "#646968" }}>
+                      <div style={{ display: "flex", gap: "12px", padding: "10px 20px", background: "#FBFCFC", fontSize: "12px", fontWeight: 600, color: "#646968", borderRadius: "12px 12px 0 0" }}>
                         <span style={{ width: "18px", flexShrink: 0 }} />
                         <span style={{ flex: "1 1 200px" }}>Order</span>
                         <span style={{ flex: "0 0 110px" }}>Placed</span>
                         <span style={{ flex: "0 0 130px" }}>Value</span>
                         <span style={{ flex: "0 0 170px" }}>Due</span>
                         <span style={{ flex: "0 0 130px" }}>Status</span>
+                        <span style={{ width: "32px", flexShrink: 0 }} />
                       </div>
 
                       {/* Empty state */}
@@ -2522,8 +2771,9 @@ export default function VendorDashboardView({
                         const badge = ST_BADGE[o.status] ?? ST_BADGE.paid;
                         const checked = !!selectedOrderIds[o.id];
                         const itemCount = o.lines.length + (o.lines.length > 1 ? " items" : " item");
+                        const isOrderMenuOpen = openOrderMenuId === o.id;
                         return (
-                          <div key={o.id} style={{ display: "flex", alignItems: "center", borderTop: "1px solid #F1F4F4", paddingLeft: "16px" }}>
+                          <div key={o.id} style={{ display: "flex", alignItems: "center", borderTop: "1px solid #F1F4F4", paddingLeft: "16px", position: "relative" }}>
                             {/* Checkbox */}
                             <button type="button" aria-label="Select order"
                               onClick={() => setSelectedOrderIds(prev => { const n = { ...prev }; n[o.id] ? delete n[o.id] : (n[o.id] = true); return n; })}
@@ -2535,7 +2785,7 @@ export default function VendorDashboardView({
                               onClick={() => { setOpenOrderId(o.id); setTrackingInput(""); setTrackingErr(""); setCancelMode(false); setCancelReason(""); setCancelErr(""); }}
                               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#FBFCFC"; }}
                               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}
-                              style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "6px 12px", flexWrap: "wrap", padding: "14px 20px 14px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer" }}>
+                              style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "6px 12px", flexWrap: "wrap", padding: "14px 12px 14px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer" }}>
                               {/* Order id + customer */}
                               <span style={{ flex: "1 1 200px", display: "flex", flexDirection: "column", minWidth: 0 }}>
                                 <span style={{ fontSize: "14px", fontWeight: 600, color: "#101212" }}>{o.id}</span>
@@ -2553,6 +2803,42 @@ export default function VendorDashboardView({
                                 </span>
                               </span>
                             </button>
+                            {/* 3-dot menu */}
+                            <div data-row-menu style={{ position: "relative", flexShrink: 0, width: "32px", display: "flex", alignItems: "center", justifyContent: "center", marginRight: "4px" }}>
+                              <button type="button" aria-label="Order actions"
+                                onClick={(e) => { e.stopPropagation(); setOpenOrderMenuId(isOrderMenuOpen ? null : o.id); setOpenProductMenuId(null); }}
+                                style={{ width: "28px", height: "28px", border: "none", background: isOrderMenuOpen ? "#F1F4F4" : "none", borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#646968", fontSize: "16px", fontWeight: 700, letterSpacing: "1px" }}
+                                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#F1F4F4"; }}
+                                onMouseLeave={e => { if (!isOrderMenuOpen) (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                                ···
+                              </button>
+                              {isOrderMenuOpen && (
+                                <div data-row-menu style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 50, background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)", minWidth: "180px", overflow: "hidden" }}>
+                                  <button type="button"
+                                    onClick={() => { setOpenOrderMenuId(null); setOpenOrderId(o.id); setTrackingInput(''); setTrackingErr(''); setCancelMode(false); setCancelReason(''); setCancelErr(''); }}
+                                    style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", fontSize: "13px", color: "#101212", cursor: "pointer" }}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC"; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                                    Order details
+                                  </button>
+                                  <button type="button"
+                                    onClick={() => handleCannotCompleteOrder(o.id)}
+                                    style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", fontSize: "13px", color: "#812F28", cursor: "pointer" }}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#FFF5F5"; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                                    Can't complete
+                                  </button>
+                                  <div style={{ height: "1px", background: "#F1F4F4", margin: "2px 0" }} />
+                                  <button type="button"
+                                    onClick={() => handleDeleteOrder(o.id)}
+                                    style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", fontSize: "13px", color: "#A0483E", cursor: "pointer" }}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#FFF5F5"; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
@@ -2685,18 +2971,38 @@ export default function VendorDashboardView({
                 </div>
 
                 {/* Table */}
-                <div style={{ background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "12px", overflow: "hidden" }}>
+                <div style={{ background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "12px", overflow: "visible" }}>
                   {/* Header row */}
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "11px 20px", background: "#FBFCFC", borderBottom: products.length > 0 ? "1px solid #EAEDEC" : "none", fontSize: "12px", fontWeight: 600, color: "#646968" }}>
-                    <span style={{ width: "16px", flexShrink: 0 }} />
-                    <span style={{ width: "36px", flexShrink: 0 }} />
-                    <span style={{ flex: "1 1 180px" }}>Listing</span>
-                    <span style={{ flex: "0 0 160px" }}>Category · type</span>
-                    <span style={{ flex: "0 0 140px" }}>Status</span>
-                    <span style={{ flex: "0 0 90px" }}>Price</span>
-                    <span style={{ flex: "0 0 90px" }}>Lead time</span>
-                    <span style={{ flex: "0 0 80px", textAlign: "right" }}>Updated</span>
-                  </div>
+                  {(() => {
+                    const allFilteredIds = filtered.map(p => p.id);
+                    const allSelected = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedProductIds[id]);
+                    const someSelected = allFilteredIds.some(id => selectedProductIds[id]);
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "11px 20px", background: "#FBFCFC", borderBottom: products.length > 0 ? "1px solid #EAEDEC" : "none", fontSize: "12px", fontWeight: 600, color: "#646968", borderRadius: "12px 12px 0 0" }}>
+                        {/* Select-all checkbox */}
+                        <button type="button" aria-label="Select all products"
+                          onClick={() => {
+                            if (allSelected) {
+                              setSelectedProductIds(prev => { const n = { ...prev }; allFilteredIds.forEach(id => delete n[id]); return n; });
+                            } else {
+                              setSelectedProductIds(prev => { const n = { ...prev }; allFilteredIds.forEach(id => { n[id] = true; }); return n; });
+                            }
+                          }}
+                          style={{ width: "16px", height: "16px", flexShrink: 0, borderRadius: "4px", border: `1.5px solid ${allSelected || someSelected ? '#004643' : '#B3B9B9'}`, background: allSelected ? "#004643" : someSelected ? "#80A3A1" : "#FFFFFF", color: "#FFFFFF", fontSize: "10px", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {allSelected ? "✓" : someSelected ? "–" : ""}
+                        </button>
+                        <span style={{ width: "36px", flexShrink: 0 }} />
+                        <span style={{ flex: "1 1 180px" }}>Listing</span>
+                        <span style={{ flex: "0 0 110px" }}>Category</span>
+                        <span style={{ flex: "0 0 110px" }}>Type</span>
+                        <span style={{ flex: "0 0 140px" }}>Status</span>
+                        <span style={{ flex: "0 0 90px" }}>Price</span>
+                        <span style={{ flex: "0 0 90px" }}>Lead time</span>
+                        <span style={{ flex: "0 0 80px", textAlign: "right" }}>Updated</span>
+                        <span style={{ width: "32px", flexShrink: 0 }} />
+                      </div>
+                    );
+                  })()}
 
                   {/* Loading skeleton rows */}
                   {dataLoading && products.length === 0 && (
@@ -2709,7 +3015,8 @@ export default function VendorDashboardView({
                             <div style={{ height: 13, width: "60%", borderRadius: 3, background: "#EAEDEC", animation: "pulse 1.5s ease-in-out infinite" }} />
                             <div style={{ height: 11, width: "30%", borderRadius: 3, background: "#F1F4F4", animation: "pulse 1.5s ease-in-out infinite" }} />
                           </div>
-                          <div style={{ flex: "0 0 160px", height: 13, borderRadius: 3, background: "#EAEDEC", animation: "pulse 1.5s ease-in-out infinite" }} />
+                          <div style={{ flex: "0 0 110px", height: 13, borderRadius: 3, background: "#EAEDEC", animation: "pulse 1.5s ease-in-out infinite" }} />
+                          <div style={{ flex: "0 0 110px", height: 13, borderRadius: 3, background: "#F1F4F4", animation: "pulse 1.5s ease-in-out infinite" }} />
                           <div style={{ flex: "0 0 140px", height: 22, borderRadius: 999, background: "#F1F4F4", animation: "pulse 1.5s ease-in-out infinite" }} />
                           <div style={{ flex: "0 0 90px", height: 13, borderRadius: 3, background: "#EAEDEC", animation: "pulse 1.5s ease-in-out infinite" }} />
                           <div style={{ flex: "0 0 90px", height: 13, borderRadius: 3, background: "#F1F4F4", animation: "pulse 1.5s ease-in-out infinite" }} />
@@ -2740,66 +3047,114 @@ export default function VendorDashboardView({
                   )}
 
                   {/* Product rows */}
-                  {filtered.map((p, i) => (
-                    <Fragment key={p.id}>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 20px", borderTop: i === 0 ? "none" : "1px solid #F1F4F4", cursor: "pointer", transition: "background 0.1s" }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#FBFCFC"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ""; }}
-                    >
-                      <input type="checkbox" style={{ width: "14px", height: "14px", accentColor: "#004643", flexShrink: 0 }} onClick={(e) => e.stopPropagation()} />
+                  {filtered.map((p, i) => {
+                    const isProdChecked = !!selectedProductIds[p.id];
+                    const isProdMenuOpen = openProductMenuId === p.id;
+                    return (
+                      <Fragment key={p.id}>
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 20px", borderTop: i === 0 ? "none" : "1px solid #F1F4F4", cursor: "pointer", transition: "background 0.1s", position: "relative" }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#FBFCFC"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = ""; }}
+                      >
+                        {/* Controlled checkbox */}
+                        <button type="button" aria-label="Select product"
+                          onClick={(e) => { e.stopPropagation(); setSelectedProductIds(prev => { const n = { ...prev }; n[p.id] ? delete n[p.id] : (n[p.id] = true); return n; }); }}
+                          style={{ width: "16px", height: "16px", flexShrink: 0, borderRadius: "4px", border: `1.5px solid ${isProdChecked ? '#004643' : '#B3B9B9'}`, background: isProdChecked ? "#004643" : "#FFFFFF", color: "#FFFFFF", fontSize: "10px", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {isProdChecked ? "✓" : ""}
+                        </button>
 
-                      {/* Thumbnail */}
-                      <div style={{ width: "36px", height: "36px", borderRadius: "6px", background: p.imgCount > 0 ? "#C3F4F0" : "#F1F4F4", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {p.imgCount > 0 ? (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#004643" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <circle cx="9" cy="9" r="2" />
-                            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-                          </svg>
-                        ) : (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B3B9B9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <line x1="3" y1="3" x2="21" y2="21" />
-                          </svg>
-                        )}
-                      </div>
+                        {/* Thumbnail */}
+                        <div style={{ width: "36px", height: "36px", borderRadius: "6px", background: p.images?.[0] ? "transparent" : (p.imgCount > 0 ? "#C3F4F0" : "#F1F4F4"), flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                          {p.images?.[0] ? (
+                            <img src={p.images[0]} alt={p.title} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "6px" }} />
+                          ) : p.imgCount > 0 ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#004643" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                              <circle cx="9" cy="9" r="2" />
+                              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                            </svg>
+                          ) : (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#B3B9B9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2" />
+                              <line x1="3" y1="3" x2="21" y2="21" />
+                            </svg>
+                          )}
+                        </div>
 
-                      {/* Title + SKU */}
-                      <div style={{ flex: "1 1 180px", minWidth: 0, display: "flex", flexDirection: "column" }}>
-                        <span style={{ fontSize: "13px", fontWeight: 600, color: "#101212", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.title}</span>
-                        <span style={{ fontSize: "11px", color: "#8E9493" }}>
-                          {p.vars.find((v) => v.sku)?.sku || `AR-${p.id.slice(-4).toUpperCase()}`}
+                        {/* Title + SKU */}
+                        <div style={{ flex: "1 1 180px", minWidth: 0, display: "flex", flexDirection: "column" }}>
+                          <span style={{ fontSize: "13px", fontWeight: 600, color: "#101212", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.title}</span>
+                          <span style={{ fontSize: "11px", color: "#8E9493" }}>
+                            {p.vars.find((v) => v.sku)?.sku || `AR-${p.id.slice(-4).toUpperCase()}`}
+                          </span>
+                        </div>
+
+                        {/* Category column */}
+                        <span style={{ flex: "0 0 110px", fontSize: "13px", color: "#4B4F4F", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cat}</span>
+
+                        {/* Type column */}
+                        <span style={{ flex: "0 0 110px", fontSize: "13px", color: "#4B4F4F", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.kind}</span>
+
+                        {/* Status */}
+                        <div style={{ flex: "0 0 140px" }}><StatusBadge status={p.status} /></div>
+
+                        {/* Price */}
+                        <span style={{ flex: "0 0 90px", fontSize: "13px", fontWeight: 600, color: "#101212" }}>
+                          {p.price ? `SAR ${p.price}` : "—"}
                         </span>
+
+                        {/* Lead time */}
+                        <span style={{ flex: "0 0 90px", fontSize: "13px", color: "#4B4F4F" }}>
+                          {p.kind === "In stock"
+                            ? (p.stock ? `${p.stock} units` : "—")
+                            : (p.stock ? `${p.stock} weeks` : "—")}
+                        </span>
+
+                        {/* Updated */}
+                        <span style={{ flex: "0 0 80px", fontSize: "12px", color: "#8E9493", textAlign: "right" }}>
+                          {relativeTime(p.updatedAt)}
+                        </span>
+
+                        {/* 3-dot menu */}
+                        <div data-row-menu style={{ position: "relative", flexShrink: 0, width: "32px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <button type="button" aria-label="Product actions"
+                            onClick={(e) => { e.stopPropagation(); setOpenProductMenuId(isProdMenuOpen ? null : p.id); setOpenOrderMenuId(null); }}
+                            style={{ width: "28px", height: "28px", border: "none", background: isProdMenuOpen ? "#F1F4F4" : "none", borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#646968", fontSize: "16px", fontWeight: 700, letterSpacing: "1px" }}
+                            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#F1F4F4"; }}
+                            onMouseLeave={e => { if (!isProdMenuOpen) (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                            ···
+                          </button>
+                          {isProdMenuOpen && (
+                            <div data-row-menu style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 50, background: "#FFFFFF", border: "1px solid #EAEDEC", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06)", minWidth: "200px", overflow: "hidden" }}>
+                              <button type="button"
+                                onClick={() => { setOpenProductMenuId(null); setOpenProductId(p.id); }}
+                                style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", fontSize: "13px", color: "#101212", cursor: "pointer" }}
+                                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC"; }}
+                                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                                Product details
+                              </button>
+                              <div style={{ height: "1px", background: "#F1F4F4", margin: "2px 0" }} />
+                              <button type="button"
+                                onClick={() => handleUnlistProduct(p.id, p.title)}
+                                style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", fontSize: "13px", color: "#101212", cursor: "pointer" }}
+                                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#F8FAFC"; }}
+                                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                                {p.status === "deactivated" ? "Relist on marketplace" : "Unlist from marketplace"}
+                              </button>
+                              <div style={{ height: "1px", background: "#F1F4F4", margin: "2px 0" }} />
+                              <button type="button"
+                                onClick={() => handleDeleteProduct(p.id, p.title)}
+                                style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", background: "none", fontSize: "13px", color: "#A0483E", cursor: "pointer" }}
+                                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#FFF5F5"; }}
+                                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}>
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-
-                      {/* Category · type */}
-                      <div style={{ flex: "0 0 160px", fontSize: "13px", color: "#4B4F4F", display: "flex", flexDirection: "column" }}>
-                        <span>{p.cat}</span>
-                        <span style={{ fontSize: "11px", color: "#8E9493" }}>{p.kind}</span>
-                      </div>
-
-                      {/* Status */}
-                      <div style={{ flex: "0 0 140px" }}><StatusBadge status={p.status} /></div>
-
-                      {/* Price */}
-                      <span style={{ flex: "0 0 90px", fontSize: "13px", fontWeight: 600, color: "#101212" }}>
-                        {p.price ? `SAR ${p.price}` : "—"}
-                      </span>
-
-                      {/* Lead time */}
-                      <span style={{ flex: "0 0 90px", fontSize: "13px", color: "#4B4F4F" }}>
-                        {p.kind === "In stock"
-                          ? (p.stock ? `${p.stock} units` : "—")
-                          : (p.stock ? `${p.stock} weeks` : "—")}
-                      </span>
-
-                      {/* Updated */}
-                      <span style={{ flex: "0 0 80px", fontSize: "12px", color: "#8E9493", textAlign: "right" }}>
-                        {relativeTime(p.updatedAt)}
-                      </span>
-                    </div>
-                    {(p.status === "changes_requested" || p.status === "deactivated") && (
+                    {(p.status === "changes_requested" || (p.status === "deactivated" && p.reviewNote)) && (
                       <ListingReviewActions
                         product={{ id: p.id, title: p.title, price: p.price, status: p.status, reviewNote: p.reviewNote ?? null }}
                         onChanged={(next) => {
@@ -2808,9 +3163,24 @@ export default function VendorDashboardView({
                         }}
                       />
                     )}
-                    </Fragment>
-                  ))}
+                      </Fragment>
+                    );
+                  })}
                 </div>
+
+                {/* Products bottom selection bar */}
+                {(() => {
+                  const selProdCount = Object.keys(selectedProductIds).length;
+                  if (selProdCount === 0) return null;
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap", background: "#101212", color: "#FFFFFF", borderRadius: "12px", padding: "10px 16px" }}>
+                      <span style={{ fontSize: "13px", fontWeight: 600, flex: 1 }}>{selProdCount} selected</span>
+                      <button type="button" onClick={handleBatchUnlistProducts} style={{ background: "#FFFFFF", color: "#101212", border: "none", borderRadius: "8px", padding: "7px 12px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Unlist from marketplace</button>
+                      <button type="button" onClick={handleBatchDeleteProducts} style={{ background: "#A0483E", color: "#FFFFFF", border: "none", borderRadius: "8px", padding: "7px 12px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>Delete</button>
+                      <button type="button" onClick={() => setSelectedProductIds({})} style={{ background: "none", border: "none", color: "#D5DBDA", fontSize: "13px", cursor: "pointer" }}>Clear</button>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
@@ -3360,7 +3730,6 @@ export default function VendorDashboardView({
                       >
                         <option value="Made to order">Made to order</option>
                         <option value="In stock">In stock</option>
-                        <option value="Custom size">Custom size</option>
                       </select>
                     </label>
                   </div>
@@ -3434,13 +3803,11 @@ export default function VendorDashboardView({
                   <div style={{ fontSize: "12px", color: "#646968" }}>
                     {nlKind === "In stock"
                       ? "Shoppers see how many are left. Stock edits publish immediately."
-                      : nlKind === "Made to order"
-                      ? "Shoppers see the lead time, never a stock count."
-                      : "Shoppers request a quote with their dimensions before ordering."}
+                      : "Shoppers see the lead time, never a stock count."}
                   </div>
 
-                  {/* No-returns warning — shown for Made to order & Custom size */}
-                  {(nlKind === "Made to order" || nlKind === "Custom size") && (
+                  {/* No-returns warning — shown for Made to order */}
+                  {nlKind === "Made to order" && (
                     <div
                       style={{
                         display: "flex",
@@ -3456,9 +3823,7 @@ export default function VendorDashboardView({
                       <span style={{ fontSize: "15px", lineHeight: 1, flexShrink: 0, marginTop: "1px" }}>⚠</span>
                       <div style={{ fontSize: "12px", color: "#7A5200", lineHeight: "1.5" }}>
                         <strong style={{ fontWeight: 600 }}>No returns on this listing.</strong>{" "}
-                        {nlKind === "Made to order"
-                          ? "Made-to-order items are built specifically for each shopper and cannot be returned unless faulty."
-                          : "Custom size items are made to the shopper's exact specifications and cannot be returned unless faulty."}
+                        Made-to-order items are built specifically for each shopper and cannot be returned unless faulty.
                         {" "}Shoppers will see this notice before and after purchase.
                       </div>
                     </div>
@@ -3734,7 +4099,67 @@ export default function VendorDashboardView({
                   />
 
                   {/* Section 1: Product Images */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {/* Important Note: Multi-angle photos */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "10px",
+                        background: "#F0F7F6",
+                        border: "1px solid #B8DDD8",
+                        borderRadius: "10px",
+                        padding: "12px 14px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "22px",
+                          height: "22px",
+                          borderRadius: "50%",
+                          background: "#004643",
+                          color: "#FFFFFF",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                          marginTop: "1px",
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <span style={{ fontSize: "13px", fontWeight: 600, color: "#004643" }}>
+                          Important Note: Upload photos from every angle
+                        </span>
+                        <p style={{ margin: 0, fontSize: "12.5px", color: "#343837", lineHeight: 1.5 }}>
+                          Please upload clear furniture images from every angle — including the <strong>front</strong>, <strong>back</strong>, <strong>left side</strong>, and <strong>right side</strong>. Complete angle coverage gives shoppers full visibility of your craftsmanship and dimensions.
+                        </p>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "2px" }}>
+                          {["Front view", "Back view", "Left side", "Right side"].map((angle) => (
+                            <span
+                              key={angle}
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 500,
+                                background: "#FFFFFF",
+                                border: "1px solid #B8DDD8",
+                                color: "#004643",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                              }}
+                            >
+                              ✓ {angle}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
                     <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
                       <span style={{ fontSize: "14px", fontWeight: 600, color: "#101212" }}>
                         Product Images ({nlImages.length}/8)
@@ -4079,7 +4504,7 @@ export default function VendorDashboardView({
                   </div>
 
                   {/* Repeat no-returns notice on confirm step so vendor sees it before publishing */}
-                  {(nlKind === "Made to order" || nlKind === "Custom size") && (
+                  {nlKind === "Made to order" && (
                     <div
                       style={{
                         display: "flex",
@@ -4180,7 +4605,7 @@ export default function VendorDashboardView({
         });
         const total = o.lines.reduce((s, l) => s + l.p * l.q, 0);
         return (
-          <div style={{ position: "fixed", inset: 0, zIndex: 25, display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ position: "fixed", inset: 0, zIndex: 35, display: "flex", justifyContent: "flex-end" }}>
             {/* Backdrop */}
             <div onClick={() => setOpenOrderId(null)} style={{ flex: 1, background: "rgba(16,18,18,0.32)" }} />
             {/* Panel */}
@@ -4362,6 +4787,118 @@ export default function VendorDashboardView({
                     <button type="button" onClick={() => setCancelMode(true)} style={{ alignSelf: "flex-start", background: "none", border: "none", padding: 0, fontSize: "13px", color: "#812F28", cursor: "pointer" }}>Can&apos;t fulfil this order?</button>
                   )
                 )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── PRODUCT DETAIL DRAWER ── */}
+      {openProductId && (() => {
+        const prod = products.find(p => p.id === openProductId);
+        if (!prod) return null;
+        const sku = prod.vars.find(v => v.sku)?.sku || `AR-${prod.id.slice(-4).toUpperCase()}`;
+        const statusMap: Record<string, { bg: string; color: string; dot: string; label: string }> = {
+          pending_review:    { bg: "#FFF8E6", color: "#7A4F00", dot: "#D97706", label: "Pending review" },
+          live:              { bg: "#F4FFF6", color: "#28603A", dot: "#16A34A", label: "Live" },
+          draft:             { bg: "#F1F4F4", color: "#4B4F4F", dot: "#8E9493", label: "Draft" },
+          changes_requested: { bg: "#FFF1F2", color: "#9F1239", dot: "#E11D48", label: "Changes requested" },
+          deactivated:       { bg: "#F8FAFC", color: "#64748B", dot: "#94A3B8", label: "Deactivated" },
+        };
+        const badge = statusMap[prod.status] || statusMap.draft;
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 35, display: "flex", justifyContent: "flex-end" }}>
+            {/* Backdrop */}
+            <div onClick={() => setOpenProductId(null)} style={{ flex: 1, background: "rgba(16,18,18,0.32)" }} />
+            {/* Panel */}
+            <div style={{ width: "480px", maxWidth: "100%", height: "100%", background: "#FFFFFF", boxShadow: "0 16px 48px rgba(0,0,0,0.14)", display: "flex", flexDirection: "column" }}>
+              {/* Close */}
+              <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 16px 0" }}>
+                <button type="button" onClick={() => setOpenProductId(null)} aria-label="Close" style={{ background: "none", border: "none", fontSize: "22px", lineHeight: 1, color: "#646968", cursor: "pointer", width: "36px", height: "36px" }}>×</button>
+              </div>
+              {/* Content */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 32px", display: "flex", flexDirection: "column", gap: "20px" }}>
+                {/* Image gallery */}
+                {prod.images && prod.images.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {/* Main image */}
+                    <div style={{ width: "100%", aspectRatio: "4/3", borderRadius: "10px", overflow: "hidden", background: "#F1F4F4" }}>
+                      <img src={prod.images[0]} alt={prod.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    </div>
+                    {/* Thumbnail strip (only when more than 1 image) */}
+                    {prod.images.length > 1 && (
+                      <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "4px" }}>
+                        {prod.images.map((img, idx) => (
+                          <div key={idx} style={{ width: "56px", height: "56px", flexShrink: 0, borderRadius: "6px", overflow: "hidden", border: idx === 0 ? "2px solid #004643" : "2px solid transparent" }}>
+                            <img src={img} alt={`${prod.title} ${idx + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ width: "100%", aspectRatio: "4/3", borderRadius: "10px", background: "#F1F4F4", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#B3B9B9" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="9" cy="9" r="2" />
+                      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                    </svg>
+                    <span style={{ fontSize: "12px", color: "#8E9493" }}>No images uploaded</span>
+                  </div>
+                )}
+                {/* Title + status */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <span style={{ fontSize: "12px", color: "#646968" }}>{sku} · {prod.cat}</span>
+                  <h2 style={{ fontSize: "22px", fontWeight: 600, margin: 0, color: "#101212" }}>{prod.title}</h2>
+                  <span style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: "5px", background: badge.bg, color: badge.color, fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "999px" }}>
+                    <span style={{ width: "5px", height: "5px", borderRadius: "999px", background: badge.dot }} />{badge.label}
+                  </span>
+                </div>
+                {/* Key details */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  {[
+                    { label: "Price", value: prod.price ? `SAR ${prod.price}` : "—" },
+                    { label: "Type", value: prod.kind },
+                    { label: prod.kind === "In stock" ? "Stock" : "Lead time", value: prod.stock ? (prod.kind === "In stock" ? `${prod.stock} units` : `${prod.stock} weeks`) : "—" },
+                    { label: "Category", value: prod.cat },
+                  ].map(({ label, value }) => (
+                    <div key={label} style={{ background: "#FBFCFC", border: "1px solid #EAEDEC", borderRadius: "8px", padding: "12px 14px" }}>
+                      <div style={{ fontSize: "11px", color: "#8E9493", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>{label}</div>
+                      <div style={{ fontSize: "14px", fontWeight: 600, color: "#101212" }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Variants */}
+                {prod.vars.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#101212" }}>Variants ({prod.vars.length})</div>
+                    {prod.vars.map((v, i) => (
+                      <div key={v.id || i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderTop: i === 0 ? "none" : undefined, border: "1px solid #EAEDEC", borderRadius: "8px", fontSize: "13px" }}>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <span style={{ fontWeight: 600, color: "#101212" }}>{v.name}</span>
+                          {v.sku && <span style={{ fontSize: "11px", color: "#8E9493" }}>{v.sku}</span>}
+                        </div>
+                        <span style={{ color: "#646968", fontSize: "12px" }}>{v.stock} {prod.kind === "In stock" ? "units" : "wks"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Description */}
+                {prod.description && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#101212" }}>Description</div>
+                    <p style={{ margin: 0, fontSize: "13px", color: "#4B4F4F", lineHeight: 1.6 }}>{prod.description}</p>
+                  </div>
+                )}
+                {/* Actions */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid #EAEDEC", paddingTop: "16px" }}>
+                  <button type="button" onClick={() => { setOpenProductId(null); handleUnlistProduct(prod.id, prod.title); }} style={{ background: "#FFFFFF", color: "#343837", border: "1px solid #D5DBDA", borderRadius: "8px", padding: "10px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
+                    {prod.status === "deactivated" ? "Relist on marketplace" : "Unlist from marketplace"}
+                  </button>
+                  <button type="button" onClick={() => { setOpenProductId(null); handleDeleteProduct(prod.id, prod.title); }} style={{ background: "none", border: "none", color: "#A0483E", fontSize: "13px", fontWeight: 600, cursor: "pointer", padding: "6px 0", alignSelf: "center" }}>
+                    Delete listing
+                  </button>
+                </div>
               </div>
             </div>
           </div>
