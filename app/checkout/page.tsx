@@ -49,6 +49,7 @@ import {
   MoyasarFormConfig,
 } from "@/lib/api/checkout";
 import MoyasarPaymentForm from "@/components/checkout/MoyasarPaymentForm";
+import { pushLocalCart } from "@/lib/api/cart";
 import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 
 const COPY = {
@@ -68,6 +69,7 @@ const COPY = {
     verifying: "Verifying stock and calculating totals",
     requiredFields: "Please fill in all required shipping fields.",
     initFailed: "Failed to initialize checkout. Please check your cart items or stock.",
+    itemsUnavailable: "Some items in your cart are no longer sold. Please review your cart.",
     networkError: "Network error. Please try again.",
     paymentMethod: "Payment method",
     encrypted: "256-bit SSL encrypted",
@@ -107,6 +109,7 @@ const COPY = {
     verifying: "جارٍ التحقق من المخزون وحساب الإجمالي",
     requiredFields: "يرجى تعبئة جميع حقول الشحن المطلوبة.",
     initFailed: "تعذّر بدء عملية الدفع. تحقق من منتجات سلتك أو توفّرها.",
+    itemsUnavailable: "بعض المنتجات في سلتك لم تعد معروضة للبيع. يرجى مراجعة السلة.",
     networkError: "خطأ في الشبكة. حاول مرة أخرى.",
     paymentMethod: "طريقة الدفع",
     encrypted: "تشفير 256-bit SSL",
@@ -284,6 +287,25 @@ function CheckoutInner() {
     setIsLoadingIntent(true);
 
     try {
+      // checkout.service prices the SERVER cart. "Buy now" on a product page
+      // and any change made after the cart page only exist locally, so sync
+      // first — otherwise the shopper pays for an old (or empty) cart.
+      try {
+        const { rejected } = await pushLocalCart(items);
+        if (rejected.length) {
+          setGeneralError(t.itemsUnavailable);
+          setIsLoadingIntent(false);
+          router.push("/cart");
+          return;
+        }
+      } catch (syncErr: unknown) {
+        if (syncErr instanceof Error && syncErr.message.includes("NOT_AUTHENTICATED")) {
+          router.push("/authpage/signin?next=/checkout");
+          return;
+        }
+        throw syncErr;
+      }
+
       // The code only. The server derives the amount.
       if (PAYMENT_PROVIDER === "moyasar") {
         const response = await createMoyasarCheckout(address, promoCode);

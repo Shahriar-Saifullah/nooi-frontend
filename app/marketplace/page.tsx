@@ -37,6 +37,7 @@ import ShopHeader from "@/components/marketplace/ShopHeader";
 import ProductCard from "@/components/marketplace/ProductCard";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
+import { formatMoney } from "@/lib/money";
 import { getProject } from "@/lib/api/projects";
 import {
   getFacets, getProducts, getCanvasMatches,
@@ -126,12 +127,11 @@ const PAGE_SIZE = 12;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Cheapest in-stock variant, else cheapest overall. What "add to cart" buys. */
+/** Cheapest in-stock variant — what "add to cart" buys. Null when nothing is
+ *  buyable, so the grid never puts a sold-out item in the cart. */
 function defaultVariant(product: MarketplaceProduct): ProductVariant | null {
-  const active = product.variants.filter(v => v.is_active);
-  if (!active.length) return null;
-  const inStock = active.filter(v => v.stock_quantity > 0);
-  const pool = inStock.length ? inStock : active;
+  const pool = product.variants.filter(v => v.is_active && v.stock_quantity > 0);
+  if (!pool.length) return null;
   return pool.reduce((best, v) => (Number(v.price) < Number(best.price) ? v : best), pool[0]);
 }
 
@@ -189,8 +189,8 @@ function MarketplaceInner() {
   );
 
   const formatPrice = useCallback(
-    (value: number) => toArabicDigits(`$${Math.round(value).toLocaleString("en-US")}`),
-    [toArabicDigits],
+    (value: number) => formatMoney(value, undefined, isArabic),
+    [isArabic],
   );
 
   const formatNumber = useCallback(
@@ -343,6 +343,10 @@ function MarketplaceInner() {
       if (!variant) return;
 
       const existing = cartItems.find(i => i.variant_id === variant.id);
+      // Never more than the vendor has.
+      const room = variant.stock_quantity - (existing?.quantity ?? 0);
+      if (room <= 0) return;
+      quantity = Math.min(quantity, room);
       if (existing) {
         updateQuantityOptimistic(existing.id, existing.quantity + quantity);
         return;

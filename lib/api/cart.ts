@@ -20,6 +20,7 @@
 
 import { createClient } from "@/utils/supabase/client";
 import type { CartItem } from "@/lib/store/cart.store";
+import { DEFAULT_CURRENCY } from "@/lib/money";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -48,7 +49,11 @@ export interface QuoteItem {
   unit_price: number;
   quantity: number;
   line_total: number;
+  /** Listing live, variant active and enough stock for this quantity. Lines
+   *  that are not are shown but left out of every total. */
   in_stock: boolean;
+  available?: boolean;
+  unavailable_reason?: "unavailable" | "out_of_stock" | "not_enough_stock" | null;
   stock_quantity: number;
 }
 
@@ -70,6 +75,8 @@ export interface QuoteGroup {
 export interface CartQuote {
   groups: QuoteGroup[];
   item_count: number;
+  /** Lines in the cart that cannot be bought right now. */
+  unavailable_count: number;
   subtotal: number;
   shipping_total: number;
   tax_total: number;
@@ -91,6 +98,7 @@ export async function quoteCart(promoCode?: string | null): Promise<CartQuote> {
   return {
     groups: json.groups ?? [],
     item_count: json.item_count ?? 0,
+    unavailable_count: json.unavailable_count ?? 0,
     subtotal: json.subtotal ?? 0,
     shipping_total: json.shipping_total ?? 0,
     tax_total: json.tax_total ?? 0,
@@ -99,7 +107,7 @@ export async function quoteCart(promoCode?: string | null): Promise<CartQuote> {
     promotion: json.promotion ?? null,
     promo_error: json.promo_error ?? null,
     grand_total: json.grand_total ?? 0,
-    currency: json.currency ?? "USD",
+    currency: json.currency ?? DEFAULT_CURRENCY,
   };
 }
 
@@ -113,6 +121,14 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
+/** A failed cart request. `code` is the server's error code when it sent one
+ *  (e.g. VARIANT_NOT_FOUND, VARIANT_UNAVAILABLE). */
+export class CartRequestError extends Error {
+  constructor(public status: number, public code: string | null, path: string, body: string) {
+    super(`Cart request failed (${status}): ${path} ${body}`);
+  }
+}
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = await authHeaders();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -122,7 +138,9 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Cart request failed (${res.status}): ${path} ${body}`);
+    let code: string | null = null;
+    try { const j = JSON.parse(body); code = typeof j?.error === "string" ? j.error : null; } catch { /* not JSON */ }
+    throw new CartRequestError(res.status, code, path, body);
   }
   return res.json() as Promise<T>;
 }
@@ -150,6 +168,13 @@ async function removeServerItem(id: string) {
   return call(`/cart/items/${id}`, { method: "DELETE" });
 }
 
+export interface PushResult {
+  items: ServerCartItem[];
+  /** Local lines the server refused because the product is gone or no longer
+   *  on sale. The caller should drop them from the local cart and say so. */
+  rejected: string[];
+}
+
 /**
  * Make the server cart match the local one, then return what the server holds.
  *
@@ -157,19 +182,31 @@ async function removeServerItem(id: string) {
  * place, extras removed, missing ones added. Clearing first would leave the
  * shopper with no cart at all if the network died halfway.
  *
+ * One dead line (a listing taken down, a variant deleted) must not block the
+ * rest of the cart, so those are collected in `rejected` instead of thrown.
+ *
  * Throws NOT_AUTHENTICATED if there is no session — the caller should send them
  * to sign in rather than to a checkout that cannot work.
  */
-export async function pushLocalCart(local: CartItem[]): Promise<ServerCartItem[]> {
+export async function pushLocalCart(local: CartItem[]): Promise<PushResult> {
   const server = await getServerCart();
   const byVariant = new Map(server.map(i => [i.variant_id, i]));
+  const rejected: string[] = [];
 
   for (const item of local) {
     const existing = byVariant.get(item.variant_id);
-    if (!existing) {
-      await addServerItem(item.variant_id, item.quantity);
-    } else if (existing.quantity !== item.quantity) {
-      await setServerQuantity(existing.id, item.quantity);
+    try {
+      if (!existing) {
+        await addServerItem(item.variant_id, item.quantity);
+      } else if (existing.quantity !== item.quantity) {
+        await setServerQuantity(existing.id, item.quantity);
+      }
+    } catch (e) {
+      if (e instanceof CartRequestError && (e.status === 404 || e.status === 422) && !existing) {
+        rejected.push(item.variant_id);
+      } else {
+        throw e;
+      }
     }
     byVariant.delete(item.variant_id);
   }
@@ -179,5 +216,5 @@ export async function pushLocalCart(local: CartItem[]): Promise<ServerCartItem[]
     await removeServerItem(orphan.id);
   }
 
-  return getServerCart();
+  return { items: await getServerCart(), rejected };
 }
