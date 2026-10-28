@@ -35,6 +35,7 @@ import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore, type CartItem } from "@/lib/store/cart.store";
 import { useSavedStore } from "@/lib/store/saved.store";
 import { pushLocalCart, quoteCart, type CartQuote } from "@/lib/api/cart";
+import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 
 const COPY = {
   en: {
@@ -72,7 +73,12 @@ const COPY = {
     quoteFailed: "We couldn't price your cart. Your items are safe — please try again.",
     signInToPrice: "Sign in to see shipping and tax.",
     outOfStock: "Out of stock",
+    noLongerAvailable: "No longer available — remove it to continue",
+    notEnoughStock: (n: number) => `Only ${n} left — lower the quantity`,
     only: (n: number) => `Only ${n} left`,
+    droppedNotice: (n: number) =>
+      `${n} item${n === 1 ? " was" : "s were"} removed from your cart because ${n === 1 ? "it is" : "they are"} no longer sold.`,
+    fixUnavailable: "Some items can't be bought right now. Remove them or lower the quantity to check out.",
   },
   ar: {
     title: "السلة",
@@ -107,7 +113,11 @@ const COPY = {
     quoteFailed: "تعذّر تسعير سلتك. منتجاتك محفوظة — حاول مرة أخرى.",
     signInToPrice: "سجّل الدخول لعرض الشحن والضريبة.",
     outOfStock: "نفدت الكمية",
+    noLongerAvailable: "لم يعد متاحًا — أزله للمتابعة",
+    notEnoughStock: (n: number) => `بقي ${n} فقط — قلّل الكمية`,
     only: (n: number) => `بقي ${n} فقط`,
+    droppedNotice: (n: number) => `أُزيل ${n} من المنتجات من سلتك لأنها لم تعد معروضة للبيع.`,
+    fixUnavailable: "بعض المنتجات غير متاحة للشراء الآن. أزلها أو قلّل الكمية لإتمام الشراء.",
   },
 } as const;
 
@@ -148,10 +158,24 @@ function CartInner() {
     (s: string) => (isRtl ? s.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[+d]) : s),
     [isRtl],
   );
+  const [dropped, setDropped] = useState(0);
+  const currency = quote?.currency ?? DEFAULT_CURRENCY;
   const money = useCallback(
-    (v: number) => toArabicDigits(`$${v.toLocaleString("en-US", { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 })}`),
-    [toArabicDigits],
+    (v: number) => formatMoney(v, currency, isRtl),
+    [currency, isRtl],
   );
+
+  /** The server refused these lines (listing removed or taken off sale): take
+   *  them out of the local cart too, and tell the shopper once. */
+  const dropRejected = useCallback((rejected: string[]) => {
+    if (!rejected.length) return;
+    const store = useCartStore.getState();
+    for (const variantId of rejected) {
+      const line = store.items.find(i => i.variant_id === variantId);
+      if (line) store.removeItemOptimistic(line.id);
+    }
+    setDropped(n => n + rejected.length);
+  }, []);
   const num = useCallback((v: number) => toArabicDigits(String(v)), [toArabicDigits]);
 
   /** Push local → server, then price it. Both or neither: a quote of a stale
@@ -161,7 +185,8 @@ function CartInner() {
     setPricing(true);
     setQuoteError(null);
     try {
-      await pushLocalCart(items);
+      const { rejected } = await pushLocalCart(items);
+      if (rejected.length) { dropRejected(rejected); return; } // items changed → effect re-prices
       const q = await quoteCart(code);
       setQuote(q);
       setSignedOut(false);
@@ -177,7 +202,7 @@ function CartInner() {
     } finally {
       setPricing(false);
     }
-  }, [items, t.quoteFailed]);
+  }, [items, t.quoteFailed, dropRejected]);
 
   // Re-price on any cart change, debounced so a run of quantity taps is one
   // round trip rather than five.
@@ -203,7 +228,11 @@ function CartInner() {
   const goCheckout = useCallback(async () => {
     setCheckingOut(true);
     try {
-      await pushLocalCart(items);
+      const { rejected } = await pushLocalCart(items);
+      if (rejected.length) { dropRejected(rejected); setCheckingOut(false); return; }
+      const q = await quoteCart(appliedCode);
+      setQuote(q);
+      if (q.unavailable_count > 0 || q.item_count === 0) { setCheckingOut(false); return; }
       router.push(appliedCode ? `/checkout?promo=${encodeURIComponent(appliedCode)}` : "/checkout");
     } catch (err: any) {
       if (String(err?.message).includes("NOT_AUTHENTICATED")) {
@@ -214,7 +243,7 @@ function CartInner() {
       setQuoteError(t.quoteFailed);
       setCheckingOut(false);
     }
-  }, [items, appliedCode, router, t.quoteFailed]);
+  }, [items, appliedCode, router, t.quoteFailed, dropRejected]);
 
   /** Server groups when priced, local groups otherwise — so a signed-out cart
    *  still renders rather than showing nothing. */
@@ -237,6 +266,7 @@ function CartInner() {
           quantity: i.quantity,
           lineTotal: i.line_total,
           inStock: i.in_stock,
+          reason: i.unavailable_reason ?? (i.in_stock ? null : "out_of_stock"),
           stock: i.stock_quantity,
         })),
       }));
@@ -259,6 +289,7 @@ function CartInner() {
         quantity: i.quantity,
         lineTotal: localUnitPrice(i) * i.quantity,
         inStock: true,
+        reason: null as string | null,
         stock: 99,
       })),
     }));
@@ -376,7 +407,11 @@ function CartInner() {
 
                           {!item.inStock ? (
                             <span className="mt-1 inline-block text-[11px] text-[#812F28]">
-                              {t.outOfStock}
+                              {item.reason === "unavailable"
+                                ? t.noLongerAvailable
+                                : item.reason === "not_enough_stock"
+                                  ? t.notEnoughStock(item.stock)
+                                  : t.outOfStock}
                             </span>
                           ) : item.stock <= 5 ? (
                             <span className="mt-1 inline-block text-[11px] text-[#812F28]">
@@ -583,9 +618,23 @@ function CartInner() {
               </div>
             )}
 
+            {dropped > 0 && (
+              <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-[#FFFBF2] border border-[#E6EBEA] text-[11.5px] text-[#4B4F4F]">
+                <AlertCircle size={13} className="mt-px shrink-0" />
+                {t.droppedNotice(dropped)}
+              </div>
+            )}
+
+            {(quote?.unavailable_count ?? 0) > 0 && (
+              <div className="mt-3 flex items-start gap-2 p-2.5 rounded-lg bg-[#FFFAF9] border border-[#812F28]/25 text-[11.5px] text-[#812F28]">
+                <AlertCircle size={13} className="mt-px shrink-0" />
+                {t.fixUnavailable}
+              </div>
+            )}
+
             <button
               onClick={goCheckout}
-              disabled={checkingOut}
+              disabled={checkingOut || pricing || (quote?.unavailable_count ?? 0) > 0}
               className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-[#004643] text-white text-[13px] font-medium hover:bg-[#003836] disabled:opacity-50"
             >
               {checkingOut && <Loader2 size={14} className="animate-spin" />}

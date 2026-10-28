@@ -1,5 +1,6 @@
 import { createClient } from "@/utils/supabase/client";
 import { requestApi, type ApiResponse } from "./http";
+import { useCartStore } from "@/lib/store/cart.store";
 
 export type SignInPayload = {
   email: string;
@@ -230,6 +231,9 @@ export function getGoogleAuthUrl(): string {
 
 export async function logout(): Promise<ApiResponse<unknown>> {
   const { error } = await getSupabase().auth.signOut();
+  // The cart lives in localStorage. Without this the next person to sign in on
+  // this browser inherits it, and it gets pushed into THEIR server cart.
+  if (!error) useCartStore.getState().clearCart();
   if (error) {
     return {
       success: false,

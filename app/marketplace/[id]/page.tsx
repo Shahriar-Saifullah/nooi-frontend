@@ -37,6 +37,7 @@ import {
 import ShopHeader from "@/components/marketplace/ShopHeader";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
+import { formatMoney } from "@/lib/money";
 import { catalogById } from "@/lib/furniture/catalog";
 import {
   getProductById, getProducts,
@@ -116,8 +117,8 @@ function ProductDetailInner() {
     [isArabic],
   );
   const money = useCallback(
-    (v: number) => toArabicDigits(`$${Math.round(v).toLocaleString("en-US")}`),
-    [toArabicDigits],
+    (v: number) => formatMoney(v, undefined, isArabic),
+    [isArabic],
   );
   const num = useCallback((v: number) => toArabicDigits(String(v)), [toArabicDigits]);
 
@@ -131,7 +132,8 @@ function ProductDetailInner() {
       .then(p => {
         if (cancelled) return;
         setProduct(p);
-        const first = p?.variants.find(v => v.stock_quantity > 0) ?? p?.variants[0];
+        const live = p?.variants.filter(v => v.is_active !== false) ?? [];
+        const first = live.find(v => v.stock_quantity > 0) ?? live[0];
         setVariantId(first?.id ?? null);
       })
       .catch(err => {
@@ -198,8 +200,12 @@ function ProductDetailInner() {
   // ── Cart ───────────────────────────────────────────────────────────────────
 
   const addToCart = useCallback((quantity: number) => {
-    if (!product || !variant) return;
+    if (!product || !variant || variant.is_active === false) return;
     const existing = cartItems.find(i => i.variant_id === variant.id);
+    // Never more than the vendor has.
+    const room = variant.stock_quantity - (existing?.quantity ?? 0);
+    if (room <= 0) return;
+    quantity = Math.min(quantity, room);
     if (existing) {
       updateQuantityOptimistic(existing.id, existing.quantity + quantity);
       return;
