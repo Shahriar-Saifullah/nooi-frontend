@@ -69,6 +69,18 @@ export interface CatalogItem {
   /** Wall mounts: height of the item's CENTRE above the floor, in cm, where a
    *  drop hangs it. Dragging can move it up or down from there. */
   mountHeight?: number;
+  /** Set on items that are real marketplace listings (id "shop:<productId>"),
+   *  registered at runtime by lib/furniture/shopCatalog.ts. */
+  shop?: ShopInfo;
+}
+
+export interface ShopInfo {
+  productId: string;
+  vendor: string | null;
+  price: number;
+  /** False when the listing has since been taken off sale — it still renders
+   *  in rooms that already contain it, but can't be bought. */
+  onSale: boolean;
 }
 
 /** A kind of furniture (Sofa, Bed, Dining Chair …) holding its designs. */
@@ -422,8 +434,35 @@ export const FURNITURE_TYPES: FurnitureType[] = [
 export const FURNITURE_CATALOG: CatalogItem[] =
   FURNITURE_TYPES.flatMap(t => t.variants);
 
+// ── Shop items (vendor listings with a 3D model) ─────────────────────────────
+// Not part of the static library: they're fetched from the marketplace and
+// registered here, so everything that resolves a placed item through
+// catalogById — rendering, sizing, snapping, the furniture list — handles a
+// vendor's product exactly like a library piece.
+
+export const SHOP_ID_PREFIX = "shop:";
+export const isShopId = (id: string | null | undefined): id is string =>
+  typeof id === "string" && id.startsWith(SHOP_ID_PREFIX);
+
+const SHOP_ITEMS = new Map<string, CatalogItem>();
+let shopVersion = 0;
+const shopListeners = new Set<() => void>();
+
+export function registerShopItems(items: CatalogItem[]) {
+  if (!items.length) return;
+  for (const item of items) SHOP_ITEMS.set(item.id, item);
+  shopVersion += 1;
+  shopListeners.forEach(l => l());
+}
+export const hasShopItem = (id: string) => SHOP_ITEMS.has(id);
+export const subscribeShopItems = (l: () => void) => {
+  shopListeners.add(l);
+  return () => { shopListeners.delete(l); };
+};
+export const getShopVersion = () => shopVersion;
+
 export const catalogById = (id: string): CatalogItem | undefined =>
-  FURNITURE_CATALOG.find(i => i.id === id);
+  FURNITURE_CATALOG.find(i => i.id === id) ?? (isShopId(id) ? SHOP_ITEMS.get(id) : undefined);
 
 export const typeById = (id: string): FurnitureType | undefined =>
   FURNITURE_TYPES.find(t => t.id === id);

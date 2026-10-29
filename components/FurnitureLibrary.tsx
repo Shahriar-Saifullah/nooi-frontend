@@ -25,6 +25,8 @@ import {
   type CatalogItem, type FurnitureType, type FurnitureCategory,
 } from "@/lib/furniture/catalog";
 import { getThumbnail } from "@/lib/furniture/thumbnails";
+import { listShopItems } from "@/lib/furniture/shopCatalog";
+import { formatMoney } from "@/lib/money";
 
 export const DND_MIME = "application/x-nooi-furniture";
 
@@ -158,11 +160,51 @@ function VariantCard({
       <div className="mt-1.5 text-[12px] font-medium text-gray-800 leading-tight">
         {item.name}
       </div>
-      <div className="text-[10px] text-gray-400">
-        {item.size.w}×{item.size.d} cm
-      </div>
+      {item.shop ? (
+        <>
+          <div className="text-[10px] text-gray-400 truncate">{item.shop.vendor ?? "Nooi vendor"}</div>
+          <div className="text-[10.5px] font-medium text-teal-800">
+            {formatMoney(item.shop.price)} · {item.size.w}×{item.size.d} cm
+          </div>
+        </>
+      ) : (
+        <div className="text-[10px] text-gray-400">
+          {item.size.w}×{item.size.d} cm
+        </div>
+      )}
     </div>
     </>
+  );
+}
+
+/** Real products from Nooi vendors that have a 3D model. */
+function ShopItems({ query, onQuickAdd }: { query: string; onQuickAdd?: (item: CatalogItem) => void }) {
+  const [items, setItems] = useState<CatalogItem[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(() => {
+      listShopItems(query)
+        .then(list => { if (alive) { setItems(list); setFailed(false); } })
+        .catch(() => { if (alive) setFailed(true); });
+    }, query ? 300 : 0);
+    return () => { alive = false; clearTimeout(t); };
+  }, [query]);
+
+  if (failed) return <div className="text-sm text-gray-400 text-center py-8">Couldn&apos;t load shop items.</div>;
+  if (!items) return <div className="text-sm text-gray-400 text-center py-8">Loading…</div>;
+  if (!items.length) {
+    return (
+      <div className="text-sm text-gray-400 text-center py-8">
+        {query ? `No shop items match "${query}"` : "No vendor pieces with a 3D model yet."}
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {items.map(item => <VariantCard key={item.id} item={item} onQuickAdd={onQuickAdd} />)}
+    </div>
   );
 }
 
@@ -174,6 +216,8 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<FurnitureCategory | "all">("all");
   const [openTypeId, setOpenTypeId] = useState<string | null>(null);
+  // Library = Nooi's own models. Shop = real products you can buy.
+  const [source, setSource] = useState<"library" | "shop">("library");
 
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
@@ -203,19 +247,33 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
         Drag items into the 3D scene →
       </div>
 
+      <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1">
+        {(["library", "shop"] as const).map(s => (
+          <button
+            key={s}
+            onClick={() => setSource(s)}
+            aria-pressed={source === s}
+            className={`rounded-md py-1.5 text-[12px] font-medium transition
+              ${source === s ? "bg-white text-teal-800 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}
+          >
+            {s === "library" ? "Library" : "From the shop"}
+          </button>
+        ))}
+      </div>
+
       <div className="relative">
         <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Search furniture..."
+          placeholder={source === "shop" ? "Search shop items..." : "Search furniture..."}
           className="w-full rounded-lg border border-gray-200 pl-8 pr-3 py-2 text-sm
                      focus:outline-none focus:ring-2 focus:ring-teal-500/40"
         />
       </div>
 
       {/* ── Level 1: categories (horizontal scroll) ── */}
-      {!searching && (
+      {!searching && source === "library" && (
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide -mx-0.5 px-0.5 pb-0.5">
           {cats.map(c => (
             <button
@@ -233,8 +291,10 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
       )}
 
       <div className="flex-1 overflow-y-auto pr-1 -mr-1 min-h-0">
+        {source === "shop" && <ShopItems query={query.trim()} onQuickAdd={onQuickAdd} />}
+
         {/* ── Search results (flat) ── */}
-        {searching && (
+        {source === "library" && searching && (
           <>
             <p className="text-[11px] text-gray-400 mb-2">
               {searchResults.length} result{searchResults.length !== 1 ? "s" : ""} for "{query}"
@@ -253,7 +313,7 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
         )}
 
         {/* ── Level 3: variants of the open type ── */}
-        {!searching && openType && (
+        {source === "library" && !searching && openType && (
           <>
             <button
               onClick={() => setOpenTypeId(null)}
@@ -278,7 +338,7 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
         )}
 
         {/* ── Level 2: types in the selected category ── */}
-        {!searching && !openType && (
+        {source === "library" && !searching && !openType && (
           <>
             {(category === "all"
               ? cats.filter((c): c is FurnitureCategory => c !== "all")

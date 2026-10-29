@@ -224,7 +224,8 @@ export function rankProducts(
     if (!variant) continue; // nothing buyable
 
     const size = variantSize(variant);
-    const exact = Boolean(modelId && product.canvas_model_id === modelId);
+    // "shop:<id>" is that exact listing, placed from the canvas Shop tab.
+    const exact = Boolean(modelId && (product.canvas_model_id === modelId || modelId === `shop:${product.id}`));
     const inStock = variant.stock_quantity > 0;
 
     let score = 0;

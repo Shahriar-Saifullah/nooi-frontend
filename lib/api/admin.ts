@@ -788,7 +788,7 @@ export async function markShipmentDelivered(orderId: string, shipmentId: string,
 
 // ─── Operations: listings, cancellations, support, settings ──────────────────
 
-export interface OpsCounts { listings: number; cancellations: number; support: number }
+export interface OpsCounts { listings: number; cancellations: number; support: number; models?: number }
 export async function getOpsCounts(): Promise<ApiResponse<OpsCounts>> {
   return requestApi<OpsCounts>({ path: "/admin/ops/counts", method: "GET" });
 }
@@ -931,4 +931,87 @@ export async function updateMe(full_name: string): Promise<ApiResponse<unknown>>
 }
 export async function changeMyPassword(current_password: string, new_password: string): Promise<ApiResponse<unknown>> {
   return requestApi({ path: "/admin/me/password", method: "PUT", body: { current_password, new_password } });
+}
+
+// ─── 3D models ───────────────────────────────────────────────────────────────
+
+export type ModelView = "front" | "left" | "back" | "right";
+export type ModelJobStatus = "queued" | "processing" | "review" | "approved" | "rejected" | "failed" | "cancelled";
+export interface ModelProviderInfo { name: string; ready: boolean; balance?: { balance: number; frozen: number } | null }
+export interface ModelProductSummary {
+  id: string;
+  title: string;
+  listing_status: string;
+  vendor: string | null;
+  photo: string | null;
+  photo_count: number;
+  model_url: string | null;
+  model_source: "nooi_generated" | "admin_upload" | "vendor_upload" | null;
+}
+export interface ModelJob {
+  id: string;
+  product_id: string;
+  status: ModelJobStatus;
+  provider: string;
+  mode: "single" | "multiview" | "manual";
+  source_images: { view: ModelView; url: string }[];
+  progress: number;
+  glb_url: string | null;
+  glb_bytes: number | null;
+  error: string | null;
+  attempts: number;
+  review_note: string | null;
+  credits_used?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface ModelRow { product: ModelProductSummary; job: Pick<ModelJob, "id" | "status" | "progress" | "error" | "provider" | "mode" | "created_at" | "updated_at"> | null }
+
+export async function listModels(tab: string, search?: string): Promise<ApiResponse<{ rows: ModelRow[]; counts: Record<string, number>; provider: ModelProviderInfo }>> {
+  const q = new URLSearchParams({ tab });
+  if (search) q.set("search", search);
+  return requestApi({ path: `/admin/models?${q.toString()}`, method: "GET" });
+}
+export async function getModelProduct(id: string): Promise<ApiResponse<{
+  product: ModelProductSummary & { photos: string[]; photo_views: { view: ModelView; url: string }[]; dimensions_cm: { width: number; height: number; depth: number } | null };
+  jobs: ModelJob[];
+  provider: ModelProviderInfo;
+}>> {
+  return requestApi({ path: `/admin/models/products/${encodeURIComponent(id)}`, method: "GET" });
+}
+export async function generateModel(id: string, images: { view: ModelView; url: string }[]): Promise<ApiResponse<{ job: ModelJob }>> {
+  return requestApi({ path: `/admin/models/products/${encodeURIComponent(id)}/generate`, method: "POST", body: { images } });
+}
+export async function removeModel(id: string): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: `/admin/models/products/${encodeURIComponent(id)}/remove`, method: "POST", body: {} });
+}
+export async function decideModelJob(jobId: string, action: "approve" | "reject" | "cancel", note?: string): Promise<ApiResponse<unknown>> {
+  return requestApi({ path: `/admin/models/jobs/${encodeURIComponent(jobId)}/${action}`, method: "POST", body: note ? { note } : {} });
+}
+/** Multipart, so not requestApi. Publishes the GLB on the listing straight away. */
+export async function uploadModelGlb(id: string, file: File): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  try {
+    const supabase = createClient();
+    const token = (await supabase.auth.getSession()).data.session?.access_token;
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/admin/models/products/${encodeURIComponent(id)}/upload`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+      credentials: "include",
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.success) return { ok: false, error: json.error || "Upload failed." };
+    return { ok: true, url: json.data.model_url };
+  } catch {
+    return { ok: false, error: "Upload failed." };
+  }
+}
+export async function setModelSize(id: string, dims: { width: number; depth: number; height: number }): Promise<ApiResponse<{ dimensions_cm: { width: number; depth: number; height: number } }>> {
+  return requestApi({ path: `/admin/models/products/${encodeURIComponent(id)}/size`, method: "POST", body: dims });
+}
+/** Turn a model a quarter turn: the one waiting for review (jobId) or the live one (productId). */
+export async function rotateModel(target: { job_id: string } | { product_id: string }, degrees = 90): Promise<ApiResponse<{ glb_url: string }>> {
+  return requestApi({ path: "/admin/models/rotate", method: "POST", body: { ...target, degrees } });
 }

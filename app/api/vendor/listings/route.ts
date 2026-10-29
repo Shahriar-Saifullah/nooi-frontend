@@ -25,6 +25,33 @@ function getCategoryInfo(rawCat: string) {
   return { typeId: "armchair", category: "living", canvasModelId: "armchair" };
 }
 
+const PHOTO_SIDES = ["front", "left", "back", "right"];
+
+/** Keep only known sides, one photo per side, and only this listing's photos. */
+function cleanPhotoViews(raw: unknown, images: unknown): { view: string; url: string }[] | undefined {
+  if (!Array.isArray(raw) || !Array.isArray(images)) return undefined;
+  const own = new Set(images.filter((u): u is string => typeof u === "string"));
+  const seen = new Set<string>();
+  const out: { view: string; url: string }[] = [];
+  for (const r of raw) {
+    const view = String((r as { view?: unknown })?.view ?? "");
+    const url = String((r as { url?: unknown })?.url ?? "");
+    if (!PHOTO_SIDES.includes(view) || !own.has(url) || seen.has(view)) continue;
+    seen.add(view);
+    out.push({ view, url });
+  }
+  return out.length ? out : undefined;
+}
+
+/** Width/depth/height in cm, each 1–2000; anything else is ignored. */
+function cleanDimensions(raw: unknown): { width: number; depth: number; height: number } | null {
+  const d = raw as { width?: unknown; depth?: unknown; height?: unknown } | null;
+  const nums = [d?.width, d?.depth, d?.height].map((v) => Number(v));
+  if (!nums.every((n) => Number.isFinite(n) && n >= 1 && n <= 2000)) return null;
+  const [width, depth, height] = nums.map((n) => Math.round(n * 10) / 10);
+  return { width, depth, height };
+}
+
 async function generateUniqueSku(
   adminClient: any,
   rawSku: string | undefined,
@@ -143,7 +170,8 @@ export async function GET(req: Request) {
         review_note,
         submitted_at,
         reviewed_at,
-        product_variants (*)
+        product_variants (*),
+        product_model_jobs ( status, updated_at )
       `)
       .in("retailer_id", retailerIds)
       .order("created_at", { ascending: false });
@@ -178,6 +206,8 @@ export async function POST(req: Request) {
       images,
       description,
       model_url,
+      photo_views,
+      dimensions_cm,
       // is_returnable: false for Made to order & Custom size; true for In stock.
       // Defaults to false — better to under-promise returns on a bespoke piece.
       is_returnable = false,
@@ -323,6 +353,8 @@ export async function POST(req: Request) {
           stock: stock || "4",
           model_url: model_url || undefined,
           has_3d: Boolean(model_url),
+          // Which photo shows which side — the 3D model is built from these.
+          photo_views: cleanPhotoViews(photo_views, images),
           published_immediately: false,
         },
       })
@@ -371,7 +403,8 @@ export async function POST(req: Request) {
         sku: vSku,
         color: v.name || "Standard",
         material: "Wood / Fabric",
-        dimensions_cm: { width: 120, height: 75, depth: 80 },
+        // The canvas places the 3D model at exactly this size.
+        dimensions_cm: cleanDimensions(dimensions_cm) ?? { width: 120, height: 75, depth: 80 },
         stock_quantity: vStock,
         price: parsedPrice,
         images: validImgs,

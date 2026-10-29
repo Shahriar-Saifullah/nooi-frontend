@@ -16,6 +16,7 @@ import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/
 import CanvasPromptBox from "@/components/CanvasPromptBox";
 import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
+import { useShopCatalogVersion } from "@/lib/furniture/shopCatalog";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import FurnitureListPanel from "@/components/FurnitureListPanel";
 import {
@@ -91,6 +92,9 @@ const WALL_PAINTS = [
 
 export default function CanvasPage() {
   const router = useRouter();
+  // Re-render when vendor products in the room finish loading, so the
+  // furniture list and inspector show their names, photos and sizes.
+  useShopCatalogVersion();
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [rightTab, setRightTab] = useState<"elements" | "edit">("elements");
   const [zoom, setZoom] = useState(100);
