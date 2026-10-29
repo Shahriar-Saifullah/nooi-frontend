@@ -25,6 +25,7 @@ import {
   LayoutDashboard, Store, PackageCheck, RotateCcw, ShoppingBag, XCircle,
   LifeBuoy, Users, Wallet, UsersRound, Settings, ScrollText, Loader2, ShieldAlert,
   LogOut,
+  Box,
 } from "lucide-react";
 
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
@@ -110,6 +111,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           ready: true,
         },
         { label: "Listings", href: "/admin/listings", icon: <PackageCheck size={17} />, badge: ops?.listings || undefined, ready: true },
+        { label: "3D models", href: "/admin/models", icon: <Box size={17} />, badge: ops?.models || undefined, ready: true },
       ],
     },
     {

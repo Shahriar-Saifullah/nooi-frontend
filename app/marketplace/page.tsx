@@ -45,6 +45,7 @@ import {
 } from "@/lib/api/marketplace";
 import { groupPlacedFurniture, type FurnitureGroup } from "@/components/FurnitureListPanel";
 import { rankProducts, type ProductMatch } from "@/lib/matching/products";
+import { ensureShopItems } from "@/lib/furniture/shopCatalog";
 
 // ─── Copy ────────────────────────────────────────────────────────────────────
 
@@ -276,6 +277,10 @@ function MarketplaceInner() {
         setRoomThumb(project.thumbnail_url);
 
         const placed = project.room_data?.furniture ?? [];
+        // Vendor products placed from the canvas Shop tab: load them first so
+        // their rows show the real photo, name and size.
+        await ensureShopItems((placed as Array<{ modelId?: string }>).map(f => f.modelId));
+        if (cancelled) return;
         const groups = groupPlacedFurniture(placed as any);
 
         // One request per distinct model. Placed rooms are small, so this is a

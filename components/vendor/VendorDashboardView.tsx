@@ -25,6 +25,15 @@ interface NavItem {
   icon: string;
 }
 
+/** Photo sides Nooi's 3D generation understands (services/model3d on the backend). */
+type PhotoSide = "front" | "left" | "back" | "right";
+const PHOTO_SIDES: { value: PhotoSide; label: string }[] = [
+  { value: "front", label: "Front" },
+  { value: "left", label: "Left side" },
+  { value: "back", label: "Back" },
+  { value: "right", label: "Right side" },
+];
+
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", href: "/sell/dashboard", icon: "grid" },
   { id: "orders", label: "Orders", href: "/sell/orders", icon: "package" },
@@ -172,6 +181,12 @@ export default function VendorDashboardView({
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [userMenuOpen]);
 
+  /** Which side of the piece a photo shows. Nooi builds the 3D model from these. */
+  const setPhotoSide = (id: string, view: PhotoSide | "") =>
+    setNlImages(prev => prev.map(x =>
+      x.id === id ? { ...x, view: view || undefined } : view && x.view === view ? { ...x, view: undefined } : x,
+    ));
+
   // Products list state
   const [products, setProducts] = useState<Array<{
     id: string;
@@ -187,6 +202,8 @@ export default function VendorDashboardView({
     status: "pending_review" | "live" | "changes_requested" | "draft" | "deactivated";
     /** Why Nooi sent it back or took it off sale. */
     reviewNote?: string | null;
+    /** live: shoppers can see it in 3D · making: Nooi is building it · none */
+    model3d?: "live" | "making" | "none";
     updatedAt: Date;
   }>>([]);
   const productsRef = useRef(products);
@@ -204,11 +221,13 @@ export default function VendorDashboardView({
   const [nlCat, setNlCat] = useState("Choose");
   const [nlKind, setNlKind] = useState("Made to order");
   const [nlPrice, setNlPrice] = useState("");
+  /** Real size in cm. The 3D model is shown at exactly this size in shoppers' rooms. */
+  const [nlDims, setNlDims] = useState({ width: "", depth: "", height: "" });
   const [nlStock, setNlStock] = useState("");
   const [nlVars, setNlVars] = useState<Array<{ id: string; name: string; sku: string; stock: string }>>([
     { id: "1", name: "Standard", sku: "", stock: "" },
   ]);
-  const [nlImages, setNlImages] = useState<Array<{ id: string; url: string; name: string; isUploading?: boolean; error?: string }>>([]);
+  const [nlImages, setNlImages] = useState<Array<{ id: string; url: string; name: string; isUploading?: boolean; error?: string; view?: PhotoSide }>>([]);
   const [nlModel, setNlModel] = useState<{ url: string; name: string; size?: number; isUploading?: boolean; error?: string } | null>(null);
   const [nlErr, setNlErr] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
@@ -689,6 +708,11 @@ export default function VendorDashboardView({
             description: p.description || "",
             status: listingUiStatus(p.listing_status),
             reviewNote: p.review_note ?? null,
+            model3d: p.specs_json?.model_url
+              ? "live"
+              : ((p.product_model_jobs || []) as { status: string }[]).some((j) => ["queued", "processing", "review"].includes(j.status))
+                ? "making"
+                : "none",
             updatedAt: new Date(p.reviewed_at || p.submitted_at || p.created_at || Date.now()),
           }));
           setProducts((prev) => {
@@ -1041,6 +1065,7 @@ export default function VendorDashboardView({
     setNlCat("Choose");
     setNlKind(fulfillmentType === "Factory" ? "Made to order" : "In stock");
     setNlPrice("");
+    setNlDims({ width: "", depth: "", height: "" });
     setNlStock("");
     setNlVars([{ id: "1", name: "Standard", sku: "", stock: "" }]);
     setNlImages([]);
@@ -1225,6 +1250,14 @@ export default function VendorDashboardView({
           variants: nlVars,
           images: finalImages,
           model_url: nlModel?.url || undefined,
+          dimensions_cm: {
+            width: Number(nlDims.width),
+            depth: Number(nlDims.depth),
+            height: Number(nlDims.height),
+          },
+          photo_views: nlImages
+            .filter((x) => x.url && x.view && !x.isUploading)
+            .map((x) => ({ view: x.view, url: x.url })),
           // is_returnable is false for made-to-order and custom pieces; shoppers
           // are shown a "no returns" notice on the product and order pages.
           is_returnable: nlKind === "In stock",
@@ -3087,6 +3120,8 @@ export default function VendorDashboardView({
                           <span style={{ fontSize: "13px", fontWeight: 600, color: "#101212", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.title}</span>
                           <span style={{ fontSize: "11px", color: "#8E9493" }}>
                             {p.vars.find((v) => v.sku)?.sku || `AR-${p.id.slice(-4).toUpperCase()}`}
+                            {p.model3d === "live" && <span style={{ color: "#28603A" }}> · 3D ready</span>}
+                            {p.model3d === "making" && <span style={{ color: "#8A5A00" }}> · 3D model being made</span>}
                           </span>
                         </div>
 
@@ -3806,6 +3841,33 @@ export default function VendorDashboardView({
                       : "Shoppers see the lead time, never a stock count."}
                   </div>
 
+                  {/* Real-world size — the 3D model is placed in rooms at exactly this size */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 500, color: "#343837" }}>Size (cm)</span>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "10px" }}>
+                      {([
+                        ["width", "Width", "e.g. 220"],
+                        ["depth", "Depth", "e.g. 95"],
+                        ["height", "Height", "e.g. 80"],
+                      ] as const).map(([key, label, hint]) => (
+                        <label key={key} style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", color: "#646968" }}>
+                          {label}
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={nlDims[key]}
+                            onChange={(e) => { setNlDims((d) => ({ ...d, [key]: e.target.value })); setNlErr(""); }}
+                            placeholder={hint}
+                            style={{ padding: "10px 12px", border: "1px solid #D5DBDA", borderRadius: "8px", fontSize: "14px", background: "#FFFFFF", color: "#101212", outline: "none" }}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#646968" }}>
+                      Width is side to side, depth is front to back. Shoppers place your piece in their rooms at this exact size.
+                    </span>
+                  </div>
+
                   {/* No-returns warning — shown for Made to order */}
                   {nlKind === "Made to order" && (
                     <div
@@ -3850,6 +3912,13 @@ export default function VendorDashboardView({
                         setNlErr(
                           `Please enter ${nlKind === "In stock" ? "units in stock" : "lead time"}.`
                         );
+                        return;
+                      }
+                      if ([nlDims.width, nlDims.depth, nlDims.height].some((v) => {
+                        const n = Number(v);
+                        return !v.trim() || !Number.isFinite(n) || n < 1 || n > 2000;
+                      })) {
+                        setNlErr("Please enter the width, depth and height in cm (1–2000).");
                         return;
                       }
                       setNlStep(1);
@@ -4137,7 +4206,7 @@ export default function VendorDashboardView({
                           Important Note: Upload photos from every angle
                         </span>
                         <p style={{ margin: 0, fontSize: "12.5px", color: "#343837", lineHeight: 1.5 }}>
-                          Please upload clear furniture images from every angle — including the <strong>front</strong>, <strong>back</strong>, <strong>left side</strong>, and <strong>right side</strong>. Complete angle coverage gives shoppers full visibility of your craftsmanship and dimensions.
+                          Please upload clear furniture images from every angle — including the <strong>front</strong>, <strong>back</strong>, <strong>left side</strong>, and <strong>right side</strong>. Complete angle coverage gives shoppers full visibility of your craftsmanship and dimensions. Mark which side each photo shows — Nooi uses them to build a 3D model of your piece.
                         </p>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "2px" }}>
                           {["Front view", "Back view", "Left side", "Right side"].map((angle) => (
@@ -4209,7 +4278,7 @@ export default function VendorDashboardView({
                                 <span
                                   style={{
                                     position: "absolute",
-                                    bottom: "6px",
+                                    top: "6px",
                                     left: "6px",
                                     background: "#004643",
                                     color: "#FFFFFF",
@@ -4222,6 +4291,30 @@ export default function VendorDashboardView({
                                   Main image
                                 </span>
                               )}
+                              <select
+                                aria-label="Which side this photo shows"
+                                value={img.view ?? ""}
+                                onChange={(e) => setPhotoSide(img.id, e.target.value as PhotoSide | "")}
+                                style={{
+                                  position: "absolute",
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  border: "none",
+                                  borderTop: "1px solid #D5DBDA",
+                                  background: img.view ? "rgba(0,70,67,0.92)" : "rgba(255,255,255,0.92)",
+                                  color: img.view ? "#FFFFFF" : "#4B4F4F",
+                                  fontSize: "11px",
+                                  fontWeight: 500,
+                                  padding: "5px 6px",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <option value="">Side: not set</option>
+                                {PHOTO_SIDES.map((side) => (
+                                  <option key={side.value} value={side.value}>{side.label}</option>
+                                ))}
+                              </select>
                               <button
                                 type="button"
                                 aria-label="Remove image"
@@ -4290,14 +4383,14 @@ export default function VendorDashboardView({
                           <path d="m3 8 9 5 9-5" />
                           <path d="M12 13v9" />
                         </svg>
-                        3D Canvas & AR Model (.glb)
+                        3D model (.glb) — optional
                       </span>
                       <span style={{ fontSize: "11px", fontWeight: 600, color: "#004643", background: "#F3FEFD", border: "1px solid #87DDD7", padding: "2px 8px", borderRadius: "999px" }}>
                         Interactive 3D
                       </span>
                     </div>
                     <div style={{ fontSize: "12px", color: "#646968", lineHeight: 1.4 }}>
-                      Upload a 3D model in <strong>.glb</strong> format. Shoppers will be able to inspect your product in 360° 3D on the product page and place it inside the 3D room canvas.
+                      Have a 3D file? Upload it in <strong>.glb</strong> format. If not, Nooi makes a 3D model from your photos after your listing is approved. Either way, shoppers can turn your piece around in 3D and place it in their rooms.
                     </div>
 
                     {nlModel ? (
@@ -4493,14 +4586,21 @@ export default function VendorDashboardView({
                       {nlImages.filter((x) => x.url).length} images uploaded
                     </span>
 
+                    <span style={{ color: "#646968" }}>Size</span>
+                    <span style={{ color: "#101212" }}>
+                      {nlDims.width} × {nlDims.depth} × {nlDims.height} cm (W × D × H)
+                    </span>
+
                     <span style={{ color: "#646968" }}>3D Model</span>
                     <span style={{ color: "#101212" }}>
-                      {nlModel?.url ? `Attached (${nlModel.name})` : "None"}
+                      {nlModel?.url
+                        ? `Attached (${nlModel.name})`
+                        : `Nooi will make one from your photos${nlImages.some((x) => x.view) ? ` (${nlImages.filter((x) => x.view).length} sides marked)` : ""}`}
                     </span>
                   </div>
 
                   <div style={{ fontSize: "13px", color: "#28603A", lineHeight: 1.5, background: "#E7FBEB", padding: "10px 14px", borderRadius: "8px", border: "1px solid #B7ECC8" }}>
-                    ✓ Admin approval turned off. Your furniture will be posted directly to the marketplace and made available for shoppers to order immediately.
+                    Nooi reviews new listings within 1 business day. Once approved, your piece goes on sale in the marketplace.
                   </div>
 
                   {/* Repeat no-returns notice on confirm step so vendor sees it before publishing */}

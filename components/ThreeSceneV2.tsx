@@ -27,6 +27,7 @@ import { makeFrame, sceneToReal, snapSceneToRealCm, type PlanFrame } from "@/lib
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
+import { ensureShopItems, useShopCatalogVersion } from "@/lib/furniture/shopCatalog";
 import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
 import PathTracerLayer, { type PathTracerStats } from "@/components/PathTracerLayer";
 import LightingRig, {
@@ -2897,6 +2898,11 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   // apply some changes in their own effects (materials, textures) after the
   // commit R3F already redrew for.
   const kickRef = useRef<((ms: number) => void) | null>(null);
+  // Vendor products placed from the Shop tab ("shop:<id>") resolve once
+  // they're fetched; redraw when they arrive. Library pieces are unaffected.
+  const shopVersion = useShopCatalogVersion();
+  useEffect(() => { void ensureShopItems(furniture.map(f => f.modelId)); }, [furniture]);
+  useEffect(() => { if (shopVersion) kickRef.current?.(1500); }, [shopVersion]);
   useEffect(() => { kickRef.current?.(KICK_MS.update); });
   const raycastFn = useRef<((nx: number, ny: number, mountType?: "floor" | "ceiling") => [number, number] | null) | null>(null);
   const wallPlaceFn = useRef<ThreeSceneHandle["wallPlacementFromNdc"] | null>(null);

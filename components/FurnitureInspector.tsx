@@ -13,6 +13,7 @@ import {
 } from "@/lib/furniture/catalog";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 import { isLightFixture } from "@/components/LightingRig";
+import { formatMoney } from "@/lib/money";
 
 interface Props {
   item: PlacedFurniture;
@@ -50,6 +51,26 @@ export default function FurnitureInspector({ item, onChange, onDelete }: Props) 
           Delete
         </button>
       </div>
+
+      {cat?.shop && (
+        <div className="mb-3 rounded-lg bg-white border border-gray-200 p-2 text-[11.5px]">
+          <div className="text-gray-500">{cat.shop.vendor ?? "Nooi vendor"}</div>
+          <div className="flex items-center justify-between gap-2 mt-0.5">
+            <span className="font-semibold text-teal-800">
+              {cat.shop.onSale ? formatMoney(cat.shop.price) : "No longer for sale"}
+            </span>
+            <a
+              href={`/marketplace/${cat.shop.productId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-teal-700 underline hover:text-teal-900"
+            >
+              View product
+            </a>
+          </div>
+          <div className="mt-1 text-[10px] text-gray-400">Shown at its real size, so it can&apos;t be resized.</div>
+        </div>
+      )}
 
       {isLight && (
         <div className="mb-3 rounded-lg bg-white border border-gray-200 p-2">
@@ -127,15 +148,18 @@ export default function FurnitureInspector({ item, onChange, onDelete }: Props) 
         </>
       )}
 
-      <div className="text-[10px] font-semibold text-gray-400 uppercase mb-1">
-        Size — {Math.round(sizeScale * 100)}%
-      </div>
-      <input
-        type="range" min={0.6} max={1.8} step={0.05}
-        value={sizeScale}
-        onChange={e => onChange({ sizeScale: parseFloat(e.target.value) })}
-        className="w-full accent-teal-700 mb-3"
-      />
+      {/* A real product comes in one size; resizing it would mislead the shopper. */}
+      {!cat?.shop && <>
+        <div className="text-[10px] font-semibold text-gray-400 uppercase mb-1">
+          Size — {Math.round(sizeScale * 100)}%
+        </div>
+        <input
+          type="range" min={0.6} max={1.8} step={0.05}
+          value={sizeScale}
+          onChange={e => onChange({ sizeScale: parseFloat(e.target.value) })}
+          className="w-full accent-teal-700 mb-3"
+        />
+      </>}
 
       {mountType !== "wall" && <div className="flex gap-2">
         <button
