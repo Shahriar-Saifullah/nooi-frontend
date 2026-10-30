@@ -18,6 +18,10 @@ import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import { useShopCatalogVersion } from "@/lib/furniture/shopCatalog";
 import { planRoomLayout } from "@/lib/placement/roomLayout";
+import { listShopItems, ensureShopItems, shopId } from "@/lib/furniture/shopCatalog";
+import { parseBudget } from "@/lib/furniture/budget";
+import { DEFAULT_CURRENCY, formatMoney } from "@/lib/money";
+import { useCartStore } from "@/lib/store/cart.store";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import FurnitureListPanel from "@/components/FurnitureListPanel";
 import {
@@ -528,6 +532,24 @@ export default function CanvasPage() {
     }));
   };
 
+  /**
+   * Swap the selected library piece for a real product (from "Real products
+   * like this"), keeping its position and angle. Refused, with a message, if
+   * the real piece is too big to stand there without going into a wall.
+   */
+  const swapInProduct = async (product: { id: string; title: string }): Promise<boolean> => {
+    if (!selectedFurnitureId) return false;
+    const id = shopId(product.id);
+    await ensureShopItems([id]);
+    const cat = catalogById(id);
+    if (!cat) { noRoomToast("This product doesn't have a 3D model yet."); return false; }
+    return changeFloorItem(selectedFurnitureId, {
+      modelId: cat.id, name: cat.name,
+      width: cat.size.w, depth: cat.size.d, height: cat.size.h,
+      sizeScale: 1, color: null, materialPreset: null,
+    }, `${product.title} is bigger than the space here — move this piece away from the wall first.`);
+  };
+
   const patchSelected = (patch: Partial<PlacedFurniture>) => {
     if (!selectedFurnitureId) return;
     // size and rotation change the footprint: those must not reach into a wall
@@ -731,6 +753,14 @@ export default function CanvasPage() {
   // ── AI furnish: "decorate my master bedroom" → placed furniture ────────────
   const [isFurnishing, setIsFurnishing] = useState(false);
   const [assistantMsg, setAssistantMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  // "Furnish with": Nooi's library models, or real products shoppers can buy
+  // (vendors' listings with a 3D model), optionally within a budget.
+  const [furnishSource, setFurnishSource] = useState<"library" | "shop">("library");
+  const [furnishBudget, setFurnishBudget] = useState("");
+  const [shopSummary, setShopSummary] = useState<{
+    items: { productId: string; variantId: string | null; title: string; vendor: string | null; price: number; image: string | null; qty: number }[];
+    total: number; currency: string; added?: boolean;
+  } | null>(null);
 
   const FURNISH_VERB = /(furnish|decorat|add|place|put|fill|arrange|set\s*up|style)/i;
   const FURNISH_NOUN = /(furnitur|sofa|couch|bed\b|beds\b|table|chair|desk|wardrobe|dresser|rug|lamp|shelf|room|bedroom|living|dining|kitchen|bath|balcon)/i;
@@ -773,6 +803,11 @@ export default function CanvasPage() {
 
   const handleFurnish = async (command: string): Promise<boolean> => {
     if (!currentProject?.id) return false;
+    // Real products when chosen, or when the request says so ("…from the shop",
+    // "…under 8000"); a budget can be typed in the box or in the request.
+    const textBudget = parseBudget(command);
+    const useShop = furnishSource === "shop" || textBudget !== null || /real products|from the shop|buyable|i can buy/i.test(command);
+    const budget = useShop ? (textBudget ?? (Number(furnishBudget.replace(/[^\d.]/g, "")) || undefined)) : undefined;
     const roomPayload = roomWorldRects();
     if (roomPayload.length === 0) {
       setAssistantMsg({ kind: "err", text: "I can't see any rooms yet — wait for the floor plan to load." });
@@ -780,13 +815,25 @@ export default function CanvasPage() {
     }
     setIsFurnishing(true);
     setAssistantMsg(null);
+    setShopSummary(null);
     try {
+      let catalog = FURNITURE_CATALOG.map(c => ({
+        id: c.id, name: c.name, category: c.category, w: c.size.w, d: c.size.d, h: c.size.h,
+      } as { id: string; name: string; category: string; w: number; d: number; h: number; price?: number; vendor?: string }));
+      if (useShop) {
+        const products = (await listShopItems(undefined, 150))
+          .filter(p => p.shop?.onSale && p.shop.inStock !== false && (p.mountType ?? "floor") === "floor");
+        if (!products.length) throw new Error("There are no real products with a 3D model in the shop yet — try the Nooi library instead.");
+        catalog = products.map(p => ({
+          id: p.id, name: p.name, category: p.category, w: p.size.w, d: p.size.d, h: p.size.h,
+          price: p.shop!.price, vendor: p.shop!.vendor ?? undefined,
+        }));
+      }
       const data = await aiFurnish(currentProject.id, {
         command,
         rooms: roomPayload,
-        catalog: FURNITURE_CATALOG.map(c => ({
-          id: c.id, name: c.name, category: c.category, w: c.size.w, d: c.size.d, h: c.size.h,
-        })),
+        catalog,
+        ...(useShop ? { budget, currency: DEFAULT_CURRENCY } : {}),
         existing: placedFurniture.map(f => ({
           name: f.name, x: f.position[0], z: f.position[2],
         })),
@@ -876,13 +923,34 @@ export default function CanvasPage() {
           mountType: cat.mountType,
         });
       }
-      const skipped = layout.dropped.length;
+      const skipped = layout.dropped.length + (data.dropped_for_budget ?? 0);
+
+      // Real products: what it costs and a one-click "add all to cart".
+      if (useShop) {
+        const lines = new Map<string, NonNullable<typeof shopSummary>["items"][number]>();
+        for (const it of newItems) {
+          const shop = it.modelId ? catalogById(it.modelId)?.shop : undefined;
+          if (!shop) continue;
+          const prev = lines.get(shop.productId);
+          if (prev) prev.qty += 1;
+          else lines.set(shop.productId, {
+            productId: shop.productId, variantId: shop.variantId ?? null, title: it.name,
+            vendor: shop.vendor, price: shop.price, image: shop.image ?? null, qty: 1,
+          });
+        }
+        const items = [...lines.values()];
+        setShopSummary({
+          items,
+          total: Number(items.reduce((n, i) => n + i.price * i.qty, 0).toFixed(2)),
+          currency: data.currency || DEFAULT_CURRENCY,
+        });
+      }
       if (newItems.length === 0) throw new Error("No furniture could be placed — try rephrasing.");
       setPlacedFurniture(prev => [...prev, ...newItems]);
       if (viewMode !== "3d") setViewMode("3d");
       setAssistantMsg({
         kind: "ok",
-        text: `${data.message} (${newItems.length} item${newItems.length !== 1 ? "s" : ""} in ${data.targetRoomName}${skipped ? `; ${skipped} didn't fit and were left out` : ""} — drag any of them to adjust.)`,
+        text: `${data.message} (${newItems.length} item${newItems.length !== 1 ? "s" : ""} in ${data.targetRoomName}${skipped ? `; ${skipped} ${data.dropped_for_budget ? "left out to fit the room and budget" : "didn't fit and were left out"}` : ""} — drag any of them to adjust.)`,
       });
     } catch (err: any) {
       setAssistantMsg({ kind: "err", text: err?.message || "Couldn't place furniture — please try again." });
@@ -1548,6 +1616,27 @@ export default function CanvasPage() {
     return () => { delete (window as any).__nooiPanoTest; };
   }, []);
 
+  /** Put every product the AI chose into the cart (one line per product). */
+  const addShopSummaryToCart = () => {
+    if (!shopSummary) return;
+    const cart = useCartStore.getState();
+    for (const i of shopSummary.items) {
+      if (!i.variantId) continue;
+      const existing = cart.items.find(c => c.variant_id === i.variantId);
+      if (existing) {
+        cart.updateQuantityOptimistic(existing.id, existing.quantity + i.qty);
+        continue;
+      }
+      cart.addItemOptimistic({
+        id: i.variantId,
+        variant_id: i.variantId,
+        quantity: i.qty,
+        product_data: { title: i.title, price: i.price, retailer_name: i.vendor ?? undefined, image: i.image ?? undefined },
+      });
+    }
+    setShopSummary(s => (s ? { ...s, added: true } : s));
+  };
+
   const handleAssistantCommand = async (command: string): Promise<boolean> => {
     if (FURNISH_VERB.test(command) && FURNISH_NOUN.test(command)) {
       return handleFurnish(command);
@@ -1851,6 +1940,34 @@ export default function CanvasPage() {
                   : "Describe the room or style you want and I'll generate a design for you."}
               </p>
             </div>
+            {/* What "furnish / decorate" uses: Nooi's models, or real products */}
+            <div className="rounded-[10px] border border-[#e5e5e5] px-3 py-2.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-[#737373]">Furnish with</div>
+              <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-lg bg-[#f5f5f5] p-1">
+                {(["library", "shop"] as const).map(src => (
+                  <button key={src} type="button" onClick={() => setFurnishSource(src)} aria-pressed={furnishSource === src}
+                    className={`rounded-md py-1.5 text-[12px] font-medium transition ${furnishSource === src ? "bg-white text-[#004643] shadow-sm" : "text-[#737373] hover:text-[#404040]"}`}>
+                    {src === "library" ? "Nooi library" : "Real products"}
+                  </button>
+                ))}
+              </div>
+              {furnishSource === "shop" && (
+                <label className="mt-2 flex items-center gap-2 text-[12px] text-[#404040]">
+                  Budget
+                  <span className="flex flex-1 items-center rounded-md border border-[#e5e5e5] bg-white px-2">
+                    <span className="text-[11px] text-[#737373]">{DEFAULT_CURRENCY}</span>
+                    <input value={furnishBudget} onChange={e => setFurnishBudget(e.target.value)} inputMode="numeric"
+                      placeholder="No limit" aria-label="Budget"
+                      className="w-full bg-transparent px-1.5 py-1.5 text-[12px] focus:outline-none" />
+                  </span>
+                </label>
+              )}
+              <p className="mt-1.5 text-[11px] leading-snug text-[#737373]">
+                {furnishSource === "shop"
+                  ? "Try \"decorate my bedroom\". I'll use pieces from Nooi's vendors that you can buy."
+                  : "Try \"decorate my bedroom\". Add \"under 8000\" to use real products within a budget."}
+              </p>
+            </div>
             {isGeneratingRender && (
               <div className="bg-[#f5f5f5] rounded-[10px] px-3.5 py-4 flex items-center gap-2.5">
                 <Loader2 size={14} className="animate-spin text-[#004643]" />
@@ -1877,6 +1994,41 @@ export default function CanvasPage() {
                 <p className={`text-[12px] leading-[1.55] ${
                   assistantMsg.kind === "ok" ? "text-[#004643]" : "text-[#b91c1c]"
                 }`}>{assistantMsg.text}</p>
+              </div>
+            )}
+            {shopSummary && !isFurnishing && (
+              <div className="rounded-[10px] border border-[#e5e5e5] bg-white px-3.5 py-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[12px] font-semibold text-[#0a0a0a]">Products in this room</span>
+                  <span className="text-[13px] font-semibold text-[#004643]">{formatMoney(shopSummary.total, shopSummary.currency)}</span>
+                </div>
+                <ul className="mt-2 space-y-1.5">
+                  {shopSummary.items.map(i => (
+                    <li key={i.productId} className="flex items-center gap-2">
+                      <span className="h-8 w-8 shrink-0 overflow-hidden rounded-md bg-[#f5f5f5]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        {i.image && <img src={i.image} alt="" className="h-full w-full object-cover" />}
+                      </span>
+                      <a href={`/marketplace/${i.productId}`} target="_blank" rel="noopener noreferrer"
+                        className="min-w-0 flex-1 text-[11.5px] leading-tight text-[#404040] hover:underline">
+                        <span className="block truncate">{i.qty > 1 ? `${i.qty} × ` : ""}{i.title}</span>
+                        <span className="block truncate text-[10.5px] text-[#a3a3a3]">{i.vendor ?? "Nooi vendor"}</span>
+                      </a>
+                      <span className="shrink-0 text-[11.5px] text-[#404040]">{formatMoney(i.price * i.qty, shopSummary.currency)}</span>
+                    </li>
+                  ))}
+                </ul>
+                {shopSummary.added ? (
+                  <button type="button" onClick={() => router.push("/cart")}
+                    className="mt-3 w-full rounded-full border border-[#004643] py-2 text-[12px] font-medium text-[#004643] hover:bg-[#f0f7f6]">
+                    Added — go to cart
+                  </button>
+                ) : (
+                  <button type="button" onClick={addShopSummaryToCart}
+                    className="mt-3 w-full rounded-full bg-[#004643] py-2 text-[12px] font-medium text-white hover:bg-[#003836]">
+                    Add all to cart
+                  </button>
+                )}
               </div>
             )}
             {renderError && (
@@ -2531,6 +2683,7 @@ export default function CanvasPage() {
                   item={selectedFurniture}
                   onChange={patchSelected}
                   onDelete={handleDelete}
+                  onUseProduct={swapInProduct}
                 />
               ) : selectedFloorRoomId ? (() => {
                 const room = rooms.find(r => r.id === selectedFloorRoomId);

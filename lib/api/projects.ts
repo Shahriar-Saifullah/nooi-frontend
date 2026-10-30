@@ -270,8 +270,11 @@ export interface AiFurnishPayload {
     rect: { x: number; z: number; w: number; d: number };
     polygon?: [number, number][];   // world coords, when the room is polygonal
   }[];
-  catalog: { id: string; name: string; category: string; w: number; d: number; h?: number }[];
+  catalog: { id: string; name: string; category: string; w: number; d: number; h?: number; price?: number; vendor?: string }[];
   existing?: { name: string; x: number; z: number }[];
+  /** Real products only: the most they may cost together. */
+  budget?: number;
+  currency?: string;
 }
 
 export interface AiFurnishResult {
@@ -279,6 +282,11 @@ export interface AiFurnishResult {
   targetRoomName: string;
   message: string;
   placements: { modelId: string; x: number; z: number; rotation: number }[];
+  /** Real-products mode: what the chosen products cost together. */
+  total_price?: number | null;
+  currency?: string | null;
+  /** pieces the server left out to stay within the budget */
+  dropped_for_budget?: number;
 }
 
 export async function aiFurnish(projectId: string, payload: AiFurnishPayload) {

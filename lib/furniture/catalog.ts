@@ -81,6 +81,10 @@ export interface ShopInfo {
   /** False when the listing has since been taken off sale — it still renders
    *  in rooms that already contain it, but can't be bought. */
   onSale: boolean;
+  /** What "add to cart" buys (cheapest in-stock option), if any. */
+  variantId?: string | null;
+  inStock?: boolean;
+  image?: string | null;
 }
 
 /** A kind of furniture (Sofa, Bed, Dining Chair …) holding its designs. */
