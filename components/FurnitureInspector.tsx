@@ -15,14 +15,18 @@ import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 import { isLightFixture } from "@/components/LightingRig";
 import { formatMoney } from "@/lib/money";
 import { toDeg } from "@/lib/placement/gizmo";
+import SimilarProducts from "@/components/SimilarProducts";
+import type { MarketplaceProduct } from "@/lib/api/marketplace";
 
 interface Props {
   item: PlacedFurniture;
   onChange: (patch: Partial<PlacedFurniture>) => void;
   onDelete: () => void;
+  /** swap a library piece for a real product with a 3D model */
+  onUseProduct?: (product: MarketplaceProduct) => Promise<boolean> | boolean;
 }
 
-export default function FurnitureInspector({ item, onChange, onDelete }: Props) {
+export default function FurnitureInspector({ item, onChange, onDelete, onUseProduct }: Props) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const customizable = cat ? cat.customizable : true;
   const sizeScale = item.sizeScale ?? 1;
@@ -72,6 +76,9 @@ export default function FurnitureInspector({ item, onChange, onDelete }: Props) 
           <div className="mt-1 text-[10px] text-gray-400">Shown at its real size, so it can&apos;t be resized.</div>
         </div>
       )}
+
+      {/* library pieces: the real products closest to them */}
+      {cat && !cat.shop && <SimilarProducts item={item} onUseInRoom={onUseProduct} />}
 
       {isLight && (
         <div className="mb-3 rounded-lg bg-white border border-gray-200 p-2">

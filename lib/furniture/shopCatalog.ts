@@ -33,6 +33,9 @@ export interface ShopCanvasItem {
   category: string | null;
   tags: string[];
   on_sale: boolean;
+  in_stock?: boolean;
+  variant_id?: string | null;
+  variant_price?: number | null;
 }
 
 export const shopId = (productId: string) => `${SHOP_ID_PREFIX}${productId}`;
@@ -55,7 +58,12 @@ function toCatalogItem(p: ShopCanvasItem): CatalogItem {
     // vendor doesn't sell.
     customizable: false,
     mountType: "floor",
-    shop: { productId: p.product_id, vendor: p.vendor, price: p.price, onSale: p.on_sale },
+    shop: {
+      productId: p.product_id, vendor: p.vendor,
+      // the price of what "add to cart" would actually buy
+      price: p.variant_price ?? p.price,
+      onSale: p.on_sale, variantId: p.variant_id ?? null, inStock: p.in_stock ?? true, image: p.photo,
+    },
   };
 }
 
@@ -69,9 +77,10 @@ async function fetchItems(query: string): Promise<CatalogItem[]> {
 }
 
 /** Browse: approved listings with a 3D model, newest first. */
-export function listShopItems(search?: string): Promise<CatalogItem[]> {
+export function listShopItems(search?: string, limit?: number): Promise<CatalogItem[]> {
   const q = new URLSearchParams();
   if (search?.trim()) q.set("search", search.trim());
+  if (limit) q.set("limit", String(limit));
   return fetchItems(q.toString());
 }
 
