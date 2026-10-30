@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { notifyUsers } from "@/app/api/_lib/notify";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 
@@ -119,6 +120,25 @@ export async function POST(
         { success: false, error: updateErr.message + hint },
         { status: 500 }
       );
+    }
+
+    // Made-to-order pieces take weeks; tell the customer as theirs progresses.
+    {
+      const [{ data: order }, { data: retailer }] = await Promise.all([
+        adminClient.from("orders").select("order_number, user_id").eq("id", shipment.order_id).maybeSingle(),
+        adminClient.from("retailers").select("name").eq("id", shipment.retailer_id).maybeSingle(),
+      ]);
+      const from = retailer?.name ? ` by ${retailer.name}` : "";
+      const copy: Record<string, { title: string; message: string }> = {
+        materials: { title: "Materials are being prepared", message: `Work has started${from} on your made-to-order piece (order ${order?.order_number ?? ""}).` },
+        production: { title: "Your piece is being made", message: `Your made-to-order item is in production${from} (order ${order?.order_number ?? ""}).` },
+        qc: { title: "Your piece is in quality check", message: `It's almost ready — final checks${from} before it ships (order ${order?.order_number ?? ""}).` },
+        ready: { title: "Your piece is ready to ship", message: `It's finished and will be dispatched soon (order ${order?.order_number ?? ""}). You'll get tracking when it leaves.` },
+      };
+      const c = copy[String(stage)];
+      if (c && order?.user_id) {
+        await notifyUsers(adminClient, [order.user_id], { ...c, type: "shipment", link: `/orders/${shipment.order_id}` });
+      }
     }
 
     return NextResponse.json({

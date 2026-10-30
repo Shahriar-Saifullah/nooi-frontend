@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { notifyUsers, notifyAdmins } from "@/app/api/_lib/notify";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 
@@ -130,6 +131,21 @@ export async function POST(req: Request) {
         );
       }
     }
+
+    // The vendor gets a receipt; Nooi's team gets the application to review.
+    const storeLabel = payload.storeName || payload.businessName || "A new vendor";
+    await notifyUsers(adminClient, [userId], {
+      title: "Application received",
+      message: "Thanks — Nooi is reviewing your application. You'll hear back here within 2 business days.",
+      type: "vendor_approval",
+      link: "/sell/submitted",
+    });
+    await notifyAdmins(adminClient, {
+      title: "New vendor application",
+      message: `${storeLabel} applied to sell on Nooi.`,
+      type: "admin",
+      link: `/admin/applications?id=${userId}`,
+    });
 
     return NextResponse.json({
       success: true,

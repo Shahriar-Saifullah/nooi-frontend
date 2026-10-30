@@ -27,6 +27,7 @@ import { Search, ShoppingCart, X, LayoutDashboard, LogOut, ChevronDown } from "l
 
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
+import NotificationBell from "@/components/NotificationBell";
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 
 const COPY = {
@@ -237,6 +238,12 @@ export default function ShopHeader() {
               </span>
             )}
           </Link>
+
+          {user && (
+            <NotificationBell
+              buttonClassName="relative flex items-center justify-center h-[40px] w-[40px] md:h-[46px] md:w-[46px] rounded-[12px] border border-[#e6e6e8] bg-white text-[#004643] hover:bg-[#F3FEFD] hover:border-[#87DDD7] transition-colors shrink-0"
+            />
+          )}
 
           {user ? (
             <div ref={dropdownRef} style={{ position: "relative" }}>

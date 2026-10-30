@@ -16,6 +16,7 @@ import {
   listMyTickets, createTicket, getMyTicket, replyToTicket, SUPPORT_CATEGORIES,
   type MyTicket, type SupportMessage,
 } from "@/lib/api/support";
+import { PhotoPicker, MessagePhotos } from "@/components/support/SupportPhotos";
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   open: { label: "With Nooi", cls: "bg-[#FFF6E5] text-[#8A5A00]" },
@@ -115,13 +116,14 @@ function NewTicket({ audience, orderId, onBack, onCreated }: {
   const [category, setCategory] = useState<string>(orderId ? "order" : "general");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [photos, setPhotos] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setError(null);
-    const r = await createTicket({ subject: subject.trim(), category, body: body.trim(), order_id: orderId });
+    const r = await createTicket({ subject: subject.trim(), category, body: body.trim(), order_id: orderId }, photos);
     setBusy(false);
     if (r.success) onCreated(r.data.ticket.id); else setError(errText(r.error, "Could not open the ticket."));
   };
@@ -145,11 +147,15 @@ function NewTicket({ audience, orderId, onBack, onCreated }: {
             <textarea className={input} rows={6} value={body} onChange={e => setBody(e.target.value)} maxLength={5000}
               placeholder="Tell us what happened, with any order numbers or dates." />
           </label>
+          <div className="-mt-2 text-[12px] text-[#8E9493]">
+            Photos help — e.g. damage, the wrong item or colour, or the delivery note.
+            <PhotoPicker photos={photos} onChange={setPhotos} disabled={busy} />
+          </div>
         </div>
         {error && <p className="mt-3 flex items-center gap-1.5 text-[12.5px] text-[#812F28]"><AlertCircle size={13} /> {error}</p>}
         <button disabled={busy || subject.trim().length < 3 || body.trim().length < 5}
           className="mt-4 flex items-center gap-1.5 rounded-full bg-[#004643] px-5 py-2.5 text-[13px] font-medium text-white disabled:opacity-50">
-          {busy && <Loader2 size={13} className="animate-spin" />} Send to Nooi
+          {busy && <Loader2 size={13} className="animate-spin" />} {busy && photos.length ? "Uploading…" : "Send to Nooi"}
         </button>
       </form>
     </>
@@ -160,6 +166,7 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
   const [ticket, setTicket] = useState<(MyTicket & { orders: { order_number: string } | null }) | null>(null);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [reply, setReply] = useState("");
+  const [photos, setPhotos] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
@@ -176,9 +183,9 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
 
   const send = async () => {
     setBusy(true); setError(null);
-    const r = await replyToTicket(id, reply.trim());
+    const r = await replyToTicket(id, reply.trim(), photos);
     setBusy(false);
-    if (r.success) { setReply(""); setVersion(v => v + 1); } else setError(errText(r.error, "Could not send."));
+    if (r.success) { setReply(""); setPhotos([]); setVersion(v => v + 1); } else setError(errText(r.error, "Could not send."));
   };
 
   return (
@@ -199,15 +206,17 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
             {messages.map(m => (
               <div key={m.id} className={`max-w-[85%] rounded-2xl p-3.5 text-[13.5px] ${m.author_role === "admin" ? "bg-[#E9F7F5]" : "ms-auto bg-[#F4F6F6]"}`}>
                 <div className="mb-1 text-[11px] text-[#8E9493]">{m.author_role === "admin" ? "Nooi support" : "You"} · {when(m.created_at)}</div>
-                <div className="whitespace-pre-wrap text-[#101212]">{m.body}</div>
+                {m.body && <div className="whitespace-pre-wrap text-[#101212]">{m.body}</div>}
+                <MessagePhotos attachments={m.attachments} />
               </div>
             ))}
           </div>
           <div className="mt-5 border-t border-[#F1F4F4] pt-4">
             <textarea value={reply} onChange={e => setReply(e.target.value)} rows={3} maxLength={5000}
               placeholder={ticket.status === "resolved" ? "Reply to reopen this ticket…" : "Write a reply…"} className={input} />
+            <PhotoPicker photos={photos} onChange={setPhotos} disabled={busy} />
             {error && <p className="mt-2 text-[12.5px] text-[#812F28]">{error}</p>}
-            <button disabled={busy || !reply.trim()} onClick={send}
+            <button disabled={busy || (!reply.trim() && !photos.length)} onClick={send}
               className="mt-2 flex items-center gap-1.5 rounded-full bg-[#004643] px-4 py-2 text-[12.5px] font-medium text-white disabled:opacity-50">
               {busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Send
             </button>

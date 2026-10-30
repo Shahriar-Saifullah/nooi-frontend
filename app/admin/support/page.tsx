@@ -19,6 +19,7 @@ import {
   listSupportTickets, getSupportTicket, replySupportTicket, setSupportStatus,
   type TicketRow, type TicketMessage,
 } from "@/lib/api/admin";
+import { PhotoPicker, MessagePhotos } from "@/components/support/SupportPhotos";
 
 const TABS = [
   { key: "open", label: "Waiting on us" },
@@ -102,6 +103,7 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [requester, setRequester] = useState<{ name: string | null; role: string | null; email: string | null } | null>(null);
   const [reply, setReply] = useState("");
+  const [photos, setPhotos] = useState<File[]>([]);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
@@ -117,12 +119,12 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
   }, [id, version]);
 
   const send = async (status: "waiting" | "resolved") => {
-    if (!reply.trim()) return;
+    if (!reply.trim() && !photos.length) return;
     setWorking(true); setError(null);
-    const res = await replySupportTicket(id, reply.trim(), status);
+    const res = await replySupportTicket(id, reply.trim(), status, photos);
     setWorking(false);
     if (!res.success) { setError(errText(res.error, "Could not send.")); return; }
-    setReply(""); setVersion(v => v + 1);
+    setReply(""); setPhotos([]); setVersion(v => v + 1);
   };
   const changeStatus = async (status: "open" | "waiting" | "resolved") => {
     await setSupportStatus(id, status); setVersion(v => v + 1);
@@ -159,19 +161,21 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
             {messages.map(m => (
               <div key={m.id} className={`max-w-[85%] rounded-2xl p-3.5 text-[13px] ${m.author_role === "admin" ? "ms-auto bg-[#E9F7F5]" : "bg-[#F4F6F6]"}`}>
                 <div className="mb-1 text-[11px] text-[#8E9493]">{m.author_role === "admin" ? "Nooi" : who} · {when(m.created_at)}</div>
-                <div className="whitespace-pre-wrap text-[#101212]">{m.body}</div>
+                {m.body && <div className="whitespace-pre-wrap text-[#101212]">{m.body}</div>}
+                <MessagePhotos attachments={m.attachments} />
               </div>
             ))}
           </div>
           <div className="mt-5 border-t border-[#F1F4F4] pt-4">
             <textarea value={reply} onChange={e => setReply(e.target.value)} rows={4} placeholder={`Reply to the ${who.toLowerCase()}…`}
               className="w-full rounded-xl border border-[#D5DBDA] p-3 text-[13px] focus:outline-none" />
+            <PhotoPicker photos={photos} onChange={setPhotos} disabled={working} />
             <div className="mt-2 flex flex-wrap gap-2">
-              <button disabled={working || !reply.trim()} onClick={() => send("waiting")}
+              <button disabled={working || (!reply.trim() && !photos.length)} onClick={() => send("waiting")}
                 className="flex items-center gap-1.5 rounded-full bg-[#004643] px-4 py-2 text-[12px] font-medium text-white disabled:opacity-50">
                 {working ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Send
               </button>
-              <button disabled={working || !reply.trim()} onClick={() => send("resolved")}
+              <button disabled={working || (!reply.trim() && !photos.length)} onClick={() => send("resolved")}
                 className="flex items-center gap-1.5 rounded-full border border-[#D5DBDA] px-4 py-2 text-[12px] font-medium text-[#004643] disabled:opacity-50">
                 <CheckCircle2 size={12} /> Send and resolve
               </button>

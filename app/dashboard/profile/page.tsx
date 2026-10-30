@@ -36,6 +36,7 @@ import {
   Share2,
   Globe
 } from "lucide-react";
+import NotificationPrefsPanel from "@/components/profile/NotificationPrefs";
 import { getCurrentUser, logout, updateProfile, updatePassword, type AuthUser } from "@/lib/api/auth";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { createClient } from "@/utils/supabase/client";
@@ -94,21 +95,6 @@ export default function ProfilePage() {
   const [deleteCheckbox1, setDeleteCheckbox1] = useState(false);
   const [deleteCheckbox2, setDeleteCheckbox2] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
-
-  // Notification toggles — Email
-  const [notifProjectUpdates, setNotifProjectUpdates] = useState(true);
-  const [notifWeeklyDigest, setNotifWeeklyDigest] = useState(true);
-  const [notifMarketing, setNotifMarketing] = useState(false);
-  const [notifAccountSecurity, setNotifAccountSecurity] = useState(true);
-  // Notification toggles — Push
-  const [notifRenderComplete, setNotifRenderComplete] = useState(true);
-  const [notifNewFeatures, setNotifNewFeatures] = useState(true);
-  const [notifTipsTutorials, setNotifTipsTutorials] = useState(false);
-  // Notification toggles — In-App
-  const [notifActivityUpdates, setNotifActivityUpdates] = useState(true);
-  const [notifPointsRewards, setNotifPointsRewards] = useState(true);
-  const [notifCollaborations, setNotifCollaborations] = useState(true);
-  const [notifSystemUpdates, setNotifSystemUpdates] = useState(false);
 
   // Preferences toggles
   const [prefDarkMode, setPrefDarkMode] = useState(false);
@@ -1425,139 +1411,10 @@ export default function ProfilePage() {
               {/* Page Header */}
               <div className="px-6 sm:px-8 pt-6 sm:pt-8 pb-6">
                 <h1 className="text-2xl sm:text-3xl font-[600] text-[#0a0a0a] tracking-tight">Notification Settings</h1>
-                <p className="text-sm text-[#737373] mt-1">Choose which notifications you want to receive and how</p>
+                <p className="text-sm text-[#737373] mt-1">Choose which updates you want to hear about</p>
               </div>
 
-              {/* ── Email Notifications ── */}
-              <div className="border-t border-[#f0f0f0] px-6 sm:px-8 pt-6 pb-2">
-                <div className="flex items-center gap-3 mb-1">
-                  <div className="w-9 h-9 rounded-full bg-[#f0f4f3] flex items-center justify-center shrink-0">
-                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-[#004643] stroke-[1.8]">
-                      <rect x="2" y="4" width="20" height="16" rx="2"/>
-                      <polyline points="2,4 12,13 22,4"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <h2 className="text-base font-[700] text-[#0a0a0a]">Email Notifications</h2>
-                    <p className="text-xs text-[#737373]">Manage email communication preferences</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-6 sm:px-8">
-                {([
-                  { label: "Project Updates", desc: "Get notified when your projects are ready or updated", value: notifProjectUpdates, set: setNotifProjectUpdates },
-                  { label: "Weekly Digest", desc: "Receive a weekly summary of your activity and insights", value: notifWeeklyDigest, set: setNotifWeeklyDigest },
-                  { label: "Marketing & Promotions", desc: "Stay updated on new features, tips, and special offers", value: notifMarketing, set: setNotifMarketing },
-                  { label: "Account Security", desc: "Important alerts about your account security and changes", value: notifAccountSecurity, set: setNotifAccountSecurity },
-                ] as { label: string; desc: string; value: boolean; set: (v: boolean) => void }[]).map((item) => (
-                  <div key={item.label} className="flex items-center justify-between py-4 border-t border-[#f5f5f5]">
-                    <div className="pr-6">
-                      <h3 className="text-sm font-[600] text-[#0a0a0a]">{item.label}</h3>
-                      <p className="text-xs text-[#737373] mt-0.5">{item.desc}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => item.set(!item.value)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-                        item.value ? "bg-[#004643]" : "bg-gray-200"
-                      }`}
-                      role="switch"
-                      aria-checked={item.value}
-                    >
-                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${
-                        item.value ? "translate-x-5" : "translate-x-0"
-                      }`} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* ── Push Notifications ── */}
-              <div className="border-t border-[#f0f0f0] px-6 sm:px-8 pt-6 pb-2 mt-2">
-                <div className="flex items-center gap-3 mb-1">
-                  <div className="w-9 h-9 rounded-full bg-[#f0f4f3] flex items-center justify-center shrink-0">
-                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-none stroke-[#004643] stroke-[1.8]">
-                      <rect x="7" y="2" width="10" height="18" rx="2"/>
-                      <line x1="12" y1="18" x2="12" y2="18" strokeLinecap="round" strokeWidth="2.5"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <h2 className="text-base font-[700] text-[#0a0a0a]">Push Notifications</h2>
-                    <p className="text-xs text-[#737373]">Receive instant alerts on your device</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-6 sm:px-8">
-                {([
-                  { label: "Render Complete", desc: "Get notified when your renders are ready to view", value: notifRenderComplete, set: setNotifRenderComplete },
-                  { label: "New Features", desc: "Learn about new tools and features as they launch", value: notifNewFeatures, set: setNotifNewFeatures },
-                  { label: "Tips & Tutorials", desc: "Get helpful tips to improve your design workflow", value: notifTipsTutorials, set: setNotifTipsTutorials },
-                ] as { label: string; desc: string; value: boolean; set: (v: boolean) => void }[]).map((item) => (
-                  <div key={item.label} className="flex items-center justify-between py-4 border-t border-[#f5f5f5]">
-                    <div className="pr-6">
-                      <h3 className="text-sm font-[600] text-[#0a0a0a]">{item.label}</h3>
-                      <p className="text-xs text-[#737373] mt-0.5">{item.desc}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => item.set(!item.value)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-                        item.value ? "bg-[#004643]" : "bg-gray-200"
-                      }`}
-                      role="switch"
-                      aria-checked={item.value}
-                    >
-                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${
-                        item.value ? "translate-x-5" : "translate-x-0"
-                      }`} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* ── In-App Notifications ── */}
-              <div className="border-t border-[#f0f0f0] px-6 sm:px-8 pt-6 pb-2 mt-2">
-                <div className="flex items-center gap-3 mb-1">
-                  <div className="w-9 h-9 rounded-full bg-[#f0f4f3] flex items-center justify-center shrink-0">
-                    <Bell className="w-4 h-4 text-[#004643]" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-[700] text-[#0a0a0a]">In-App Notifications</h2>
-                    <p className="text-xs text-[#737373]">Control notifications you see while using the app</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="px-6 sm:px-8 pb-8">
-                {([
-                  { label: "Activity Updates", desc: "See updates about your projects and creations", value: notifActivityUpdates, set: setNotifActivityUpdates },
-                  { label: "Points & Rewards", desc: "Get notified when you earn points or unlock rewards", value: notifPointsRewards, set: setNotifPointsRewards },
-                  { label: "Collaborations", desc: "Get notified about comments, shares, and team activity", value: notifCollaborations, set: setNotifCollaborations },
-                  { label: "System Updates", desc: "Announcements about maintenance and platform changes", value: notifSystemUpdates, set: setNotifSystemUpdates },
-                ] as { label: string; desc: string; value: boolean; set: (v: boolean) => void }[]).map((item) => (
-                  <div key={item.label} className="flex items-center justify-between py-4 border-t border-[#f5f5f5]">
-                    <div className="pr-6">
-                      <h3 className="text-sm font-[600] text-[#0a0a0a]">{item.label}</h3>
-                      <p className="text-xs text-[#737373] mt-0.5">{item.desc}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => item.set(!item.value)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-                        item.value ? "bg-[#004643]" : "bg-gray-200"
-                      }`}
-                      role="switch"
-                      aria-checked={item.value}
-                    >
-                      <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${
-                        item.value ? "translate-x-5" : "translate-x-0"
-                      }`} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <NotificationPrefsPanel />
 
             </div>
           )}

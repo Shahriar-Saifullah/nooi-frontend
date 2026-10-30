@@ -14,6 +14,7 @@ import {
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 import { isLightFixture } from "@/components/LightingRig";
 import { formatMoney } from "@/lib/money";
+import { toDeg } from "@/lib/placement/gizmo";
 
 interface Props {
   item: PlacedFurniture;
@@ -177,12 +178,44 @@ export default function FurnitureInspector({ item, onChange, onDelete }: Props) 
           Rotate 45° ⟳
         </button>
       </div>}
+      {mountType !== "wall" && <AngleField key={`${item.id}-${toDeg(item.rotation ?? 0)}`}
+        degrees={toDeg(item.rotation ?? 0)}
+        onCommit={deg => onChange({ rotation: (deg * Math.PI) / 180 })} />}
       <div className="mt-2 text-[10px] text-gray-400">
         {mountType === "wall"
           ? "Drag along a wall to move it, up or down to raise it · Delete removes"
-          : <>{mountType === "ceiling" ? "Drag the item on the ceiling to move it" : "Drag the item on the floor to move it"} · R rotates · Delete removes</>}
+          : <>{mountType === "ceiling" ? "Drag the item on the ceiling to move it" : "Drag it to move · drag the blue ring to rotate (Shift: no snapping) · arrows slide it straight"} · R rotates · Delete removes</>}
         {isLight && " · Double-click switches it on or off"}
       </div>
     </div>
+  );
+}
+
+/** Exact angle, 0–359°. Applied on Enter or when the field loses focus. */
+function AngleField({ degrees, onCommit }: { degrees: number; onCommit: (deg: number) => void }) {
+  const [text, setText] = React.useState(String(degrees));
+  const commit = () => {
+    const n = Number(text);
+    if (!Number.isFinite(n)) { setText(String(degrees)); return; }
+    const deg = ((Math.round(n) % 360) + 360) % 360;
+    setText(String(deg));
+    if (deg !== degrees) onCommit(deg);
+  };
+  return (
+    <label className="mt-2 flex items-center justify-between gap-2 text-[11px] text-gray-500">
+      Angle
+      <span className="flex items-center gap-1">
+        <input
+          type="number" inputMode="numeric" min={0} max={359} step={1}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className="w-16 rounded-md border border-gray-200 bg-white px-2 py-1 text-right text-[12px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+          aria-label="Angle in degrees"
+        />
+        <span>°</span>
+      </span>
+    </label>
   );
 }
