@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { notifyAdmins } from "@/app/api/_lib/notify";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 
@@ -430,6 +431,13 @@ export async function POST(req: Request) {
       );
     }
 
+    await notifyAdmins(adminClient, {
+      title: `New listing to review: ${newProduct.title}`,
+      message: `${retailer.name} submitted a new listing.`,
+      type: "admin",
+      link: `/admin/listings?id=${newProduct.id}`,
+    });
+
     return NextResponse.json({
       success: true,
       message: "Listing submitted. Nooi reviews new listings within 1 business day.",
@@ -548,6 +556,7 @@ export async function PATCH(req: Request) {
 
     const now = new Date().toISOString();
     const results: { id: string; status: string; listing_status: string }[] = [];
+    const toReview: { id: string; title: string }[] = [];
 
     for (const p of listings) {
       const specs = { ...(p.specs_json || {}) } as Record<string, unknown>;
@@ -590,6 +599,17 @@ export async function PATCH(req: Request) {
         .update({ is_active: next !== "deactivated", ...(!Number.isNaN(newPrice) && newPrice > 0 ? { price: newPrice } : {}) })
         .eq("product_id", p.id);
       results.push({ id: p.id, status: uiStatus(next), listing_status: next });
+      if (next === "pending" && cur !== "pending") toReview.push({ id: p.id, title: p.title });
+    }
+
+    // Back in Nooi's review queue.
+    if (toReview.length) {
+      await notifyAdmins(adminClient, {
+        title: toReview.length === 1 ? `Listing resubmitted: ${toReview[0].title}` : `${toReview.length} listings to review`,
+        message: "A vendor sent a listing back for review.",
+        type: "admin",
+        link: toReview.length === 1 ? `/admin/listings?id=${toReview[0].id}` : "/admin/listings",
+      });
     }
 
     const single = results.length === 1 ? results[0] : null;

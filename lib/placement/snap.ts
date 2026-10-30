@@ -143,6 +143,12 @@ export function nearestWall(x: number, z: number, walls: WorldWall[]): WallHit |
   return best;
 }
 
+/** Rotation about Y that turns an item's front (local +Z) to face (nx, nz).
+ *  Same convention as wall-mounted decor in ThreeSceneV2. */
+export function facingAwayFromWall(nx: number, nz: number): number {
+  return Math.atan2(nx, nz);
+}
+
 export interface SnapResult {
   x: number; z: number;
   rotation: number;
@@ -172,8 +178,11 @@ export function snapToWall(
   }
 
   // The item's WIDTH runs along the wall and its DEPTH faces it — a 220x90
-  // sofa against a wall shows 220 of frontage, not 90.
-  const rotation = hit.angle;
+  // sofa against a wall shows 220 of frontage, not 90 — and its FRONT (local
+  // +Z) faces into the room, away from the wall. Using the wall's own angle
+  // here instead depended on which end the wall was drawn from, so half of
+  // all snapped beds and wardrobes ended up facing the wall.
+  const rotation = facingAwayFromWall(hit.nx, hit.nz);
 
   // Offset must be the half-extent measured along the WALL NORMAL, not a fixed
   // axis: for a horizontal wall that is the z extent, for a vertical wall the

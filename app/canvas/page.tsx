@@ -17,14 +17,15 @@ import CanvasPromptBox from "@/components/CanvasPromptBox";
 import FloorplanPolygonOverlay from "@/components/FloorplanPolygonOverlay";
 import FurnitureLibrary, { DND_MIME } from "@/components/FurnitureLibrary";
 import { useShopCatalogVersion } from "@/lib/furniture/shopCatalog";
+import { planRoomLayout } from "@/lib/placement/roomLayout";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import FurnitureListPanel from "@/components/FurnitureListPanel";
 import {
   catalogById, FURNITURE_CATALOG, MATERIAL_PRESETS, type CatalogItem,
 } from "@/lib/furniture/catalog";
 import {
-  snapToWall, resolveCollision, prefersWall, pointInPoly, fitsInRoom, pushOutOfWalls,
-  planWallsToWorld, settleClearOfWalls, hitsWall,
+  snapToWall, resolveCollision, prefersWall, pointInPoly, pushOutOfWalls,
+  planWallsToWorld, settleClearOfWalls,
   type WorldWall, type Footprint, type Poly,
 } from "@/lib/placement/snap";
 import {
@@ -806,66 +807,65 @@ export default function CanvasPage() {
         [targetRoom.rect.x, targetRoom.rect.z + targetRoom.rect.d],
       ] as Poly : null);
 
-      const settled: Footprint[] = placedFurniture
+      // Furniture already on the floor is in the way of the new pieces.
+      const existing: Footprint[] = placedFurniture
         .filter(f => (f.mountType ?? "floor") === "floor")
         .map(f => ({
           x: f.position[0], z: f.position[2],
-          w: (f.width ?? 0) / 100, d: (f.depth ?? 0) / 100,
+          w: ((f.width ?? 0) / 100) * (f.sizeScale ?? 1), d: ((f.depth ?? 0) / 100) * (f.sizeScale ?? 1),
           rotation: f.rotation ?? 0, id: f.id,
         }))
         .filter(f => f.w > 0 && f.d > 0);
 
-      data.placements.forEach((p, i) => {
-        const cat = catalogById(p.modelId);
-        if (!cat) return;
+      // Doors, in world metres (same projection the 3D scene uses), so nothing
+      // is put where a door opens.
+      const totalW = roomDimensionsCm.width / 100, totalD = roomDimensionsCm.depth / 100;
+      const doors = openings
+        .filter(op => op.type === "door")
+        .map(op => ({
+          x: (op.x / 10 / 100) * totalW - totalW / 2,
+          z: (op.y / 10 / 100) * totalD - totalD / 2,
+          halfWidth: ((op.width / 1000) * Math.max(totalW, totalD)) / 2,
+        }));
 
-        const id = `${cat.id}-${stamp}-${i}`;
-        let fp: Footprint = {
-          x: p.x, z: p.z,
-          w: cat.size.w / 100, d: cat.size.d / 100,
-          rotation: (p.rotation * Math.PI) / 180,
-          id,
-        };
+      // The AI chose the pieces and suggested spots; the layout planner puts
+      // each one somewhere that makes sense — bed headboard to a wall,
+      // nightstands beside it, wardrobes backed to walls, rug under the bed,
+      // nothing in a wall, outside the room, overlapping, or in a doorway.
+      const chosen = data.placements
+        .map((p, i) => ({ p, i, cat: catalogById(p.modelId) }))
+        .filter((c): c is { p: typeof c.p; i: number; cat: CatalogItem } => Boolean(c.cat))
+        // ceiling and wall-hung pieces are placed by their own rules, not here
+        .filter(c => (c.cat.mountType ?? "floor") === "floor");
 
-        if (walls.length > 0 && prefersWall(cat.name, cat.typeId)) {
-          // Generous threshold: the AI puts these roughly right, just not
-          // touching. Free-standing pieces (coffee table, rug) are untouched.
-          const snap = snapToWall(fp, walls, 1.2);
-          if (snap.snapped) {
-            const moved = { ...fp, x: snap.x, z: snap.z, rotation: snap.rotation };
-            // Snapping targets the nearest wall, which near a corner or a thin
-            // partition can be the far side. Only accept the snap if the whole
-            // footprint still sits inside the room the AI chose.
-            const room = roomPoly;
-            if (!room || fitsInRoom(moved, room)) fp = moved;
-          }
-        }
+      const layout = roomPoly
+        ? planRoomLayout({
+            room: roomPoly,
+            walls,
+            doors,
+            existing,
+            items: chosen.map(({ p, i, cat }) => ({
+              key: `${cat.id}-${stamp}-${i}`,
+              name: cat.name,
+              typeId: cat.typeId,
+              w: cat.size.w / 100, d: cat.size.d / 100, h: cat.size.h / 100,
+              hint: { x: p.x, z: p.z, rotation: (p.rotation * Math.PI) / 180 },
+            })),
+          })
+        : { placed: [], dropped: [] };
 
-        // Evict from wall volume. This applies to everything, not just the
-        // wall-hugging categories: room polygons follow the wall centreline,
-        // so an item can sit "inside the room" and still be buried in a wall.
-        if (walls.length > 0) fp = pushOutOfWalls(fp, walls);
-
-        // keep clear of what is already down, including earlier items in
-        // this same batch
-        fp = resolveCollision(fp, settled);
-        // collision resolution can shove an item back into a wall
-        if (walls.length > 0) fp = pushOutOfWalls(fp, walls);
-        // still inside a wall (no room for it here): leave it out rather
-        // than place it through the wall
-        if (walls.length > 0 && hitsWall(fp, walls)) return;
-        settled.push(fp);
-
+      for (const spot of layout.placed) {
+        const c = chosen.find(x => `${x.cat.id}-${stamp}-${x.i}` === spot.key)!;
+        const cat = c.cat;
         newItems.push({
-          id,
+          id: spot.key,
           modelId: cat.id,
           name: cat.name,
-          // AI returns floor coordinates; lift small items onto any surface
-          // they land on, same as a manual drop
-          position: [fp.x, supportHeightAt(fp.x, fp.z, {
-            width: cat.size.w, depth: cat.size.d, mountType: (cat as any).mountType,
-          }), fp.z],
-          rotation: fp.rotation,
+          // lift small items onto any surface they land on, same as a drop
+          position: [spot.x, supportHeightAt(spot.x, spot.z, {
+            width: cat.size.w, depth: cat.size.d, mountType: cat.mountType,
+          }), spot.z],
+          rotation: spot.rotation,
           sizeScale: 1,
           color: null,
           materialPreset: null,
@@ -873,15 +873,16 @@ export default function CanvasPage() {
           width: cat.size.w,
           depth: cat.size.d,
           height: cat.size.h,
-          mountType: (cat as any).mountType,
+          mountType: cat.mountType,
         });
-      });
+      }
+      const skipped = layout.dropped.length;
       if (newItems.length === 0) throw new Error("No furniture could be placed — try rephrasing.");
       setPlacedFurniture(prev => [...prev, ...newItems]);
       if (viewMode !== "3d") setViewMode("3d");
       setAssistantMsg({
         kind: "ok",
-        text: `${data.message} (${newItems.length} item${newItems.length !== 1 ? "s" : ""} in ${data.targetRoomName} — drag any of them to adjust.)`,
+        text: `${data.message} (${newItems.length} item${newItems.length !== 1 ? "s" : ""} in ${data.targetRoomName}${skipped ? `; ${skipped} didn't fit and were left out` : ""} — drag any of them to adjust.)`,
       });
     } catch (err: any) {
       setAssistantMsg({ kind: "err", text: err?.message || "Couldn't place furniture — please try again." });

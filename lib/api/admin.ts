@@ -10,6 +10,7 @@
  */
 
 import { requestApi, type ApiResponse } from "./http";
+import { postWithPhotos, type SupportAttachment } from "./support";
 import { createClient } from "@/utils/supabase/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -870,7 +871,7 @@ export interface TicketRow {
   created_at: string;
   orders: { order_number: string } | null;
 }
-export interface TicketMessage { id: string; author_role: "customer" | "vendor" | "admin"; body: string; created_at: string }
+export interface TicketMessage { id: string; author_role: "customer" | "vendor" | "admin"; body: string; attachments?: SupportAttachment[]; created_at: string }
 export async function listSupportTickets(tab: string, search?: string): Promise<ApiResponse<{ tickets: TicketRow[]; counts: Record<string, number> }>> {
   const q = new URLSearchParams({ tab });
   if (search) q.set("search", search);
@@ -880,8 +881,10 @@ export async function listSupportTickets(tab: string, search?: string): Promise<
 export async function getSupportTicket(id: string): Promise<ApiResponse<{ ticket: any; messages: TicketMessage[]; requester: { name: string | null; role: string | null; email: string | null } }>> {
   return requestApi({ path: `/admin/support/${encodeURIComponent(id)}`, method: "GET" });
 }
-export async function replySupportTicket(id: string, body: string, status: "waiting" | "resolved"): Promise<ApiResponse<unknown>> {
-  return requestApi({ path: `/admin/support/${encodeURIComponent(id)}/reply`, method: "POST", body: { body, status } });
+export async function replySupportTicket(id: string, body: string, status: "waiting" | "resolved", photos: File[] = []): Promise<ApiResponse<unknown>> {
+  const path = `/admin/support/${encodeURIComponent(id)}/reply`;
+  if (photos.length) return postWithPhotos(path, { body, status }, photos);
+  return requestApi({ path, method: "POST", body: { body, status } });
 }
 export async function setSupportStatus(id: string, status: "open" | "waiting" | "resolved"): Promise<ApiResponse<unknown>> {
   return requestApi({ path: `/admin/support/${encodeURIComponent(id)}/status`, method: "POST", body: { status } });

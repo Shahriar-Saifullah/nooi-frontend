@@ -1,10 +1,11 @@
 "use client";
 
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import VendorPaymentsPanel from "@/components/vendor/VendorPaymentsPanel";
 import VendorSupportPanel from "@/components/support/SupportCenter";
+import NotificationBell from "@/components/NotificationBell";
 import ListingReviewActions, { listingUiStatus } from "@/components/vendor/ListingReviewActions";
 import { useVendorStore } from "@/lib/store";
 import { createClient } from "@/utils/supabase/client";
@@ -166,7 +167,6 @@ export default function VendorDashboardView({
   // Vendor journey lifecycle state (Pending review, New vendor approved, Established vendor)
   const [vendorStage, setVendorStage] = useState<VendorJourneyStage>("pending");
   const [deliveryRegionsDone, setDeliveryRegionsDone] = useState(false);
-  const [bellOpen, setBellOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -298,6 +298,12 @@ export default function VendorDashboardView({
   const [isDispatching, setIsDispatching] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Record<string, boolean>>({});
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
+  // Notification links: /sell/orders?order=NOOI-123 opens that order,
+  // /sell/support?ticket=<id> opens that ticket.
+  const searchParams = useSearchParams();
+  const orderParam = searchParams.get("order");
+  const ticketParam = searchParams.get("ticket");
+  const openedFromLink = useRef<string | null>(null);
   const [trackingInput, setTrackingInput] = useState("");
   const [trackingErr, setTrackingErr] = useState("");
   const [cancelMode, setCancelMode] = useState(false);
@@ -572,6 +578,15 @@ export default function VendorDashboardView({
   const selN = Object.keys(selectedOrderIds).length;
   const selOrders = orders.filter(x => selectedOrderIds[x.id]);
   const openOrder = orders.find(x => x.id === openOrderId) ?? null;
+
+  useEffect(() => {
+    if (!orderParam || openedFromLink.current === orderParam) return;
+    const match = orders.find(o => o.id === orderParam || o.orderNumber === orderParam);
+    if (match) {
+      openedFromLink.current = orderParam;
+      setOpenOrderId(match.id);
+    }
+  }, [orderParam, orders]);
 
   // Build packing groups from selected orders
   const buildPackingGroups = () => {
@@ -1713,152 +1728,26 @@ export default function VendorDashboardView({
 
           <div style={{ flex: 1 }}></div>
 
-          {/* Notifications */}
-          <div style={{ position: "relative" }}>
-            <button
-              type="button"
-              onClick={() => setBellOpen(!bellOpen)}
-              aria-label="Notifications"
-              style={{
-                background: "none",
-                border: "1px solid #EAEDEC",
-                borderRadius: "8px",
-                width: "36px",
-                height: "36px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: "pointer",
-                color: "#343837",
-                position: "relative",
-              }}
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-              </svg>
-              {vendorStage === "established" && (orders.some((o) => o.overdue) || products.some((p) => p.status === "changes_requested")) && (
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "6px",
-                    right: "7px",
-                    width: "7px",
-                    height: "7px",
-                    borderRadius: "999px",
-                    background: "#A0483E",
-                  }}
-                />
-              )}
-            </button>
-
-            {bellOpen && (
-              <div
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: "44px",
-                  width: "300px",
-                  background: "#FFFFFF",
-                  border: "1px solid #EAEDEC",
-                  borderRadius: "12px",
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06)",
-                  padding: "8px",
-                  zIndex: 20,
-                }}
-              >
-                <div style={{ padding: "8px 10px", fontSize: "13px", fontWeight: 600, color: "#101212" }}>
-                  Notifications
-                </div>
-                {vendorStage === "pending" && (
-                  <div style={{ padding: "10px", fontSize: "13px", color: "#646968" }}>
-                    We&apos;ll notify you here and by email when review is done.
-                  </div>
-                )}
-                {vendorStage === "new_vendor" && (
-                  <div style={{ padding: "10px", fontSize: "13px", color: "#646968" }}>
-                    No notifications yet. Order and review updates will show here.
-                  </div>
-                )}
-                {vendorStage === "established" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                    {!orders.some((o) => o.overdue) && !products.some((p) => p.status === "changes_requested") ? (
-                      <div style={{ padding: "10px", fontSize: "13px", color: "#646968" }}>
-                        No notifications yet. Order and review updates will show here.
-                      </div>
-                    ) : (
-                      <>
-                        {orders.filter((o) => o.overdue).map((o) => (
-                          <button
-                            key={o.id}
-                            type="button"
-                            onClick={() => {
-                              setOpenOrderId(o.id);
-                              setActiveNav("orders");
-                              setBellOpen(false);
-                            }}
-                            style={{
-                              width: "100%",
-                              textAlign: "left",
-                              background: "none",
-                              border: "none",
-                              borderRadius: "8px",
-                              padding: "10px",
-                              cursor: "pointer",
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "2px",
-                            }}
-                          >
-                            <span style={{ fontSize: "13px", color: "#812F28", fontWeight: 600 }}>
-                              {o.id} is overdue
-                            </span>
-                            <span style={{ fontSize: "12px", color: "#8E9493" }}>Due {o.due}</span>
-                          </button>
-                        ))}
-                        {products.filter((p) => p.status === "changes_requested").map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setActiveNav("products");
-                              setBellOpen(false);
-                            }}
-                            style={{
-                              width: "100%",
-                              textAlign: "left",
-                              background: "none",
-                              border: "none",
-                              borderRadius: "8px",
-                              padding: "10px",
-                              cursor: "pointer",
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "2px",
-                            }}
-                          >
-                            <span style={{ fontSize: "13px", color: "#101212", fontWeight: 500 }}>
-                              Changes requested on {p.title}
-                            </span>
-                            <span style={{ fontSize: "12px", color: "#8E9493" }}>Awaiting updates</span>
-                          </button>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {/* Notifications — real ones from Nooi (orders, returns, payouts,
+              reviews…) plus live "needs attention" items from this page */}
+          <NotificationBell
+            buttonClassName="relative flex h-9 w-9 items-center justify-center rounded-lg border border-[#EAEDEC] bg-white text-[#343837] hover:bg-[#FBFCFC]"
+            attention={vendorStage === "established" ? [
+              ...orders.filter((o) => o.overdue).map((o) => ({
+                key: `overdue-${o.id}`,
+                title: `${o.id} is overdue`,
+                sub: `Due ${o.due}`,
+                urgent: true,
+                onClick: () => { setOpenOrderId(o.id); setActiveNav("orders"); },
+              })),
+              ...products.filter((p) => p.status === "changes_requested").map((p) => ({
+                key: `changes-${p.id}`,
+                title: `Changes requested on ${p.title}`,
+                sub: "Edit and resubmit it",
+                onClick: () => setActiveNav("products"),
+              })),
+            ] : []}
+          />
 
           {/* New Listing Button */}
           <button
@@ -3236,7 +3125,7 @@ export default function VendorDashboardView({
           {activeNav === "payments" && <VendorPaymentsPanel />}
 
           {/* ── SECTION 6: SUPPORT ── */}
-          {activeNav === "support" && <VendorSupportPanel audience="vendor" />}
+          {activeNav === "support" && <VendorSupportPanel key={ticketParam ?? ""} audience="vendor" initialTicketId={ticketParam} />}
 
           {/* ── SECTION 7: SETTINGS ── */}
           {activeNav === "settings" && (

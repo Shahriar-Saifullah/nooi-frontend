@@ -20,6 +20,8 @@ function SupportContent() {
       <ShopHeader />
       <main className="mx-auto max-w-[860px] px-5 pt-[120px] pb-20">
         <SupportCenter
+          // Opening a different ticket from a notification starts fresh.
+          key={`${params.get("ticket") ?? ""}|${params.get("order") ?? ""}`}
           audience="customer"
           initialTicketId={params.get("ticket")}
           initialOrderId={params.get("order")}

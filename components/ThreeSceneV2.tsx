@@ -19,6 +19,7 @@ import {
 import { doorFinishById } from "@/lib/surfaces/doors";
 import { getFaceTextures, getDoorTexture, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
 import WallDecor from "@/components/decor/WallDecor";
+import FurnitureGizmo from "@/components/FurnitureGizmo";
 import { RoomAreaLabels, ItemDimensions } from "@/components/Measurements";
 import { Html } from "@react-three/drei";
 import { installBvh, buildBoundsTrees } from "@/lib/three/bvh";
@@ -2743,6 +2744,29 @@ function SceneContent({
           </CutawayWall>
         );
       })}
+
+      {/* Move / rotate handles on the selected floor piece */}
+      {(() => {
+        const sel = furniture.find(f => f.id === selectedFurnitureId);
+        if (!sel) return null;
+        const selCat = sel.modelId ? catalogById(sel.modelId) : undefined;
+        if ((sel.mountType ?? selCat?.mountType ?? "floor") !== "floor") return null;
+        const sz = itemSizeM(sel);
+        const others: Footprint[] = furniture
+          .filter(f => f.id !== sel.id && (f.mountType ?? "floor") === "floor")
+          .map(f => {
+            const o = itemSizeM(f);
+            return { x: f.position[0], z: f.position[2], w: o.w, d: o.d, rotation: f.rotation ?? 0, id: f.id };
+          })
+          .filter(f => f.w > 0 && f.d > 0);
+        return (
+          <FurnitureGizmo
+            id={sel.id} position={sel.position} rotation={sel.rotation ?? 0}
+            w={sz.w} d={sz.d} walls={worldWalls} others={others}
+            onMove={onFurnitureMove} onRotate={onFurnitureRotate}
+          />
+        );
+      })()}
 
       {furniture.map((f) => {
         const cat = f.modelId ? catalogById(f.modelId) : undefined;

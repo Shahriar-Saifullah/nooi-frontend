@@ -30,6 +30,7 @@ import {
 
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 import { getVendorQueue, getOpsCounts, type OpsCounts } from "@/lib/api/admin";
+import NotificationBell from "@/components/NotificationBell";
 
 interface NavItem {
   label: string;
@@ -199,6 +200,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             Admin
           </span>
         </div>
+        <NotificationBell className="ms-auto me-2" buttonClassName="relative flex h-8 w-8 items-center justify-center rounded-md border border-[#D5DBDA] bg-[#F8FAF9] text-[#4B4F4F] hover:bg-[#F1F4F4]" />
         <button
           type="button"
           onClick={handleLogout}
@@ -223,6 +225,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <span className="font-inter text-[15px] font-bold tracking-tight text-[#111d27]">
             Admin
           </span>
+          <NotificationBell className="ms-auto" placement="below-start" buttonClassName="relative flex h-8 w-8 items-center justify-center rounded-md border border-[#D5DBDA] bg-[#F8FAF9] text-[#4B4F4F] hover:bg-[#F1F4F4]" />
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 pb-4">
