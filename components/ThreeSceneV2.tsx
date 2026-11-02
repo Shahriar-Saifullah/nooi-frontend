@@ -166,6 +166,9 @@ export interface ThreeSceneHandle {
   ) => WallPlacement | null;
   /** render the current view and return it as a PNG data-URL */
   captureImage: () => string | null;
+  /** the project picture: the standard 3D overview of the whole home as a
+   *  4:3 JPEG data-URL, whatever the user's camera is doing */
+  captureOverview: () => string | null;
   /** grayscale depth map of the current view (near = white), for
       depth-conditioned photorealistic rendering */
   captureDepthMap: () => string | null;
@@ -686,14 +689,12 @@ function CutawayWall({
   const ref = useRef<THREE.Group>(null);
   const line = useMemo(() => wallLine(wall, world), [wall, world]);
 
-  useFrame(({ camera, invalidate }, rawDt) => {
-    const g = ref.current;
-    if (!g) return;
-    const dt = frameDt(rawDt);
-
+  // Whether this wall should be cut for a camera at `cam`. Kept on the group
+  // too, so a capture from another viewpoint (the project picture) can cut
+  // the walls for THAT camera rather than the user's.
+  const cutFor = (cam: THREE.Vector3): boolean => {
     let cut = false;
     if (enabled && outside !== 0) {
-      const cam = camera.position;
       // signed distance of the camera from the wall's line, along its normal
       const camSide = line.horiz ? cam.z - line.c : cam.x - line.c;
       // horizontal distance from the camera to the wall's midpoint
@@ -708,6 +709,15 @@ function CutawayWall({
         Math.abs(camSide) / Math.max(flat, 1e-3) > 0.3 && // facing the camera, not edge-on
         elevation < CUTAWAY_MAX_ELEVATION;
     }
+    return cut;
+  };
+
+  useFrame(({ camera, invalidate }, rawDt) => {
+    const g = ref.current;
+    if (!g) return;
+    const dt = frameDt(rawDt);
+    g.userData.cutawayFor = (c: THREE.Vector3) => (cutFor(c) ? CUTAWAY_H / WALL_H : 1);
+    const cut = cutFor(camera.position);
 
     const target = cut ? CUTAWAY_H / WALL_H : 1;
     const y = g.scale.y;
@@ -2458,17 +2468,119 @@ function CameraRig({
 // Lives inside the Canvas so it can reach gl/scene/camera through useThree.
 export interface SceneExportApi {
   capture: () => string;
+  captureOverview: () => string | null;
   captureDepth: () => string;
   exportGlb: () => Promise<Blob>;
   getCamera: () => THREE.Camera;
 }
 
+/** Size of the project picture (4:3, JPEG). */
+const OVERVIEW_W = 1200, OVERVIEW_H = 900;
+const OVERVIEW_BG = "#eef1ef";
+
 function ExportBridge({
-  register, world,
-}: { register: (api: SceneExportApi) => void; world: World }) {
-  const { gl, scene, camera } = useThree();
+  register, world, building,
+}: {
+  register: (api: SceneExportApi) => void; world: World;
+  /** the walls' footprint in scene metres, to frame the project picture */
+  building: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
+}) {
+  const { gl, scene, camera, invalidate } = useThree();
   useEffect(() => {
     register({
+      // The project picture: the standard ¾ "3D" view of the whole home,
+      // whatever the user's own camera is doing — framed on the building, not
+      // the ground around it, with walls cut away for THIS viewpoint and no
+      // editor UI. Rendered into the visible canvas (cropped to 4:3), then
+      // the user's view is redrawn on the next frame.
+      captureOverview: () => {
+        const el = gl.domElement;
+        const w = el.width, h = el.height;
+        if (!w || !h) return null;
+        const b = building ?? {
+          minX: -world.totalW / 2, maxX: world.totalW / 2, minZ: -world.totalD / 2, maxZ: world.totalD / 2,
+        };
+        const user = camera as THREE.PerspectiveCamera;
+        const cam = new THREE.PerspectiveCamera(user.fov || 40, w / h, 0.1, 500);
+
+        // fit the building's bounding sphere inside the 4:3 crop
+        const cropW = Math.min(w, (h * 4) / 3), cropH = (cropW * 3) / 4;
+        const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+        const vFov = 2 * Math.atan(tanV * (cropH / h));
+        const hFov = 2 * Math.atan(tanV * (cropW / h));
+        const bw = b.maxX - b.minX, bd = b.maxZ - b.minZ;
+        const r = 0.5 * Math.hypot(bw, bd, WALL_H) * 0.9;
+        const dist = r / Math.sin(Math.min(vFov, hFov) / 2);
+        const tgt = new THREE.Vector3((b.minX + b.maxX) / 2, WALL_H * 0.3, (b.minZ + b.maxZ) / 2);
+        const dir = new THREE.Vector3(0.55, 0.62, 0.95).normalize();
+        let d = dist;
+        const place = () => {
+          cam.position.copy(tgt).addScaledVector(dir, d);
+          cam.lookAt(tgt);
+          cam.updateMatrixWorld();
+          cam.updateProjectionMatrix();
+        };
+        place();
+        // The sphere is a loose fit. Project the building's corners and
+        // tighten: centre them in the crop and fill ~90% of it.
+        const sx = cropW / w, sy = cropH / h;          // crop size in NDC units (of 2)
+        const corners: THREE.Vector3[] = [];
+        for (const x of [b.minX, b.maxX]) for (const y of [0, WALL_H]) for (const z of [b.minZ, b.maxZ]) {
+          corners.push(new THREE.Vector3(x, y, z));
+        }
+        for (let pass = 0; pass < 2; pass++) {
+          const ndc = corners.map(c => c.clone().project(cam));
+          const x0 = Math.min(...ndc.map(p => p.x)) / sx, x1 = Math.max(...ndc.map(p => p.x)) / sx;
+          const y0 = Math.min(...ndc.map(p => p.y)) / sy, y1 = Math.max(...ndc.map(p => p.y)) / sy;
+          // move the target so the building sits in the middle of the crop
+          const halfH = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * d;
+          const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+          const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1);
+          tgt.addScaledVector(right, ((x0 + x1) / 2) * sx * halfH * cam.aspect);
+          tgt.addScaledVector(up, ((y0 + y1) / 2) * sy * halfH);
+          // and come closer / back off so it fills ~90% of the crop
+          const extent = Math.max((x1 - x0) / 2, (y1 - y0) / 2);
+          if (extent > 0.05) d *= extent / 0.9;
+          place();
+        }
+
+        // walls cut for this camera; editor UI hidden; a light backdrop
+        const restore: (() => void)[] = [];
+        scene.traverse((o) => {
+          const f = o.userData?.cutawayFor as ((c: THREE.Vector3) => number) | undefined;
+          if (f) { const y = o.scale.y; o.scale.y = f(cam.position); restore.push(() => { o.scale.y = y; }); }
+          if (o.name === "nooi-ui" && o.visible) { o.visible = false; restore.push(() => { o.visible = true; }); }
+        });
+        const prevBg = scene.background;
+        scene.background = new THREE.Color(OVERVIEW_BG);
+        const prevTarget = gl.getRenderTarget();
+        const prevToneMapping = gl.toneMapping;
+        gl.toneMapping = THREE.ACESFilmicToneMapping;
+
+        let url: string | null = null;
+        try {
+          gl.setRenderTarget(null);
+          gl.render(scene, cam);
+          const out = document.createElement("canvas");
+          out.width = OVERVIEW_W; out.height = OVERVIEW_H;
+          const g2 = out.getContext("2d");
+          if (g2) {
+            g2.drawImage(el, (w - cropW) / 2, (h - cropH) / 2, cropW, cropH, 0, 0, OVERVIEW_W, OVERVIEW_H);
+            url = out.toDataURL("image/jpeg", 0.85);
+          }
+        } catch {
+          url = null;
+        } finally {
+          scene.background = prevBg;
+          gl.toneMapping = prevToneMapping;
+          restore.forEach(fn => fn());
+          gl.setRenderTarget(prevTarget);
+          // redraw the user's view through the normal pipeline (post-
+          // processing included) on the next frame
+          invalidate();
+        }
+        return url;
+      },
       getCamera: () => camera,
       // Depth map for ControlNet-style conditioning. Renders the scene with a
       // depth material, then inverts it: three.js writes near=black/far=white,
@@ -2623,7 +2735,7 @@ function ExportBridge({
           );
         }),
     });
-  }, [gl, scene, camera, register]);
+  }, [gl, scene, camera, register, building, world, invalidate]);
   return null;
 }
 
@@ -3206,6 +3318,12 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
     () => planWallsToWorld(rfWalls, world.totalW, world.totalD),
     [rfWalls, world],
   );
+  // the home's footprint, for framing the project picture
+  const buildingBox = useMemo(() => {
+    if (!worldWallsRoot.length) return null;
+    const xs = worldWallsRoot.flatMap(w => [w.x1, w.x2]), zs = worldWallsRoot.flatMap(w => [w.z1, w.z2]);
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs) };
+  }, [worldWallsRoot]);
   // Everything the walker cannot pass through in Inside mode.
   const walkObstacles = useMemo(
     () => buildWalkObstacles(rfWalls, openings, world, furniture),
@@ -3230,6 +3348,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       wallPlaceFn.current ? wallPlaceFn.current(nx, ny, item, nearestIfMissed) : null,
     captureImage: () =>
       exportApi.current ? exportApi.current.capture() : null,
+    captureOverview: () =>
+      exportApi.current ? exportApi.current.captureOverview() : null,
     captureDepthMap: () =>
       exportApi.current ? exportApi.current.captureDepth() : null,
     exportGlb: async () =>
@@ -3305,7 +3425,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
                        rooms={rooms} world={world} />
       <WallPlacementBridge register={(fn) => { wallPlaceFn.current = fn; }}
                            walls={worldWallsRoot} />
-      <ExportBridge register={(api) => { exportApi.current = api; }} world={world} />
+      <ExportBridge register={(api) => { exportApi.current = api; }} world={world} building={buildingBox} />
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
       <DemandDriver kickRef={kickRef} />
       <SurfaceTextureRefresh />

@@ -360,3 +360,16 @@ export async function saveWalls(
   if (!json.success) throw new Error(json.error || 'Failed to save walls');
   return json.data as { room_data: unknown };
 }
+/** Save the project picture (a data-URL of the 3D overview). Returns its link. */
+export async function saveThumbnail(projectId: string, image: string) {
+  const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/thumbnail`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ image }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || 'Failed to save the project picture');
+  return json.data as { thumbnail_url: string };
+}

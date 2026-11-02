@@ -46,6 +46,7 @@ import {
 import { groupPlacedFurniture, type FurnitureGroup } from "@/components/FurnitureListPanel";
 import { rankProducts, type ProductMatch } from "@/lib/matching/products";
 import { ensureShopItems } from "@/lib/furniture/shopCatalog";
+import { recentProjectThumb } from "@/lib/projectThumb";
 
 // ─── Copy ────────────────────────────────────────────────────────────────────
 
@@ -178,6 +179,8 @@ function MarketplaceInner() {
   const [roomLoading, setRoomLoading] = useState(Boolean(projectId));
   const [projectName, setProjectName] = useState<string | null>(null);
   const [roomThumb, setRoomThumb] = useState<string | null>(null);
+  /** the picture is the 2D plan (no 3D view yet): shown whole, not cropped */
+  const [roomThumbIsPlan, setRoomThumbIsPlan] = useState(false);
   const [roomRows, setRoomRows] = useState<
     { group: FurnitureGroup; match: ProductMatch | null }[]
   >([]);
@@ -274,7 +277,12 @@ function MarketplaceInner() {
         if (cancelled) return;
 
         setProjectName(project.name);
-        setRoomThumb(project.thumbnail_url);
+        // The design's picture: the fresh 3D capture the canvas just handed
+        // over, else the saved one, else the 2D floor plan — never blank.
+        const fresh = recentProjectThumb(projectId);
+        const pic = fresh ?? project.thumbnail_url ?? null;
+        setRoomThumb(pic ?? project.floor_plan_url ?? null);
+        setRoomThumbIsPlan(!pic && !!project.floor_plan_url);
 
         const placed = project.room_data?.furniture ?? [];
         // Vendor products placed from the canvas Shop tab: load them first so
@@ -440,7 +448,11 @@ function MarketplaceInner() {
             <div className="rounded-xl overflow-hidden bg-[#F1F4F4] aspect-[4/3]">
               {roomThumb ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={roomThumb} alt="" className="w-full h-full object-cover" />
+                <img
+                  src={roomThumb}
+                  alt={projectName ? `${projectName} design` : "Your design"}
+                  className={`w-full h-full ${roomThumbIsPlan ? "object-contain bg-white p-3" : "object-cover"}`}
+                />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-[#B3B9B9] text-[12px]">
                   <Box size={26} strokeWidth={1.25} />
