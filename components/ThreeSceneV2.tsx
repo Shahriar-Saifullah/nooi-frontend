@@ -522,7 +522,11 @@ function WallWithOpenings({
         if (cut.type === "door") {
           // Width decides what a "door" opening really is:
           //   <=1.3m hinged leaf | <=3.6m sliding glass | wider: open passage
+          // Judged on the REAL width: the scene is drawn visualScale times
+          // larger than life, so a normal 90 cm door can be over 1.3 scene
+          // metres wide and used to come out as a sliding door.
           const HINGED_MAX = 1.3, SLIDER_MAX = 7.0;
+          const realW = sceneToReal(world.frame, cw);
           return (
             <group key={`d${i}`}>
               {/* header above the opening */}
@@ -531,7 +535,7 @@ function WallWithOpenings({
               {box(cut.start, cut.start + 0.05, 0, DOOR_H, `dfa${i}`, frameMat)}
               {box(cut.end - 0.05, cut.end, 0, DOOR_H, `dfb${i}`, frameMat)}
 
-              {cw <= HINGED_MAX && (
+              {realW <= HINGED_MAX && (
                 // hinged leaf, pivoted at the jamb (not its own centre)
                 <SwingDoor
                   horiz={horiz}
@@ -573,7 +577,7 @@ function WallWithOpenings({
                 </SwingDoor>
               )}
 
-              {cw > HINGED_MAX && cw <= SLIDER_MAX && (
+              {realW > HINGED_MAX && realW <= SLIDER_MAX && (
                 // sliding glass panels (patio / balcony sliders)
                 <group key={`sl${i}`}>
                   {Array.from({ length: Math.max(2, Math.round(cw / 1.0)) }).map((_, pi, arr) => {
