@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
   Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
-  Ruler, Sparkles, Sun, DoorOpen,
+  Ruler, Sparkles, Sun, DoorOpen, FileText,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -46,7 +46,8 @@ import {
 import { useRendererBackend } from "@/lib/three/rendererBackend";
 import { capturePanoPair } from "@/lib/panoTest";
 import { useProjectStore } from "@/lib/store";
-import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls } from "@/lib/api/projects";
+import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls, saveThumbnail } from "@/lib/api/projects";
+import { rememberProjectThumb } from "@/lib/projectThumb";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
 import type { PlacedFurniture, WallHandleDragEvent } from "@/components/ThreeSceneV2";
 import WallSizeFields from "@/components/WallSizeFields";
@@ -56,6 +57,7 @@ import {
 } from "@/lib/walls/wallEdit";
 import { makeFrame } from "@/lib/geometry/planFrame";
 import { WALL_T_MIN, WALL_T_MAX } from "@/lib/placement/snap";
+import { buildFurnitureSheet } from "@/lib/export/furnitureSheet";
 import {
   openingKey, openingSpan, placeOpening, wallIndexOf, openingsAfterWallDelete,
   type PlanOpening, type OpeningType,
@@ -232,6 +234,7 @@ export default function CanvasPage() {
           if (p.room_data?.openings) {
             setOpenings(p.room_data.openings);
           }
+          projectHasThumb.current = !!p.thumbnail_url;
           if ((p.room_data as any)?.image_size) {
             setImageSize((p.room_data as any).image_size);
           }
@@ -501,6 +504,9 @@ export default function CanvasPage() {
       saveTimer.current = null;
     }
     try {
+      // the picture goes up alongside the room; a failed picture never
+      // blocks the shop (it falls back to the 2D plan there)
+      const picture = captureProjectThumb();
       await saveFurniture(
         currentProject.id,
         placedFurniture as any,
@@ -509,6 +515,7 @@ export default function CanvasPage() {
         doorFinishes,
         floorSurfaces,
       );
+      if (picture) await Promise.race([picture, new Promise(r => setTimeout(r, 4000))]);
       router.push(`/marketplace?project=${currentProject.id}`);
     } catch (err) {
       console.error("Could not save the room before opening the shop:", err);
@@ -1876,6 +1883,87 @@ export default function CanvasPage() {
     }
   };
 
+  // ── Project picture ───────────────────────────────────────────────────────
+  // The standard 3D overview of the home, saved as the project's thumbnail:
+  // "Shop this room" and the dashboard card show it. Taken when the user goes
+  // to the shop from 3D, and quietly a few seconds after the design changes
+  // in 3D (so it is current even when they shop from the 2D plan later).
+  // Without one, the marketplace and dashboard fall back to the 2D plan image.
+  const projectHasThumb = useRef(false);
+  /** the design as of the last saved picture */
+  const thumbSig = useRef<string | null>(null);
+  const designSig = () => JSON.stringify([placedFurniture, rfWalls, openings, wallColors, wallSurfaces, floorSurfaces, doorFinishes]);
+  const canCaptureOverview = viewMode === "3d" && cameraView !== "inside" && !walkthroughActive && !pathTracing;
+
+  const captureProjectThumb = (): Promise<void> | null => {
+    const id = currentProject?.id;
+    if (!id || !canCaptureOverview) return null;
+    const url = sceneRef.current?.captureOverview?.();
+    if (!url) return null;
+    rememberProjectThumb(id, url);
+    const sig = designSig();
+    return saveThumbnail(id, url)
+      .then(() => { projectHasThumb.current = true; thumbSig.current = sig; })
+      .catch(err => console.warn("Could not save the project picture:", err));
+  };
+  const captureProjectThumbRef = useRef(captureProjectThumb);
+  useEffect(() => { captureProjectThumbRef.current = captureProjectThumb; });
+
+  useEffect(() => {
+    if (!canCaptureOverview || !currentProject?.id || rfWalls.length === 0) return;
+    const sig = designSig();
+    // first look at a project that already has a picture: take it as current
+    if (thumbSig.current === null && projectHasThumb.current) { thumbSig.current = sig; return; }
+    if (sig === thumbSig.current) return;
+    // wait for models to finish loading and the user to pause
+    const t = setTimeout(() => { void captureProjectThumbRef.current(); }, 5000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canCaptureOverview, currentProject?.id, placedFurniture, rfWalls, openings, wallColors, wallSurfaces, floorSurfaces, doorFinishes]);
+
+  // ── Furniture list (PDF) ──────────────────────────────────────────────────
+  // For users who design here but build or buy elsewhere: every placed piece,
+  // grouped by room, with real sizes, finish, mounting and quantity, plus the
+  // floor plan with item numbers. Built in the browser from what the canvas
+  // already holds; no prices (lib/export/furnitureSheet + furnitureSheetPdf).
+  const handleExportSheet = async () => {
+    setExportMenuOpen(false);
+    if (placedFurniture.length === 0) {
+      noRoomToast("Add some furniture first — the list is made from what is placed in the plan.");
+      return;
+    }
+    setExporting(true);
+    try {
+      // shop pieces need their details (name, vendor, picture) loaded
+      await ensureShopItems(placedFurniture.map(f => f.modelId));
+      const totalW = roomDimensionsCm.width / 100, totalD = roomDimensionsCm.depth / 100;
+      const vs = roomDimensionsCm.visualScale || 1;
+      // what each model is really made of, read from its 3D file
+      const { modelFinish } = await import("@/lib/export/modelFinish");
+      const finishes = new Map<string, Awaited<ReturnType<typeof modelFinish>>>();
+      await Promise.all([...new Set(placedFurniture.map(f => f.modelId).filter((id): id is string => !!id))]
+        .map(async id => {
+          const cat = catalogById(id);
+          if (cat?.path && !cat.procedural) finishes.set(id, await modelFinish(cat.path));
+        }));
+      const sheet = buildFurnitureSheet({
+        furniture: placedFurniture, rooms, totalW, totalD, visualScale: vs, finishes,
+      });
+      const { downloadFurnitureSheetPdf } = await import("@/lib/export/furnitureSheetPdf");
+      await downloadFurnitureSheetPdf({
+        sheet,
+        projectName: currentProject?.name || "My design",
+        fileName: `${exportFileBase}-furniture-list.pdf`,
+        plan: { totalW, totalD, visualScale: vs, walls: rfWalls, openings, rooms },
+      });
+    } catch (err) {
+      console.error("Furniture list export failed:", err);
+      noRoomToast("Couldn't create the furniture list. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen w-full bg-[#f5f5f5] overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
 
@@ -2067,9 +2155,20 @@ export default function CanvasPage() {
                       <span className="block text-[11px] text-[#737373]">GLB file with rooms &amp; furniture</span>
                     </span>
                   </button>
+                  <button
+                    onClick={handleExportSheet}
+                    disabled={exporting}
+                    className="w-full flex items-start gap-2.5 px-3.5 py-2 hover:bg-[#fafafa] disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                  >
+                    <FileText size={15} className="mt-[1px] shrink-0 text-[#004643]" />
+                    <span>
+                      <span className="block text-[12px] font-medium text-[#0a0a0a]">Furniture list (PDF)</span>
+                      <span className="block text-[11px] text-[#737373]">Sizes &amp; finishes by room, with a plan</span>
+                    </span>
+                  </button>
                   {viewMode !== "3d" && (
                     <p className="px-3.5 pt-1.5 pb-1 text-[11px] text-[#a3a3a3] border-t border-[#f0f0f0] mt-1">
-                      Switch to 3D view to export
+                      Switch to 3D view to export an image or 3D model
                     </p>
                   )}
                 </div>
