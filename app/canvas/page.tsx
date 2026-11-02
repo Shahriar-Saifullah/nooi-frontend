@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
   Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
-  Ruler, Sparkles, Sun,
+  Ruler, Sparkles, Sun, DoorOpen,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -56,6 +56,10 @@ import {
 } from "@/lib/walls/wallEdit";
 import { makeFrame } from "@/lib/geometry/planFrame";
 import { WALL_T_MIN, WALL_T_MAX } from "@/lib/placement/snap";
+import {
+  openingKey, openingSpan, placeOpening, wallIndexOf, openingsAfterWallDelete,
+  type PlanOpening, type OpeningType,
+} from "@/lib/walls/openings";
 
 // ─── Lazy-load Three.js (no SSR — Three.js requires browser APIs) ─────────────
 const ThreeSceneV2 = dynamic(() => import("@/components/ThreeSceneV2"), {
@@ -111,7 +115,7 @@ export default function CanvasPage() {
   }>>([]);
   const [buildingPerimeter, setBuildingPerimeter] = useState<[number,number][] | null>(null);
   const [rfWalls, setRfWalls] = useState<Array<{x1:number;y1:number;x2:number;y2:number;thickness:number}>>([]);
-  const [openings, setOpenings] = useState<Array<{type:'door'|'window';wall:'horizontal'|'vertical';x:number;y:number;width:number}>>([]);
+  const [openings, setOpenings] = useState<PlanOpening[]>([]);
   const [imageSize, setImageSize] = useState<{width:number;height:number} | null>(null);
   const [fetchedRooms, setFetchedRooms] = useState<any[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
@@ -732,6 +736,10 @@ export default function CanvasPage() {
   const [lightPanelOpen, setLightPanelOpen] = useState(false);
   // Room areas + distance-to-wall lines for the selected item.
   const [showDimensions, setShowDimensions] = useState(false);
+  // "Edit doors & windows" (3D): select / drag / add / resize openings
+  const [editOpenings, setEditOpenings] = useState(false);
+  const [addOpeningType, setAddOpeningType] = useState<OpeningType | null>(null);
+  const [selectedOpening, setSelectedOpening] = useState<number | null>(null);
 
   // ── Rendered walkthrough (path tracing) ───────────────────────────────────
   // Not the AI render. This traces the real scene — the user's own furniture,
@@ -1188,15 +1196,19 @@ export default function CanvasPage() {
     // openings and room polygons were being moved more than once per drag
     // frame while the wall itself moved once.
 
-    // move this wall's openings with it, preserving how far along they sat
+    // move this wall's openings with it, preserving how far along they sat.
+    // Openings are stored in ‰ of the plan, walls in % — convert both ways.
     setOpenings(ops => ops.map(op => {
-      const d = Math.abs((op.x - before.x1) * (before.y2 - before.y1)
-                       - (op.y - before.y1) * (before.x2 - before.x1))
-              / (Math.hypot(before.x2 - before.x1, before.y2 - before.y1) || 1e-9);
-      if (d > 1.5) return op;            // not on this wall
-      const t = openingT(op, before);
-      return { ...op, x: wall.x1 + (wall.x2 - wall.x1) * t,
-                      y: wall.y1 + (wall.y2 - wall.y1) * t };
+      const p = { x: op.x / 10, y: op.y / 10 };
+      const onWall = op.wall_id
+        ? op.wall_id === `w${index}`
+        : Math.abs((p.x - before.x1) * (before.y2 - before.y1)
+                 - (p.y - before.y1) * (before.x2 - before.x1))
+            / (Math.hypot(before.x2 - before.x1, before.y2 - before.y1) || 1e-9) <= 1.5;
+      if (!onWall) return op;
+      const t = openingT(p, before);
+      return { ...op, x: (wall.x1 + (wall.x2 - wall.x1) * t) * 10,
+                      y: (wall.y1 + (wall.y2 - wall.y1) * t) * 10 };
     }));
     // Only the wall the user actually grabbed drags the room boundary. Walls
     // that moved to stay welded at a corner must not drag it too: a vertex
@@ -1312,18 +1324,161 @@ export default function CanvasPage() {
   const handleWallDelete = (index: number) => {
     const w = rfWalls[index];
     if (!w) return;
-    // drop the openings that lived in it — a door with no wall is nonsense
-    const nextOpenings = openings.filter(op => {
-      const d = Math.abs((op.x - w.x1) * (w.y2 - w.y1) - (op.y - w.y1) * (w.x2 - w.x1))
-              / (Math.hypot(w.x2 - w.x1, w.y2 - w.y1) || 1e-9);
-      return d > 1.5;
-    });
+    // drop the openings that lived in it — a door with no wall is nonsense —
+    // and renumber the rest's wall_id, which indexes the walls array
+    const nextOpenings = openingsAfterWallDelete(openings, rfWalls, index, openingPlanSize);
+    setSelectedOpening(null);
     const nextWalls = rfWalls.filter((_, i) => i !== index);
     setOpenings(nextOpenings);
     setRfWalls(nextWalls);
     setSelectedWallIndex(null);
     void commitWalls(nextWalls, nextOpenings);
   };
+
+  // ── Doors & windows editing (3D) ──────────────────────────────────────────
+  // Geometry rules live in lib/walls/openings; the scene does the picking and
+  // dragging and hands back the new openings. Saved with the walls, like any
+  // other wall edit. Door finishes are stored by opening key, so a door that
+  // moves takes its finish along. Undo / redo cover these edits while the
+  // mode is on (they are separate from the furniture history).
+  const openingPlanSize = { totalW: roomDimensionsCm.width / 100, totalD: roomDimensionsCm.depth / 100 };
+  type OpeningSnap = { openings: PlanOpening[]; doorFinishes: Record<string, string> };
+  const openingUndo = useRef<OpeningSnap[]>([]);
+  const openingRedo = useRef<OpeningSnap[]>([]);
+  /** state before the current drag, recorded on its first move */
+  const openingGesture = useRef<OpeningSnap | null>(null);
+  // re-render for the undo / redo buttons (the stacks live in refs)
+  const [, setOpeningTick] = useState(0);
+  /** the openings as last set here — a drag can fire several moves per render */
+  const openingsRef = useRef(openings);
+  useEffect(() => { openingsRef.current = openings; }, [openings]);
+
+  const remapFinish = (before: PlanOpening | undefined, after: PlanOpening | undefined) => {
+    if (!before) return;
+    const from = openingKey(before);
+    const to = after ? openingKey(after) : null;
+    if (from === to) return;
+    setDoorFinishes(prev => {
+      if (!(from in prev)) return prev;
+      const next = { ...prev };
+      const fin = next[from];
+      delete next[from];
+      if (to && after?.type === "door") next[to] = fin;
+      return next;
+    });
+  };
+
+  const pushOpeningHistory = (snap: OpeningSnap) => {
+    openingUndo.current.push(snap);
+    if (openingUndo.current.length > 50) openingUndo.current.shift();
+    openingRedo.current = [];
+    setOpeningTick(t => t + 1);
+  };
+
+  /** Apply an edit. "move" = live drag frame (no save), "end" = save. */
+  const changeOpenings = (next: PlanOpening[], phase: "move" | "end", index: number, removed = false) => {
+    const prev = openingsRef.current;
+    if (phase === "move" && !openingGesture.current) {
+      openingGesture.current = { openings: prev, doorFinishes };
+    }
+    // the edited opening's finish follows it (or goes, if it is no longer a door)
+    if (index < prev.length) remapFinish(prev[index], removed ? undefined : next[index]);
+    openingsRef.current = next;
+    setOpenings(next);
+    if (phase === "end") {
+      pushOpeningHistory(openingGesture.current ?? { openings: prev, doorFinishes });
+      openingGesture.current = null;
+      void commitWalls(undefined, next);
+    }
+  };
+
+  const sceneOpeningEdit = editOpenings ? {
+    addType: addOpeningType,
+    selected: selectedOpening,
+    onSelect: setSelectedOpening,
+    onChange: (next: PlanOpening[], phase: "move" | "end", index: number) => {
+      const added = next.length > openingsRef.current.length;
+      changeOpenings(next, phase, index);
+      if (added) { setAddOpeningType(null); setSelectedOpening(index); }
+    },
+    onNoRoom: () => noRoomToast(`No room for a ${addOpeningType ?? "door"} there — try a longer stretch of wall.`),
+  } : null;
+
+  const selectedOpeningInfo = (() => {
+    const op = selectedOpening !== null ? openings[selectedOpening] : undefined;
+    if (!op) return null;
+    const { half } = openingSpan(op, openingPlanSize);
+    return { op, widthCm: Math.round((half * 2) / (roomDimensionsCm.visualScale || 1) * 100) };
+  })();
+
+  /** Change the selected opening's width (real cm) or type, keeping its spot if it fits. */
+  const updateSelectedOpening = (patch: { widthCm?: number; type?: OpeningType }) => {
+    const i = selectedOpening;
+    const op = i !== null ? openings[i] : undefined;
+    if (i === null || !op) return;
+    const wi = wallIndexOf(op, rfWalls, openingPlanSize);
+    if (wi < 0) return;
+    const { centre, half } = openingSpan(op, openingPlanSize);
+    const vs = roomDimensionsCm.visualScale || 1;
+    const widthM = patch.widthCm !== undefined
+      ? Math.max(40, Math.min(600, patch.widthCm)) / 100 * vs
+      : half * 2;
+    const placed = placeOpening({
+      openings, walls: rfWalls, size: openingPlanSize, wallIndex: wi,
+      centre, widthM, type: patch.type ?? op.type, skip: i,
+    });
+    if (!placed) { noRoomToast("It doesn't fit there at that width."); return; }
+    changeOpenings(openings.map((o, k) => (k === i ? placed : o)), "end", i);
+  };
+
+  const deleteSelectedOpening = () => {
+    const i = selectedOpening;
+    if (i === null || !openings[i]) return;
+    changeOpenings(openings.filter((_, k) => k !== i), "end", i, true);
+    setSelectedOpening(null);
+  };
+
+  const undoOpenings = (redo = false) => {
+    const from = redo ? openingRedo.current : openingUndo.current;
+    const to = redo ? openingUndo.current : openingRedo.current;
+    const snap = from.pop();
+    if (!snap) return;
+    to.push({ openings, doorFinishes });
+    openingsRef.current = snap.openings;
+    setOpenings(snap.openings);
+    setDoorFinishes(snap.doorFinishes);
+    setSelectedOpening(null);
+    setOpeningTick(t => t + 1);
+    void commitWalls(undefined, snap.openings);
+  };
+
+  const toggleEditOpenings = () => {
+    setEditOpenings(on => !on);
+    setAddOpeningType(null);
+    setSelectedOpening(null);
+    setSelectedFurnitureId(null);
+    setSelectedWall(null);
+    setSelectedDoor(null);
+    setSelectedFloorRoomId(null);
+  };
+
+  useEffect(() => {
+    if (!editOpenings || viewMode !== "3d") return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return;
+      if (e.key === "Escape") {
+        if (addOpeningType) setAddOpeningType(null);
+        else setSelectedOpening(null);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedOpening !== null) {
+        e.preventDefault();
+        deleteSelectedOpening();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editOpenings, addOpeningType, selectedOpening, openings, viewMode]);
 
   // ── NOOI-11: add rooms by drawing a shape ─────────────────────────────────
   // Plans often miss a room the CV pipeline could not close, or the user wants
@@ -1467,6 +1622,7 @@ export default function CanvasPage() {
   }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes]);
 
   const undo = () => {
+    if (editOpenings && viewMode === "3d") { undoOpenings(); return; }
     const prev = undoStack.current.pop();
     if (!prev) return;
     if (historyTimer.current) clearTimeout(historyTimer.current);
@@ -1476,6 +1632,7 @@ export default function CanvasPage() {
   };
 
   const redo = () => {
+    if (editOpenings && viewMode === "3d") { undoOpenings(true); return; }
     const next = redoStack.current.pop();
     if (!next) return;
     if (historyTimer.current) clearTimeout(historyTimer.current);
@@ -1501,7 +1658,7 @@ export default function CanvasPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, editOpenings, openings, viewMode]);
 
   // Tooltips should name the shortcut the user actually presses.
   const isMac = typeof navigator !== "undefined"
@@ -1509,8 +1666,9 @@ export default function CanvasPage() {
   const undoHint = isMac ? "⌘Z" : "Ctrl+Z";
   const redoHint = isMac ? "⌘Y" : "Ctrl+Y";
 
-  const canUndo = undoStack.current.length > 0;
-  const canRedo = redoStack.current.length > 0;
+  const openingHistory = editOpenings && viewMode === "3d";
+  const canUndo = (openingHistory ? openingUndo.current : undoStack.current).length > 0;
+  const canRedo = (openingHistory ? openingRedo.current : redoStack.current).length > 0;
   void historyTick;   // stacks live in refs; this state forces the re-render
 
   // ── NOOI-19: re-validate placements after a layout change ─────────────────
@@ -2180,6 +2338,80 @@ export default function CanvasPage() {
                rest: every lamp placed emits, every opening admits daylight. */}
           {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
             <div className="absolute bottom-5 left-5 z-10">
+              {editOpenings && (
+                <div className="mb-2 w-[232px] rounded-[12px] bg-black/70 backdrop-blur-sm p-3.5 text-white">
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <span className="text-[12px] font-semibold">Doors &amp; windows</span>
+                    <button onClick={toggleEditOpenings} title="Done" className="text-white/60 hover:text-white">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="mb-2.5 grid grid-cols-2 gap-1.5">
+                    {(["door", "window"] as const).map(t => (
+                      <button
+                        key={t}
+                        onClick={() => { setAddOpeningType(a => (a === t ? null : t)); setSelectedOpening(null); }}
+                        className={`flex items-center justify-center gap-1 rounded-[7px] py-1.5 text-[11px] font-medium transition-colors ${
+                          addOpeningType === t ? "bg-[#c7de7d] text-[#0a0a0a]" : "bg-white/10 text-white/85 hover:bg-white/20"
+                        }`}
+                      >
+                        <Plus size={12} />{t === "door" ? "Add door" : "Add window"}
+                      </button>
+                    ))}
+                  </div>
+                  {cameraView === "inside" ? (
+                    <p className="text-[11px] leading-snug text-white/65">Switch to the 3D or Top view to edit doors and windows.</p>
+                  ) : addOpeningType ? (
+                    <p className="text-[11px] leading-snug text-white/65">
+                      Click a wall to place the {addOpeningType}. Green means it fits. Esc to cancel.
+                    </p>
+                  ) : selectedOpeningInfo ? (
+                    <div className="space-y-2.5">
+                      <div className="grid grid-cols-2 gap-0.5 rounded-[8px] bg-white/10 p-0.5">
+                        {(["door", "window"] as const).map(t => (
+                          <button
+                            key={t}
+                            onClick={() => t !== selectedOpeningInfo.op.type && updateSelectedOpening({ type: t })}
+                            className={`rounded-[6px] py-1 text-[11px] font-medium transition-colors ${
+                              selectedOpeningInfo.op.type === t ? "bg-white text-[#0a0a0a]" : "text-white/70 hover:text-white"
+                            }`}
+                          >
+                            {t === "door" ? "Door" : "Window"}
+                          </button>
+                        ))}
+                      </div>
+                      <label className="flex items-center justify-between gap-2 text-[11px] text-white/75">
+                        Width
+                        <span className="flex items-center gap-1">
+                          <input
+                            key={`${selectedOpening}-${selectedOpeningInfo.widthCm}`}
+                            type="number" min={40} max={600} step={1}
+                            defaultValue={selectedOpeningInfo.widthCm}
+                            onBlur={(e) => {
+                              const v = Number(e.currentTarget.value);
+                              if (Number.isFinite(v) && v > 0 && v !== selectedOpeningInfo.widthCm) updateSelectedOpening({ widthCm: v });
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                            className="w-[64px] rounded-[6px] bg-white/10 px-2 py-1 text-right text-[11px] text-white outline-none focus:bg-white/20"
+                          />
+                          cm
+                        </span>
+                      </label>
+                      <p className="text-[10.5px] leading-snug text-white/55">Drag it along the wall to move it.</p>
+                      <button
+                        onClick={deleteSelectedOpening}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-[7px] border border-white/20 py-1.5 text-[11px] text-white/80 hover:bg-red-500/80 hover:text-white"
+                      >
+                        <Trash2 size={12} />Delete {selectedOpeningInfo.op.type}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] leading-snug text-white/65">
+                      Click a door or window to select it, then drag it along its wall.
+                    </p>
+                  )}
+                </div>
+              )}
               {lightPanelOpen && (
                 <div className="mb-2 w-[214px] rounded-[12px] bg-black/70 backdrop-blur-sm p-3.5 text-white">
                   {/* Time of day: sun angle and colour, sky, and lamps, all at
@@ -2254,6 +2486,18 @@ export default function CanvasPage() {
                   }`}
                 >
                   <Ruler size={13} />Dimensions
+                </button>
+                <button
+                  onClick={toggleEditOpenings}
+                  title="Move, add, resize or remove doors and windows"
+                  aria-pressed={editOpenings}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
+                    editOpenings
+                      ? "bg-white text-[#0a0a0a]"
+                      : "bg-black/50 text-white/80 hover:text-white"
+                  }`}
+                >
+                  <DoorOpen size={13} />Doors &amp; windows
                 </button>
               </div>
             </div>
@@ -2516,6 +2760,7 @@ export default function CanvasPage() {
                   }}
                   onFurnitureMove={handleFurnitureMove}
                   onWallHandleDrag={handleWallHandleDrag}
+                  openingEdit={cameraView === "inside" ? null : sceneOpeningEdit}
                   showDimensions={showDimensions}
                   onFurnitureToggleLight={(id) => setPlacedFurniture(prev => prev.map(f =>
                     f.id === id ? { ...f, lightLevel: (f.lightLevel ?? 1) > 0 ? 0 : 1 } : f))}

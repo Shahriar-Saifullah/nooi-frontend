@@ -25,6 +25,10 @@ import { Html } from "@react-three/drei";
 import { installBvh, buildBoundsTrees } from "@/lib/three/bvh";
 import { outsideSides, type OutsideSide } from "@/lib/walls/exterior";
 import { makeFrame, sceneToReal, snapSceneToRealCm, type PlanFrame } from "@/lib/geometry/planFrame";
+import {
+  wallLine as openingWallLine, wallIndexOf, openingSpan, placeOpening,
+  openingKey, type PlanOpening, type WallLine,
+} from "@/lib/walls/openings";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
@@ -251,6 +255,9 @@ interface ThreeSceneV2Props {
   /** Path-traced rendering. Replaces the raster view entirely while on. */
   pathTracing?: boolean;
   onPathTracerStats?: (s: PathTracerStats) => void;
+  /** "Edit doors & windows" mode (orbit views). While set, clicks pick and
+   *  drag openings instead of selecting walls, doors or furniture. */
+  openingEdit?: OpeningEditProps | null;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -1495,50 +1502,294 @@ class ModelErrorBoundary extends React.Component<
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
+// ─── Doors & windows editing (3D) ────────────────────────────────────────────
+//
+// "Edit doors & windows" mode: every opening is drawn as a coloured volume
+// (doors amber, windows blue, the selected one green). Click one to select
+// it, drag it to slide it along its wall; in add mode, click a wall to put a
+// new door or window there. Placement rules live in lib/walls/openings: an
+// opening stays inside its wall, clear of the other openings and of the spots
+// where another wall meets it.
+//
+// Picking is done by hand — the pointer ray against plain boxes — rather than
+// through mesh events: walls are scaled down by the cutaway and furniture
+// sits in the way, and boxes give the same answer from every angle. The
+// listeners run in the capture phase so a press on an opening never starts an
+// orbit.
+
+export interface OpeningEditProps {
+  /** set while placing a new opening: the next wall click adds one */
+  addType: "door" | "window" | null;
+  selected: number | null;
+  onSelect: (index: number | null) => void;
+  /** the openings after an edit: live while dragging ("move"), final on
+   *  "end" (save then). `index` is the opening that changed. */
+  onChange: (next: Opening[], phase: "move" | "end", index: number) => void;
+  /** the click landed on a wall with no room left for the opening */
+  onNoRoom?: () => void;
+}
+
+/** Default widths, real metres. */
+const NEW_OPENING_W = { door: 0.9, window: 1.2 } as const;
+const OPENING_COLOURS = { door: "#e9a54b", window: "#5aa9e6", selected: "#c7de7d", bad: "#e5484d" };
+
+function OpeningEditor({
+  walls, openings, world, edit,
+}: {
+  walls: VWall[]; openings: Opening[]; world: World; edit: OpeningEditProps;
+}) {
+  const get = useThree(st => st.get);
+  const size = useMemo(() => ({ totalW: world.totalW, totalD: world.totalD }), [world]);
+  const lines = useMemo(() => walls.map((w, i) => openingWallLine(w, i, size)), [walls, size]);
+  const spans = useMemo(() => openings.map((op) => {
+    const wi = wallIndexOf(op as PlanOpening, walls, size);
+    return wi < 0 || !lines[wi] ? null : { wi, type: op.type, ...openingSpan(op as PlanOpening, size) };
+  }), [openings, walls, size, lines]);
+
+  const [hover, setHover] = useState<number | null>(null);
+  const [preview, setPreview] = useState<{ wi: number; centre: number; half: number; ok: boolean } | null>(null);
+
+  // the listeners live for the whole mode; they read everything current here
+  const latest = useRef({ walls, openings, lines, spans, edit, size, world });
+  useEffect(() => { latest.current = { walls, openings, lines, spans, edit, size, world }; });
+
+  useEffect(() => {
+    const { gl } = get();
+    const el = gl.domElement;
+    const ray = new THREE.Raycaster();
+    const box = new THREE.Box3();
+    const v = new THREE.Vector3();
+    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const flags = window as unknown as { __nooiFurnitureDrag?: boolean; __nooiWalkMode?: boolean };
+    let drag: { i: number; wi: number; offset: number; widthM: number; type: "door" | "window"; last: Opening[] | null } | null = null;
+    let down: { x: number; y: number; hit: boolean } | null = null;
+
+    const aim = (e: PointerEvent | MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      ray.setFromCamera(new THREE.Vector2(
+        ((e.clientX - r.left) / r.width) * 2 - 1,
+        -(((e.clientY - r.top) / r.height) * 2 - 1),
+      ), get().camera);
+    };
+    const yRange = (type: "door" | "window"): [number, number] =>
+      type === "door" ? [0, DOOR_H] : [SILL_H, DOOR_H];
+    const setBox = (L: WallLine, from: number, to: number, y0: number, y1: number, pad: number) => {
+      if (L.horiz) box.set(new THREE.Vector3(from, y0, L.c - L.t / 2 - pad), new THREE.Vector3(to, y1, L.c + L.t / 2 + pad));
+      else box.set(new THREE.Vector3(L.c - L.t / 2 - pad, y0, from), new THREE.Vector3(L.c + L.t / 2 + pad, y1, to));
+    };
+
+    const hitOpening = () => {
+      const { spans: sp, lines: ls } = latest.current;
+      let best: { i: number; along: number; dist: number } | null = null;
+      sp.forEach((s, i) => {
+        if (!s) return;
+        const L = ls[s.wi];
+        const [y0, y1] = yRange(s.type);
+        setBox(L, s.centre - s.half, s.centre + s.half, y0, y1, 0.05);
+        if (!ray.ray.intersectBox(box, v)) return;
+        const dist = v.distanceTo(ray.ray.origin);
+        if (!best || dist < best.dist) best = { i, along: L.horiz ? v.x : v.z, dist };
+      });
+      return best as { i: number; along: number; dist: number } | null;
+    };
+    const hitWall = () => {
+      const { walls: ws, lines: ls } = latest.current;
+      let best: { wi: number; along: number; dist: number } | null = null;
+      ls.forEach((L, wi) => {
+        const key = (ws[wi] as { id?: string }).id ?? `wi${wi}`;
+        const h = WALL_H * (wallCutScale.get(key) ?? 1);
+        setBox(L, L.a0 - L.t / 2, L.a1 + L.t / 2, 0, h, 0.02);
+        if (!ray.ray.intersectBox(box, v)) return;
+        const dist = v.distanceTo(ray.ray.origin);
+        if (!best || dist < best.dist) best = { wi, along: L.horiz ? v.x : v.z, dist };
+      });
+      if (best) return best as { wi: number; along: number; dist: number };
+      // nothing hit (walls cut low, pointer just past one): the wall nearest
+      // to where the pointer meets the floor, if it is close
+      if (!ray.ray.intersectPlane(floor, v)) return null;
+      let near: { wi: number; along: number; dist: number } | null = null;
+      ls.forEach((L, wi) => {
+        const along = L.horiz ? v.x : v.z, across = L.horiz ? v.z : v.x;
+        const out = Math.max(0, L.a0 - along, along - L.a1);
+        const d = Math.hypot(out, across - L.c);
+        if (d < 0.45 && (!near || d < near.dist)) near = { wi, along, dist: d };
+      });
+      return near as { wi: number; along: number; dist: number } | null;
+    };
+
+    const snap = (a: number) => snapSceneToRealCm(latest.current.world.frame, a);
+    const newWidth = (type: "door" | "window") => NEW_OPENING_W[type] * latest.current.world.frame.visualScale;
+
+    /** the add-mode proposal under the pointer */
+    const proposal = (type: "door" | "window") => {
+      const w = hitWall();
+      if (!w) return null;
+      const { openings: ops, walls: ws, size: sz } = latest.current;
+      const placed = placeOpening({ openings: ops as PlanOpening[], walls: ws, size: sz,
+        wallIndex: w.wi, centre: snap(w.along), widthM: newWidth(type), type });
+      return { w, placed };
+    };
+
+    const stop = (e: Event) => { e.stopImmediatePropagation(); e.preventDefault(); };
+
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      aim(e);
+      const ed = latest.current.edit;
+      if (ed.addType) {
+        const p = proposal(ed.addType);
+        if (!p) return;                       // not on a wall: let the camera orbit
+        stop(e);
+        if (!p.placed) { ed.onNoRoom?.(); return; }
+        const next = [...latest.current.openings, p.placed as Opening];
+        setPreview(null);
+        ed.onChange(next, "end", next.length - 1);
+        return;
+      }
+      const h = hitOpening();
+      const w = h ? hitWall() : null;
+      // a wall standing in front of the opening hides it
+      if (!h || (w && w.dist < h.dist - 0.1 && latest.current.spans[h.i]?.wi !== w.wi)) {
+        down = { x: e.clientX, y: e.clientY, hit: false };
+        return;
+      }
+      stop(e);
+      const s = latest.current.spans[h.i]!;
+      ed.onSelect(h.i);
+      drag = { i: h.i, wi: s.wi, offset: s.centre - h.along, widthM: s.half * 2, type: s.type, last: null };
+      flags.__nooiFurnitureDrag = true;
+      const controls = get().controls as unknown as { enabled: boolean } | null;
+      if (controls) controls.enabled = false;
+      document.body.style.cursor = "grabbing";
+    };
+
+    const onMove = (e: PointerEvent) => {
+      aim(e);
+      const L = latest.current;
+      if (drag) {
+        const line = L.lines[drag.wi];
+        if (!line) return;
+        // slide along the wall: the pointer on the wall's own vertical plane
+        const plane = line.horiz
+          ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -line.c)
+          : new THREE.Plane(new THREE.Vector3(1, 0, 0), -line.c);
+        if (!ray.ray.intersectPlane(plane, v) && !ray.ray.intersectPlane(floor, v)) return;
+        const along = snap((line.horiz ? v.x : v.z) + drag.offset);
+        const placed = placeOpening({ openings: L.openings as PlanOpening[], walls: L.walls, size: L.size,
+          wallIndex: drag.wi, centre: along, widthM: drag.widthM, type: drag.type, skip: drag.i });
+        if (!placed) return;
+        const cur = (drag.last ?? L.openings)[drag.i];
+        if (cur && cur.x === placed.x && cur.y === placed.y && cur.width === placed.width) return;
+        // build on the last frame sent, not the last one rendered: several
+        // moves can arrive before React renders
+        const i = drag.i;
+        drag.last = (drag.last ?? L.openings).map((o, k) => (k === i ? { ...placed, type: o.type } : o));
+        L.edit.onChange(drag.last, "move", i);
+        return;
+      }
+      if (e.target !== el) return;
+      if (L.edit.addType) {
+        const p = proposal(L.edit.addType);
+        if (!p) { setPreview(null); el.style.cursor = ""; return; }
+        const half = newWidth(L.edit.addType) / 2;
+        const sp = p.placed ? openingSpan(p.placed, L.size) : { centre: p.w.along, half };
+        setPreview({ wi: p.w.wi, centre: sp.centre, half: sp.half, ok: !!p.placed });
+        el.style.cursor = p.placed ? "copy" : "not-allowed";
+        return;
+      }
+      const h = hitOpening();
+      setHover(h ? h.i : null);
+      el.style.cursor = h ? "grab" : "";
+    };
+
+    const onUp = (e: PointerEvent) => {
+      if (drag) {
+        const d = drag;
+        drag = null;
+        flags.__nooiFurnitureDrag = false;
+        const controls = get().controls as unknown as { enabled: boolean } | null;
+        if (controls && !flags.__nooiWalkMode) controls.enabled = true;
+        document.body.style.cursor = "";
+        if (d.last) latest.current.edit.onChange(d.last, "end", d.i);
+        return;
+      }
+      // a plain click on nothing (not the end of an orbit) clears the selection
+      if (down && !down.hit && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) {
+        latest.current.edit.onSelect(null);
+      }
+      down = null;
+    };
+
+    el.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      el.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      el.style.cursor = "";
+      if (drag) {
+        flags.__nooiFurnitureDrag = false;
+        const controls = get().controls as unknown as { enabled: boolean } | null;
+        if (controls && !flags.__nooiWalkMode) controls.enabled = true;
+      }
+    };
+  }, [get]);
+
+  // leaving add mode drops its preview (derived, so no effect needed)
+  const shownPreview = edit.addType ? preview : null;
+
+  const volume = (
+    key: string, L: WallLine, centre: number, half: number,
+    type: "door" | "window", colour: string, opacity: number,
+  ) => {
+    const [y0, y1] = type === "door" ? [0, DOOR_H] : [SILL_H, DOOR_H];
+    const len = half * 2, th = L.t + 0.08, h = y1 - y0;
+    return (
+      <mesh key={key} name="nooi-ui" raycast={() => null} renderOrder={900}
+        position={L.horiz ? [centre, (y0 + y1) / 2, L.c] : [L.c, (y0 + y1) / 2, centre]}>
+        <boxGeometry args={L.horiz ? [len, h, th] : [th, h, len]} />
+        <meshBasicMaterial color={colour} transparent opacity={opacity} depthWrite={false} toneMapped={false} />
+      </mesh>
+    );
+  };
+
+  return (
+    <group name="nooi-noexport">
+      {spans.map((s, i) => {
+        if (!s) return null;
+        const sel = edit.selected === i;
+        const colour = sel ? OPENING_COLOURS.selected : OPENING_COLOURS[s.type];
+        return volume(`o${i}`, lines[s.wi], s.centre, s.half, s.type, colour,
+          sel ? 0.8 : hover === i ? 0.7 : 0.55);
+      })}
+      {shownPreview && lines[shownPreview.wi] && edit.addType &&
+        volume("preview", lines[shownPreview.wi], shownPreview.centre, shownPreview.half, edit.addType,
+          shownPreview.ok ? OPENING_COLOURS.selected : OPENING_COLOURS.bad, 0.6)}
+    </group>
+  );
+}
+
 // ─── Opening → wall assignment ───────────────────────────────────────────────
 
 function cutsPerWall(
   walls: VWall[], openings: Opening[], world: World,
 ): Map<number, Cut[]> {
+  // same wall assignment and keys as the doors & windows editor
+  // (lib/walls/openings): wall_id first, else the nearest parallel wall
   const map = new Map<number, Cut[]>();
+  const size = { totalW: world.totalW, totalD: world.totalD };
   openings.forEach((op) => {
-    const ox = world.px(op.x / 10);
-    const oz = world.pz(op.y / 10);
-    const halfW = ((op.width / 1000) * world.maxDim) / 2;
-    const horiz = op.wall === "horizontal";
-
-    // wall_id like "w7" indexes directly into the walls array
-    let idx = -1;
-    if (op.wall_id) {
-      const n = parseInt(op.wall_id.replace(/\D/g, ""), 10);
-      if (!Number.isNaN(n) && n >= 0 && n < walls.length) idx = n;
-    }
-    if (idx < 0) {
-      // fall back to the nearest wall of matching orientation
-      let best = Infinity;
-      walls.forEach((wl, i) => {
-        const wh = Math.abs(wl.x2 - wl.x1) >= Math.abs(wl.y2 - wl.y1);
-        if (wh !== horiz) return;
-        const c = wh ? world.pz(wl.y1) : world.px(wl.x1);
-        const d = Math.abs((horiz ? oz : ox) - c);
-        if (d < best) { best = d; idx = i; }
-      });
-      if (best > 0.6) return; // nothing plausible nearby
-    }
-
-    const center = horiz ? ox : oz;
+    const idx = wallIndexOf(op as PlanOpening, walls, size);
+    if (idx < 0) return;                  // nothing plausible nearby
+    const { centre, half } = openingSpan(op as PlanOpening, size);
     const arr = map.get(idx) ?? [];
-    // Stable per-opening key from its plan position (‰ coords, rounded).
-    // Index would be unstable: re-analysing a plan can reorder openings and
-    const key = op.wall_id
-      ? `${op.wall_id}-${op.type}-${Math.round(op.x)}-${Math.round(op.y)}`
-      : `${op.type}-${Math.round(op.x)}-${Math.round(op.y)}`;
-    arr.push({
-      start: center - halfW,
-      end: center + halfW,
-      type: op.type,
-      key,
-    });
+    // Stable per-opening key from its plan position (‰ coords, rounded):
+    // door finishes are stored against it. An index would be unstable —
+    // re-analysing a plan can reorder openings.
+    arr.push({ start: centre - half, end: centre + half, type: op.type, key: openingKey(op as PlanOpening) });
     map.set(idx, arr);
   });
   return map;
@@ -2382,6 +2633,7 @@ function SceneContent({
   wallCutaway = false,
   showDimensions = false,
   onWallHandleDrag,
+  openingEdit = null,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -2408,7 +2660,11 @@ function SceneContent({
   wallCutaway?: boolean;
   showDimensions?: boolean;
   onWallHandleDrag?: (e: WallHandleDragEvent) => void;
+  openingEdit?: OpeningEditProps | null;
 }) {
+  // While editing doors & windows the editor owns the pointer: walls, doors
+  // and furniture stop reacting to clicks.
+  const editingOpenings = !!openingEdit;
   // drei's ContactShadows is built on GLSL ShaderMaterials, which WebGPU
   // cannot run. On WebGPU the AO pass covers the same contact darkening.
   const isWebGPU = useThree(s => (s.gl as { isWebGPURenderer?: boolean }).isWebGPURenderer === true);
@@ -2605,6 +2861,7 @@ function SceneContent({
   // suspense/error-boundary wrapped models)
   useEffect(() => {
     (window as any).__nooiSelect = (id: string) => {
+      if (editingOpenings) return;
       onFurnitureSelect?.(id);
       startDrag(id);
     };
@@ -2707,8 +2964,8 @@ function SceneContent({
         <RoomFloor
           key={r.id} room={r} world={world}
           surfaceId={floorSurfaces?.[r.id]}
-          selected={selectedFloorRoomId === r.id}
-          onSelect={onFloorSelect}
+          selected={!editingOpenings && selectedFloorRoomId === r.id}
+          onSelect={editingOpenings ? undefined : onFloorSelect}
         />
       ))}
 
@@ -2736,17 +2993,21 @@ function SceneContent({
                 ? (selectedWallSide.endsWith(":A") ? "A" : "B")
                 : null
             }
-            onSelect={onWallSelect}
+            onSelect={editingOpenings ? undefined : onWallSelect}
             doorFinishes={doorFinishes}
-            selectedDoorKey={selectedDoorKey}
-            onDoorSelect={onDoorSelect}
+            selectedDoorKey={editingOpenings ? null : selectedDoorKey}
+            onDoorSelect={editingOpenings ? undefined : onDoorSelect}
           />
           </CutawayWall>
         );
       })}
 
+      {openingEdit && !insideMode && (
+        <OpeningEditor walls={rfWalls} openings={openings} world={world} edit={openingEdit} />
+      )}
+
       {/* Move / rotate handles on the selected floor piece */}
-      {(() => {
+      {!editingOpenings && (() => {
         const sel = furniture.find(f => f.id === selectedFurnitureId);
         if (!sel) return null;
         const selCat = sel.modelId ? catalogById(sel.modelId) : undefined;
@@ -2783,7 +3044,7 @@ function SceneContent({
       })}
 
       {/* ── wall editing handles (orbit views) ── */}
-      {onWallHandleDrag && wallCutaway && selectedWallIndexFromSide >= 0 && rfWalls[selectedWallIndexFromSide] && (
+      {onWallHandleDrag && wallCutaway && !editingOpenings && selectedWallIndexFromSide >= 0 && rfWalls[selectedWallIndexFromSide] && (
         <WallHandles
           wall={rfWalls[selectedWallIndexFromSide]}
           index={selectedWallIndexFromSide}
@@ -2912,6 +3173,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   lighting = DEFAULT_LIGHTING,
   pathTracing = false,
   onPathTracerStats,
+  openingEdit = null,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100, visualScale),
@@ -3077,6 +3339,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           wallCutaway={!insideMode && !(walkthroughActive && !walkthroughPaused)}
           showDimensions={showDimensions}
           onWallHandleDrag={onWallHandleDrag}
+          openingEdit={openingEdit}
           onFurnitureSelect={onFurnitureSelect}
           onFurnitureMove={onFurnitureMove}
           onFurnitureRotate={onFurnitureRotate}
