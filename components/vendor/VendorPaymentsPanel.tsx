@@ -101,8 +101,8 @@ function BankAccountCard({ data, onSaved }: { data: VendorPaymentsData; onSaved:
           <label className="text-[11px] font-medium text-[#646968]">City
             <input className={input} value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} required />
           </label>
-          <label className="text-[11px] font-medium text-[#646968]">Mobile
-            <input className={input} placeholder="+9665XXXXXXXX" value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value })} required />
+          <label className="text-[11px] font-medium text-[#646968]">Saudi mobile
+            <input className={input} placeholder="05XXXXXXXX or +9665XXXXXXXX" title="A Saudi mobile number — bank payouts in Saudi Arabia need one" value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value })} required />
           </label>
           <div className="flex items-end gap-3">
             <button disabled={busy} className="rounded-full bg-[#004643] px-5 py-2.5 text-[13px] font-medium text-white hover:bg-[#003836] disabled:opacity-60">

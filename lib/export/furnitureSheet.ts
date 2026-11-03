@@ -16,6 +16,7 @@ import {
   catalogById, typeById, CATEGORY_LABELS, MATERIAL_PRESETS, isShopId,
 } from "@/lib/furniture/catalog";
 import { colourName } from "./colourName";
+import { pieceSizeCm } from "@/lib/furniture/size";
 import { materialKind, proceduralParts, styledParts, type FinishPart } from "./finishParts";
 
 export { colourName };
@@ -32,6 +33,7 @@ export interface SheetFurniture {
   materialPreset?: string | null;
   mountType?: "floor" | "ceiling" | "wall";
   width?: number; depth?: number; height?: number;
+  dims?: { w: number; d: number; h: number };
 }
 
 export interface SheetRoomInput {
@@ -170,13 +172,9 @@ function fallbackParts(cat: ReturnType<typeof catalogById>, f: SheetFurniture): 
 
 function describe(f: SheetFurniture, finishes?: Map<string, FinishPart[] | null>) {
   const cat = f.modelId ? catalogById(f.modelId) : undefined;
-  const s = f.sizeScale ?? 1;
   // same size rule as the 3D scene (ThreeSceneV2 itemSizeM)
-  const sizeCm = {
-    w: round((f.width ?? cat?.size.w ?? 60) * s),
-    d: round((f.depth ?? cat?.size.d ?? 5) * s),
-    h: round((f.height ?? cat?.size.h ?? 60) * s),
-  };
+  const cm = pieceSizeCm(f, cat, { w: 60, d: 5, h: 60 });
+  const sizeCm = { w: round(cm.w), d: round(cm.d), h: round(cm.h) };
   const mount: Mount = f.mountType ?? cat?.mountType ?? "floor";
   const shop = f.modelId ? isShopId(f.modelId) : false;
   const material = f.materialPreset

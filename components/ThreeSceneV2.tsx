@@ -32,6 +32,8 @@ import {
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
+import { pieceSizeCm, drawnSizeCm, naturalSizeCm } from "@/lib/furniture/size";
+import { stretchModeFor, cutsFor, planStretch, regionOf, publishShares, noGapFor } from "@/lib/furniture/stretch";
 import { ensureShopItems, useShopCatalogVersion } from "@/lib/furniture/shopCatalog";
 import WalkthroughCamera, { type WalkthroughProgressInfo } from "@/components/WalkthroughCamera";
 import PathTracerLayer, { type PathTracerStats } from "@/components/PathTracerLayer";
@@ -125,6 +127,10 @@ export interface PlacedFurniture {
   mountType?: "floor" | "ceiling" | "wall";
   /** Lamps only: 0 = off … 1 = full. Absent = on at full. */
   lightLevel?: number;
+  /** A size the user typed in, real cm. Overrides the catalogue size; the
+   *  size slider still multiplies it. Wider than the model is made via smart
+   *  stretch (lib/furniture/stretch): sofas gain seats, tables lengthen. */
+  dims?: { w: number; d: number; h: number };
   // legacy box fields (still used as GLTF fallback)
   scale?: [number, number, number];
   width?: number;
@@ -261,6 +267,26 @@ interface ThreeSceneV2Props {
   /** "Edit doors & windows" mode (orbit views). While set, clicks pick and
    *  drag openings instead of selecting walls, doors or furniture. */
   openingEdit?: OpeningEditProps | null;
+  /** Array preview: where copies would go (green fits, red doesn't). */
+  ghosts?: ArrayGhost[] | null;
+}
+
+export interface ArrayGhost { x: number; z: number; rotation: number; w: number; d: number; h: number; ok: boolean }
+
+/** Translucent boxes for the Array preview; editor UI, hidden in captures. */
+function ArrayGhosts({ ghosts }: { ghosts: ArrayGhost[] }) {
+  return (
+    <group>
+      {ghosts.map((g, i) => (
+        <mesh key={i} name="nooi-ui" raycast={() => null} renderOrder={950}
+          position={[g.x, g.h / 2 + 0.005, g.z]} rotation={[0, g.rotation, 0]}>
+          <boxGeometry args={[g.w, g.h, g.d]} />
+          <meshBasicMaterial color={g.ok ? "#7fc97f" : "#e5484d"} transparent opacity={0.42}
+            depthWrite={false} toneMapped={false} />
+        </mesh>
+      ))}
+    </group>
+  );
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -819,13 +845,8 @@ function placeOnWall(
 
 /** Item size in metres, honouring its size multiplier. */
 function itemSizeM(item: PlacedFurniture) {
-  const cat = item.modelId ? catalogById(item.modelId) : undefined;
-  const s = item.sizeScale ?? 1;
-  return {
-    w: ((item.width ?? cat?.size.w ?? 60) / 100) * s,
-    h: ((item.height ?? cat?.size.h ?? 60) / 100) * s,
-    d: ((item.depth ?? cat?.size.d ?? 5) / 100) * s,
-  };
+  const cm = pieceSizeCm(item, undefined, { w: 60, d: 5, h: 60 });
+  return { w: cm.w / 100, h: cm.h / 100, d: cm.d / 100 };
 }
 
 function WallMountedItem({
@@ -1292,16 +1313,18 @@ function GltfModel({
     return box;
   }, [clone]);
 
-  // auto-scale the raw model to the catalog real-world size (m), * sizeScale
+  // auto-scale the raw model to its real-world size (m): the typed size if
+  // there is one, else the catalogue's — × sizeScale either way
+  const dimsKey = item.dims ? `${item.dims.w}|${item.dims.d}|${item.dims.h}` : "";
   const fit = useMemo(() => {
     const box = baseSize;
     const size = box.getSize(new THREE.Vector3());
     const s = item.sizeScale ?? 1;
-    const tw = (cat!.size.w / 100) * s;
+    const drawn = drawnSizeCm(item, cat);
+    const tw = drawn.w / 100;
     // architecture (stairs) spans floor to ceiling regardless of catalog height
-    const catH = cat!.fitToWallHeight ? WALL_H * 100 : cat!.size.h;
-    const th = (catH / 100) * s;
-    const td = (cat!.size.d / 100) * s;
+    const th = cat!.fitToWallHeight ? (WALL_H * s) : drawn.h / 100;
+    const td = drawn.d / 100;
     const sx = size.x > 1e-4 ? tw / size.x : 1;
     const sy = size.y > 1e-4 ? th / size.y : 1;
     const sz = size.z > 1e-4 ? td / size.z : 1;
@@ -1312,11 +1335,51 @@ function GltfModel({
     const yOffset = mountType === "ceiling"
       ? WALL_H - maxY
       : -minY;
-    return { scale: [sx, sy, sz] as [number, number, number], yOffset, mountType };
-  }, [baseSize, cat, item.sizeScale, item.mountType]);
+    return { scale: [sx, sy, sz] as [number, number, number], yOffset, mountType, tw };
+    // dimsKey stands in for item.dims (a new object on every save)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseSize, cat, item.sizeScale, item.mountType, dimsKey]);
 
-  useEffect(() => { applyOverrides(clone, item, selected); },
-    [clone, item.color, item.materialPreset, selected, item]);
+  // ── smart stretch: wider by repeating seats / bays, or by lengthening the
+  // middle, not by fattening the whole model (lib/furniture/stretch) ──
+  const stretched = useMemo(() => {
+    const { mode, unit } = stretchModeFor(cat);
+    if (mode === "scale" || !item.dims || fit.mountType !== "floor") return null;
+    const cuts = cutsFor(scene, mode, noGapFor(unit));
+    if (!cuts) return null;
+    // the width the model comes at; the typed width is fit.tw
+    const natural = naturalSizeCm(item, cat).w / 100;
+    const plan = planStretch(cuts, natural, fit.tw);
+    if (!plan) return null;
+    // the source model and the clone share their frame: regions cut from the
+    // original scene are cloned per piece (materials stay shared until
+    // applyOverrides swaps them)
+    const holder = new THREE.Group();
+    for (const p of plan.pieces) {
+      const region = regionOf(scene, cuts, p.region).clone(true);
+      const start = p.region === "left" ? cuts.x0 : p.region === "middle" ? cuts.c1 : cuts.c2;
+      const g = new THREE.Group();
+      g.scale.set(p.k, 1, 1);
+      g.position.x = p.start - p.k * start;
+      g.add(region);
+      holder.add(g);
+    }
+    return holder;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene, cat, fit, dimsKey, item.sizeScale]);
+
+  // repeat-mode models publish their sections even before any resize, so the
+  // panel can say "3 seats → 4 seats" from the first edit
+  useEffect(() => {
+    const { mode, unit } = stretchModeFor(cat);
+    if (mode !== "repeat" || !cat) return;
+    const cuts = cutsFor(scene, mode, noGapFor(unit));
+    if (cuts) publishShares(cat.id, cuts);
+  }, [scene, cat]);
+
+  useEffect(() => { if (stretched) buildBoundsTrees(stretched); }, [stretched]);
+  useEffect(() => { applyOverrides(stretched ?? clone, item, selected); },
+    [clone, stretched, item.color, item.materialPreset, selected, item]);
 
   return (
     <group
@@ -1331,11 +1394,12 @@ function GltfModel({
         item.position[2],
       ]}
       rotation={[0, item.rotation, 0]}
-      scale={fit.scale}
+      // stretched pieces carry their own x scale; y and z scale as usual
+      scale={stretched ? [1, fit.scale[1], fit.scale[2]] : fit.scale}
       onPointerDown={(e) => { e.stopPropagation(); (window as any).__nooiSelect?.(item.id); }}
       onClick={(e) => e.stopPropagation()}
     >
-      <primitive object={clone} />
+      <primitive object={stretched ?? clone} />
     </group>
   );
 }
@@ -1344,10 +1408,8 @@ function BoxFurniture({
   item,
 }: { item: PlacedFurniture; selected: boolean }) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
-  const s = item.sizeScale ?? 1;
-  const w = ((cat?.size.w ?? item.width ?? 80) / 100) * s;
-  const d = ((cat?.size.d ?? item.depth ?? 80) / 100) * s;
-  const h = ((cat?.size.h ?? item.height ?? 80) / 100) * s;
+  const cm = item.dims || cat ? drawnSizeCm(item, cat) : pieceSizeCm(item, cat, { w: 80, d: 80, h: 80 });
+  const w = cm.w / 100, d = cm.d / 100, h = cm.h / 100;
   const mountType = item.mountType ?? cat?.mountType ?? "floor";
   const posY = mountType === "ceiling" ? WALL_H - h / 2 : (item.position[1] ?? 0) + h / 2;
   return (
@@ -1406,7 +1468,7 @@ function SelectionBrackets({
     // the throttle.
     let meshes = 0;
     root?.traverse(o => { if ((o as THREE.Mesh).isMesh) meshes++; });
-    const sig = `${item.position.join()},${item.rotation ?? 0},${item.sizeScale ?? 1},${meshes}`;
+    const sig = `${item.position.join()},${item.rotation ?? 0},${item.sizeScale ?? 1},${item.dims ? `${item.dims.w}x${item.dims.d}x${item.dims.h}` : ""},${meshes}`;
     since.current += dt;
     if (sig === lastSig.current && since.current < 0.25) return;
     lastSig.current = sig;
@@ -1947,10 +2009,8 @@ function buildWalkObstacles(
   for (const f of furniture) {
     const cat = f.modelId ? catalogById(f.modelId) : undefined;
     if ((f.mountType ?? cat?.mountType ?? "floor") !== "floor") continue;
-    const scale = f.sizeScale ?? 1;
-    const w = (f.width ?? (cat ? cat.size.w * scale : 0)) / 100;
-    const d = (f.depth ?? (cat ? cat.size.d * scale : 0)) / 100;
-    const h = (f.height ?? (cat ? cat.size.h * scale : 0)) / 100;
+    const cm = pieceSizeCm(f, cat, { w: 0, d: 0, h: 0 });
+    const w = cm.w / 100, d = cm.d / 100, h = cm.h / 100;
     if (w <= 0 || d <= 0) continue;
     const [hx, hz] = halfExtents({ w, d, rotation: f.rotation ?? 0 });
     out.push({
@@ -2750,6 +2810,7 @@ function SceneContent({
   showDimensions = false,
   onWallHandleDrag,
   openingEdit = null,
+  ghosts = null,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -2777,6 +2838,7 @@ function SceneContent({
   showDimensions?: boolean;
   onWallHandleDrag?: (e: WallHandleDragEvent) => void;
   openingEdit?: OpeningEditProps | null;
+  ghosts?: ArrayGhost[] | null;
 }) {
   // While editing doors & windows the editor owns the pointer: walls, doors
   // and furniture stop reacting to clicks.
@@ -3118,6 +3180,8 @@ function SceneContent({
         );
       })}
 
+      {ghosts && ghosts.length > 0 && <ArrayGhosts ghosts={ghosts} />}
+
       {openingEdit && !insideMode && (
         <OpeningEditor walls={rfWalls} openings={openings} world={world} edit={openingEdit} />
       )}
@@ -3290,6 +3354,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   pathTracing = false,
   onPathTracerStats,
   openingEdit = null,
+  ghosts = null,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100, visualScale),
@@ -3464,6 +3529,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           showDimensions={showDimensions}
           onWallHandleDrag={onWallHandleDrag}
           openingEdit={openingEdit}
+          ghosts={ghosts}
           onFurnitureSelect={onFurnitureSelect}
           onFurnitureMove={onFurnitureMove}
           onFurnitureRotate={onFurnitureRotate}
