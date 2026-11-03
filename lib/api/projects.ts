@@ -205,6 +205,8 @@ export interface FurniturePlacement {
   height?: number;
   /** Lamps only: 0 = off … 1 = full. */
   lightLevel?: number;
+  /** a size the user typed in, real cm (overrides the catalogue size) */
+  dims?: { w: number; d: number; h: number };
 }
 
 export async function saveFurniture(

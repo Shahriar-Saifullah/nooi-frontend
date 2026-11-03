@@ -17,6 +17,8 @@ import { formatMoney } from "@/lib/money";
 import { toDeg } from "@/lib/placement/gizmo";
 import SimilarProducts from "@/components/SimilarProducts";
 import type { MarketplaceProduct } from "@/lib/api/marketplace";
+import { pieceSizeCm, naturalSizeCm } from "@/lib/furniture/size";
+import { stretchModeFor, getShares, subscribeShares, getSharesVersion, repeatsFor } from "@/lib/furniture/stretch";
 
 interface Props {
   item: PlacedFurniture;
@@ -24,9 +26,11 @@ interface Props {
   onDelete: () => void;
   /** swap a library piece for a real product with a 3D model */
   onUseProduct?: (product: MarketplaceProduct) => Promise<boolean> | boolean;
+  /** open the Array tool for this piece */
+  onArray?: () => void;
 }
 
-export default function FurnitureInspector({ item, onChange, onDelete, onUseProduct }: Props) {
+export default function FurnitureInspector({ item, onChange, onDelete, onUseProduct, onArray }: Props) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const customizable = cat ? cat.customizable : true;
   const sizeScale = item.sizeScale ?? 1;
@@ -42,9 +46,12 @@ export default function FurnitureInspector({ item, onChange, onDelete, onUseProd
           <div className="text-sm font-semibold text-gray-800">{item.name}</div>
           {cat && (
             <div className="text-[10px] text-gray-400">
-              {mountType === "wall"
-                ? `${Math.round(cat.size.w * sizeScale)}×${Math.round(cat.size.h * sizeScale)} cm (Wall)`
-                : <>{Math.round(cat.size.w * sizeScale)}×{Math.round(cat.size.d * sizeScale)}{mountType === "ceiling" ? `×${Math.round(cat.size.h * sizeScale)} cm (Ceiling)` : " cm"}</>}
+              {(() => {
+                const z = pieceSizeCm(item, cat);
+                return mountType === "wall"
+                  ? `${Math.round(z.w)}×${Math.round(z.h)} cm (Wall)`
+                  : `${Math.round(z.w)}×${Math.round(z.d)}${mountType === "ceiling" ? `×${Math.round(z.h)} cm (Ceiling)` : " cm"}`;
+              })()}
             </div>
           )}
         </div>
@@ -157,9 +164,11 @@ export default function FurnitureInspector({ item, onChange, onDelete, onUseProd
       )}
 
       {/* A real product comes in one size; resizing it would mislead the shopper. */}
+      {!cat?.shop && <SizeFields item={item} onChange={onChange} />}
+
       {!cat?.shop && <>
         <div className="text-[10px] font-semibold text-gray-400 uppercase mb-1">
-          Size — {Math.round(sizeScale * 100)}%
+          Scale everything — {Math.round(sizeScale * 100)}%
         </div>
         <input
           type="range" min={0.6} max={1.8} step={0.05}
@@ -185,6 +194,15 @@ export default function FurnitureInspector({ item, onChange, onDelete, onUseProd
           Rotate 45° ⟳
         </button>
       </div>}
+      {onArray && mountType !== "wall" && (
+        <button
+          onClick={onArray}
+          className="mt-2 w-full text-[11px] px-2 py-1.5 rounded-md bg-white border border-gray-200 hover:border-teal-400 text-gray-700"
+          title="Repeat this piece in a row, a grid, or around a table"
+        >
+          ⧉ Array — repeat in a row, grid or around a table
+        </button>
+      )}
       {mountType !== "wall" && <AngleField key={`${item.id}-${toDeg(item.rotation ?? 0)}`}
         degrees={toDeg(item.rotation ?? 0)}
         onCommit={deg => onChange({ rotation: (deg * Math.PI) / 180 })} />}
@@ -224,5 +242,96 @@ function AngleField({ degrees, onCommit }: { degrees: number; onCommit: (deg: nu
         <span>°</span>
       </span>
     </label>
+  );
+}
+
+// ── Exact size ──────────────────────────────────────────────────────────────
+// Width, depth and height in real cm. A typed size resets the "scale
+// everything" slider to 100% and is kept on the piece (dims). Getting wider
+// works the way the piece would really be made wider: sofas gain seats,
+// shelves gain bays, tables get a longer top (lib/furniture/stretch).
+
+const LIMITS = { w: [20, 800], d: [10, 300], h: [10, 300] } as const;
+
+function SizeFields({ item, onChange }: { item: PlacedFurniture; onChange: (patch: Partial<PlacedFurniture>) => void }) {
+  const cat = item.modelId ? catalogById(item.modelId) : undefined;
+  const now = pieceSizeCm(item, cat);
+  const natural = naturalSizeCm({ ...item, sizeScale: 1 }, cat);
+  const [lock, setLock] = React.useState(false);
+  const { mode, unit } = stretchModeFor(cat);
+  React.useSyncExternalStore(subscribeShares, getSharesVersion, getSharesVersion);
+  const share = cat ? getShares(cat.id) : undefined;
+
+  const commit = (axis: "w" | "d" | "h", value: number) => {
+    if (!Number.isFinite(value) || value <= 0) return;
+    const [lo, hi] = LIMITS[axis];
+    const v = Math.max(lo, Math.min(hi, Math.round(value)));
+    if (Math.round(now[axis]) === v) return;
+    const next = { ...now };
+    if (lock) {
+      const k = v / now[axis];
+      next.w = now.w * k; next.d = now.d * k; next.h = now.h * k;
+    } else next[axis] = v;
+    onChange({ dims: { w: Math.round(next.w), d: Math.round(next.d), h: Math.round(next.h) }, sizeScale: 1 });
+  };
+
+  const field = (axis: "w" | "d" | "h", label: string) => (
+    <label className="flex flex-col gap-0.5 text-[10px] text-gray-500">
+      {label}
+      <input
+        key={`${item.id}-${axis}-${Math.round(now[axis])}`}
+        type="number" inputMode="numeric" min={LIMITS[axis][0]} max={LIMITS[axis][1]} step={1}
+        defaultValue={Math.round(now[axis])}
+        onBlur={e => commit(axis, Number(e.currentTarget.value))}
+        onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+        className="w-full rounded-md border border-gray-200 bg-white px-1.5 py-1 text-right text-[12px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-teal-500/40"
+        aria-label={`${label} in cm`}
+      />
+    </label>
+  );
+
+  // what the width does to this kind of piece
+  let note: string | null = null;
+  if (item.dims && mode === "repeat" && share?.how === "stretch" && Math.abs(now.w / natural.w - 1) > 0.02) {
+    note = `Longer ${unit} — the ends keep their size`;
+  } else if (item.dims && mode === "repeat" && share) {
+    const n = repeatsFor(share, natural.w, now.w);
+    const extra = n - 1;
+    if (extra > 0) note = `${extra} extra ${unit}${extra === 1 ? "" : "s"} added — the ends keep their size`;
+    else if (now.w > natural.w * 1.02) note = `Wider ${unit} — keep widening for another ${unit}`;
+    else if (now.w < natural.w * 0.98) note = `Narrower ${unit}s — the ends keep their size`;
+  } else if (item.dims && mode === "stretch" && Math.abs(now.w / natural.w - 1) > 0.02) {
+    note = "Longer top — the legs keep their size";
+  } else if (mode === "repeat" && !item.dims && share?.how !== "stretch") {
+    note = `Make it wider to add ${unit}s`;
+  }
+
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-semibold text-gray-400 uppercase">Size (cm)</span>
+        <span className="flex items-center gap-2">
+          <button
+            onClick={() => setLock(l => !l)}
+            className={`text-[10.5px] rounded px-1.5 py-0.5 border ${lock ? "bg-teal-700 text-white border-teal-700" : "bg-white text-gray-500 border-gray-200"}`}
+            title={lock ? "Proportions locked: changing one size changes all three" : "Lock proportions"}
+            aria-pressed={lock}
+          >
+            {lock ? "🔒 Locked" : "🔓 Free"}
+          </button>
+          {item.dims && (
+            <button onClick={() => onChange({ dims: undefined })} className="text-[10.5px] text-teal-700 hover:underline" title="Back to the model's own size">
+              Reset
+            </button>
+          )}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {field("w", "Width")}
+        {field("d", "Depth")}
+        {field("h", "Height")}
+      </div>
+      {note && <div className="mt-1 text-[10.5px] text-teal-800">{note}</div>}
+    </div>
   );
 }

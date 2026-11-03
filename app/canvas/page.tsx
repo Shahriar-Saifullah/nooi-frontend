@@ -58,6 +58,10 @@ import {
 import { makeFrame } from "@/lib/geometry/planFrame";
 import { WALL_T_MIN, WALL_T_MAX } from "@/lib/placement/snap";
 import { buildFurnitureSheet } from "@/lib/export/furnitureSheet";
+import { pieceSizeCm } from "@/lib/furniture/size";
+import ArrayPanel, { DEFAULT_ARRAY, type ArrayConfig } from "@/components/ArrayPanel";
+import { rowSpots, gridSpots, aroundSpots, spotProblem, type Spot } from "@/lib/placement/array";
+import { roomPolygonScene } from "@/lib/export/furnitureSheet";
 import {
   openingKey, openingSpan, placeOpening, wallIndexOf, openingsAfterWallDelete,
   type PlanOpening, type OpeningType,
@@ -312,13 +316,12 @@ export default function CanvasPage() {
 
   // ── Walls are solid ─────────────────────────────────────────────────────────
   // A floor item's footprint at the size it is drawn (size slider included).
-  const floorFootprint = (f: Pick<PlacedFurniture, "position" | "rotation" | "width" | "depth" | "sizeScale" | "modelId" | "id">): Footprint => {
-    const cat = f.modelId ? catalogById(f.modelId) : undefined;
-    const s = f.sizeScale ?? 1;
+  const floorFootprint = (f: Pick<PlacedFurniture, "position" | "rotation" | "width" | "depth" | "height" | "sizeScale" | "modelId" | "id" | "dims">): Footprint => {
+    const cm = pieceSizeCm(f);
     return {
       x: f.position[0], z: f.position[2],
-      w: ((f.width ?? cat?.size.w ?? 60) / 100) * s,
-      d: ((f.depth ?? cat?.size.d ?? 60) / 100) * s,
+      w: cm.w / 100,
+      d: cm.d / 100,
       rotation: f.rotation ?? 0, id: f.id,
     };
   };
@@ -564,8 +567,8 @@ export default function CanvasPage() {
   const patchSelected = (patch: Partial<PlacedFurniture>) => {
     if (!selectedFurnitureId) return;
     // size and rotation change the footprint: those must not reach into a wall
-    if ("sizeScale" in patch || "rotation" in patch) {
-      changeFloorItem(selectedFurnitureId, patch, "sizeScale" in patch
+    if ("sizeScale" in patch || "rotation" in patch || "dims" in patch) {
+      changeFloorItem(selectedFurnitureId, patch, "sizeScale" in patch || "dims" in patch
         ? "It won't fit any bigger here — move it away from the wall first."
         : "Not enough room to turn it here — move it away from the wall first.");
       return;
@@ -872,11 +875,10 @@ export default function CanvasPage() {
       // Furniture already on the floor is in the way of the new pieces.
       const existing: Footprint[] = placedFurniture
         .filter(f => (f.mountType ?? "floor") === "floor")
-        .map(f => ({
-          x: f.position[0], z: f.position[2],
-          w: ((f.width ?? 0) / 100) * (f.sizeScale ?? 1), d: ((f.depth ?? 0) / 100) * (f.sizeScale ?? 1),
-          rotation: f.rotation ?? 0, id: f.id,
-        }))
+        .map(f => {
+          const cm = pieceSizeCm(f, undefined, { w: 0, d: 0, h: 0 });
+          return { x: f.position[0], z: f.position[2], w: cm.w / 100, d: cm.d / 100, rotation: f.rotation ?? 0, id: f.id };
+        })
         .filter(f => f.w > 0 && f.d > 0);
 
       // Doors, in world metres (same projection the 3D scene uses), so nothing
@@ -1104,6 +1106,89 @@ export default function CanvasPage() {
   const worldWalls = (): WorldWall[] =>
     planWallsToWorld(rfWalls, roomDimensionsCm.width / 100, roomDimensionsCm.depth / 100);
   useEffect(() => { placementWalls.current = worldWalls(); });
+
+  // ── Array: repeat the selected piece ──────────────────────────────────────
+  // In a row, a grid, or round a table (lib/placement/array). The spots are
+  // previewed in 3D — green fits, red hits a wall / furniture / leaves the
+  // rooms — and Apply adds the ones that fit as ordinary pieces, in one undo
+  // step. The panel belongs to the piece it was opened on: selecting another
+  // piece closes it.
+  const [arrayItemId, setArrayItemId] = useState<string | null>(null);
+  const [arrayCfg, setArrayCfg] = useState<ArrayConfig>(DEFAULT_ARRAY);
+  const arraySource = arrayItemId && arrayItemId === selectedFurnitureId
+    ? placedFurniture.find(f => f.id === arrayItemId) : undefined;
+  const ARRAY_TABLES = new Set(["dining-table", "coffee-table", "outdoor-table", "side-table", "kitchen-island", "patio-set"]);
+  const arrayTables = arraySource
+    ? placedFurniture.filter(f => f.id !== arraySource.id && isFloorItem(f)
+        && (ARRAY_TABLES.has(catalogById(f.modelId ?? "")?.typeId ?? "") || /table|island/i.test(f.name)))
+    : [];
+
+  const arrayPlan = (() => {
+    if (!arraySource) return null;
+    const src = floorFootprint(arraySource);
+    const cfg = arrayCfg;
+    let spots: Spot[] = [];
+    let table: PlacedFurniture | undefined;
+    if (cfg.mode === "row") spots = rowSpots(src, cfg.count, cfg.gapCm / 100, cfg.dir);
+    else if (cfg.mode === "grid") spots = gridSpots(src, cfg.rows, cfg.cols, cfg.gapXCm / 100, cfg.gapZCm / 100);
+    else {
+      // the chosen table, else the nearest one
+      table = arrayTables.find(t => t.id === cfg.tableId)
+        ?? [...arrayTables].sort((a, b) =>
+          Math.hypot(a.position[0] - src.x, a.position[2] - src.z) - Math.hypot(b.position[0] - src.x, b.position[2] - src.z))[0];
+      if (table) {
+        const tf = floorFootprint(table);
+        const tcat = catalogById(table.modelId ?? "");
+        const round = /round|circular/i.test(`${table.name} ${tcat?.name ?? ""} ${(tcat?.tags ?? []).join(" ")}`)
+          || Math.abs(tf.w - tf.d) / Math.max(tf.w, tf.d) < 0.08;
+        spots = aroundSpots(tf, src, cfg.seats, round);
+      }
+    }
+    const walls = worldWalls();
+    const totalW = roomDimensionsCm.width / 100, totalD = roomDimensionsCm.depth / 100;
+    const polys = rooms.map(r => roomPolygonScene(r, totalW, totalD)).filter((p): p is [number, number][] => !!p);
+    // in the way: other floor pieces, except this one, the table it is
+    // being seated at, and things lying flat (rugs)
+    const others = placedFurniture
+      .filter(f => isFloorItem(f) && f.id !== arraySource.id && f.id !== table?.id && pieceSizeCm(f).h >= 5)
+      .map(floorFootprint);
+    const results = spots.map(sp => ({
+      ...sp,
+      problem: spotProblem({ x: sp.x, z: sp.z, w: src.w, d: src.d, rotation: sp.rotation }, walls, others, polys),
+    }));
+    return { src, results, table };
+  })();
+
+  const arrayGhosts = arrayPlan?.results.map(r => ({
+    x: r.x, z: r.z, rotation: r.rotation, w: arrayPlan.src.w, d: arrayPlan.src.d,
+    h: arraySource ? pieceSizeCm(arraySource).h / 100 : 0.8, ok: !r.problem,
+  })) ?? null;
+
+  const applyArray = () => {
+    if (!arraySource || !arrayPlan) return;
+    const fits = arrayPlan.results.filter(r => !r.problem);
+    if (!fits.length) return;
+    const stamp = crypto.randomUUID().slice(0, 8);
+    const base = arraySource.id.replace(/~a\d+-[0-9a-f]+$/, "");
+    // round a table the piece itself takes the first seat
+    const [moveTo, ...rest] = arrayCfg.mode === "around" ? fits : [null, ...fits];
+    const copies: PlacedFurniture[] = rest.map((r, i) => ({
+      ...arraySource!,
+      id: `${base}~a${i}-${stamp}`,
+      position: [r!.x, arraySource!.position[1], r!.z] as [number, number, number],
+      rotation: r!.rotation,
+    }));
+    setPlacedFurniture(prev => [
+      ...prev.map(f => f.id === arraySource.id && moveTo
+        ? { ...f, position: [moveTo.x, f.position[1], moveTo.z] as [number, number, number], rotation: moveTo.rotation }
+        : f),
+      ...copies,
+    ]);
+    const skipped = arrayPlan.results.length - fits.length;
+    noRoomToast(`Added ${copies.length} ${arraySource.name.toLowerCase()}${copies.length === 1 ? "" : "s"}`
+      + (skipped ? ` · ${skipped} didn't fit and were skipped` : "") + ". Undo removes them all.");
+    setArrayItemId(null);
+  };
 
   // ── NOOI-10: wall editing ─────────────────────────────────────────────────
   // Detected walls are an estimate. Editing them changes the shell everything
@@ -2860,6 +2945,7 @@ export default function CanvasPage() {
                   onFurnitureMove={handleFurnitureMove}
                   onWallHandleDrag={handleWallHandleDrag}
                   openingEdit={cameraView === "inside" ? null : sceneOpeningEdit}
+                  ghosts={arrayGhosts}
                   showDimensions={showDimensions}
                   onFurnitureToggleLight={(id) => setPlacedFurniture(prev => prev.map(f =>
                     f.id === id ? { ...f, lightLevel: (f.lightLevel ?? 1) > 0 ? 0 : 1 } : f))}
@@ -3023,12 +3109,26 @@ export default function CanvasPage() {
                   </p>
                 </div>
               ) : selectedFurniture ? (
-                <FurnitureInspector
-                  item={selectedFurniture}
-                  onChange={patchSelected}
-                  onDelete={handleDelete}
-                  onUseProduct={swapInProduct}
-                />
+                <>
+                  {arraySource && arrayPlan && (
+                    <ArrayPanel
+                      name={arraySource.name}
+                      config={arrayCfg}
+                      onChange={setArrayCfg}
+                      tables={arrayTables.map(t => ({ id: t.id, name: t.name }))}
+                      summary={{ total: arrayPlan.results.length, blocked: arrayPlan.results.filter(r => r.problem).length }}
+                      onApply={applyArray}
+                      onClose={() => setArrayItemId(null)}
+                    />
+                  )}
+                  <FurnitureInspector
+                    item={selectedFurniture}
+                    onChange={patchSelected}
+                    onDelete={handleDelete}
+                    onUseProduct={swapInProduct}
+                    onArray={() => setArrayItemId(selectedFurniture.id)}
+                  />
+                </>
               ) : selectedFloorRoomId ? (() => {
                 const room = rooms.find(r => r.id === selectedFloorRoomId);
                 const options = floorSurfaceOptions();

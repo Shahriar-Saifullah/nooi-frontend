@@ -27,6 +27,7 @@
 import type { CatalogItem } from "@/lib/furniture/catalog";
 import type { FurnitureGroup } from "@/components/FurnitureListPanel";
 import type { MarketplaceProduct, ProductVariant } from "@/lib/api/marketplace";
+import { pieceSizeCm } from "@/lib/furniture/size";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -89,9 +90,9 @@ const WEIGHT = {
 export function targetSizeFor(group: FurnitureGroup): TargetSize | null {
   const scale = group.sample.sizeScale ?? 1;
 
-  if (group.cat) {
-    const { w, d, h } = group.cat.size;
-    return { w: w * scale, d: d * scale, h: h * scale };
+  // a typed size (or the catalogue size) × the slider
+  if (group.cat || group.sample.dims) {
+    return pieceSizeCm(group.sample, group.cat);
   }
 
   const { width, depth, height } = group.sample;

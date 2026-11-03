@@ -20,6 +20,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import { Sofa, X, ShoppingBag, Loader2 } from "lucide-react";
 import { catalogById, type CatalogItem } from "@/lib/furniture/catalog";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
+import { pieceSizeCm } from "@/lib/furniture/size";
 
 export interface FurnitureGroup {
   key: string;
@@ -49,6 +50,7 @@ export function groupPlacedFurniture(items: PlacedFurniture[]): FurnitureGroup[]
           item.color ?? "",
           item.materialPreset ?? "",
           item.sizeScale ?? 1,
+          item.dims ? `${item.dims.w}x${item.dims.d}x${item.dims.h}` : "",
         ].join("|")
       : `custom:${item.id}`; // legacy boxes never merge — each is its own thing
 
@@ -73,16 +75,9 @@ export function groupPlacedFurniture(items: PlacedFurniture[]): FurnitureGroup[]
 
 /** Real-world footprint in cm, accounting for the user's size slider. */
 function footprint(group: FurnitureGroup): string | null {
-  const scale = group.sample.sizeScale ?? 1;
-  if (group.cat) {
-    const { w, d } = group.cat.size;
-    return `${Math.round(w * scale)}×${Math.round(d * scale)} cm`;
-  }
-  const { width, depth } = group.sample;
-  if (width && depth) {
-    return `${Math.round(width * scale)}×${Math.round(depth * scale)} cm`;
-  }
-  return null;
+  if (!group.cat && !group.sample.dims && !(group.sample.width && group.sample.depth)) return null;
+  const { w, d } = pieceSizeCm(group.sample, group.cat);
+  return `${Math.round(w)}×${Math.round(d)} cm`;
 }
 
 interface Props {

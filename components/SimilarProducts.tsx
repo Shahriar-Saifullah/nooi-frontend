@@ -39,7 +39,9 @@ export default function SimilarProducts({
   onUseInRoom?: (product: MarketplaceProduct) => Promise<boolean> | boolean;
 }) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
-  const key = cat && !isShopId(cat.id) ? `${cat.id}|${item.sizeScale ?? 1}|${item.color ?? ""}` : null;
+  const key = cat && !isShopId(cat.id)
+    ? `${cat.id}|${item.sizeScale ?? 1}|${item.dims ? `${item.dims.w}x${item.dims.d}x${item.dims.h}` : ""}|${item.color ?? ""}`
+    : null;
   // results arrive asynchronously; derive what to show from the cache so a
   // different piece never flashes the previous piece's products
   const [, setLoadedKey] = useState<string | null>(null);

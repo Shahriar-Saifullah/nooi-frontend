@@ -710,8 +710,8 @@ function VendorOnboardingInner() {
                       <label className="text-[12px] font-medium text-[#646968]">City
                         <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1" value={bank.city} onChange={e => setBank({ ...bank, city: e.target.value })} />
                       </label>
-                      <label className="text-[12px] font-medium text-[#646968]">Mobile
-                        <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1" placeholder="+9665XXXXXXXX" value={bank.mobile} onChange={e => setBank({ ...bank, mobile: e.target.value })} />
+                      <label className="text-[12px] font-medium text-[#646968]">Saudi mobile
+                        <input className="w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-[14px] focus:outline-none focus:border-[#004643] mt-1" placeholder="05XXXXXXXX or +9665XXXXXXXX" title="A Saudi mobile number — bank payouts in Saudi Arabia need one" value={bank.mobile} onChange={e => setBank({ ...bank, mobile: e.target.value })} />
                       </label>
                       <div className="flex items-end">
                         <button type="button" onClick={handleSaveBank} disabled={connectingStripe}
