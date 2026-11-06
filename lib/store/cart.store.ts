@@ -29,6 +29,10 @@ export interface CartItem {
   id: string;
   variant_id: string;
   quantity: number;
+  /** width (per-metre listings) and chosen options — lib/listings/configure */
+  config?: { width_cm?: number; options?: Record<string, string> };
+  /** configKey(config); "" for a plain line. A line is variant + key. */
+  config_key?: string;
   product_variants?: CartVariant & { products?: CartProduct };
   product_data?: {
     title?: string;
@@ -36,6 +40,8 @@ export interface CartItem {
     retailer_name?: string;
     color?: string;
     image?: string;
+    /** "240 cm wide · Fabric: Linen" */
+    config_label?: string;
   };
 }
 
@@ -82,11 +88,12 @@ export const useCartStore = create<CartStore>()(
 
       addItemOptimistic: (item) =>
         set((state) => {
-          const existing = state.items.find((i) => i.variant_id === item.variant_id);
+          const same = (i: CartItem) => i.variant_id === item.variant_id && (i.config_key ?? "") === (item.config_key ?? "");
+          const existing = state.items.find(same);
           if (existing) {
             return {
               items: state.items.map((i) =>
-                i.variant_id === item.variant_id
+                same(i)
                   ? { ...i, quantity: i.quantity + item.quantity }
                   : i
               ),

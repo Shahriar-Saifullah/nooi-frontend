@@ -13,6 +13,7 @@ import { X, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { MODULES, type KitchenData, type ModuleKind, type UpperKind } from "@/lib/kitchen/model";
 import { COUNTERTOPS, FRONT_FINISHES, HARDWARE, type KitchenStyle } from "@/lib/kitchen/materials";
 import type { KitchenSelection } from "@/components/KitchenLayer";
+import KitchenEstimate from "@/components/KitchenEstimate";
 
 interface Props {
   data: KitchenData;
@@ -140,6 +141,8 @@ export default function KitchenPanel(p: Props) {
         </div>
         <Swatches title="Handle finish" items={HARDWARE} value={style.hardware} onPick={id => set({ hardware: id as KitchenStyle["hardware"] })} />
       </div>
+
+      <KitchenEstimate data={data} />
     </div>
   );
 }

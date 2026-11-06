@@ -901,6 +901,8 @@ export interface PlatformSettings {
   legal_address: string | null;
   vat_number: string | null;
   cr_number: string | null;
+  /** see lib/kitchen/pricing.ts */
+  kitchen_prices?: import("@/lib/kitchen/pricing").KitchenPriceList;
   updated_at?: string | null;
 }
 export async function getPlatformSettings(): Promise<ApiResponse<{ settings: PlatformSettings; can_edit: boolean }>> {

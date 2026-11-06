@@ -22,7 +22,8 @@ import { rankProducts, type ProductMatch } from "@/lib/matching/products";
 import { groupPlacedFurniture } from "@/components/FurnitureListPanel";
 import { catalogById, isShopId } from "@/lib/furniture/catalog";
 import { formatMoney } from "@/lib/money";
-import { useCartStore } from "@/lib/store/cart.store";
+import { addCartLine, lineConfig, listedWidthCm } from "@/lib/listings/cartLine";
+import { pieceSizeCm } from "@/lib/furniture/size";
 import type { PlacedFurniture } from "@/components/ThreeSceneV2";
 
 // Results per library model (and size), for the life of the page.
@@ -78,13 +79,20 @@ export default function SimilarProducts({
   if (!key) return null;
 
   const addToCart = (m: ProductMatch) => {
-    const cart = useCartStore.getState();
-    const existing = cart.items.find(c => c.variant_id === m.variant.id);
-    if (existing) cart.updateQuantityOptimistic(existing.id, existing.quantity + 1);
-    else cart.addItemOptimistic({
-      id: m.variant.id, variant_id: m.variant.id, quantity: 1,
-      product_data: {
-        title: m.product.title, price: Number(m.variant.price), retailer_name: m.product.retailer?.name,
+    const listing = {
+      price_unit: m.product.price_unit ?? "unit",
+      min_width_cm: m.product.min_width_cm ?? null,
+      max_width_cm: m.product.max_width_cm ?? null,
+      options: m.product.options ?? [],
+    };
+    const listedW = listedWidthCm(m.variant);
+    // made-to-measure: order it at the width of the piece in the room
+    const config = lineConfig(listing, listedW, { width_cm: pieceSizeCm(item, catalogById(item.modelId ?? "")).w });
+    addCartLine({
+      variantId: m.variant.id, basePrice: Number(m.variant.price), listing, listedWidth: listedW, config,
+      quantity: 1, max: m.variant.stock_quantity,
+      product: {
+        title: m.product.title, retailer_name: m.product.retailer?.name ?? undefined,
         color: m.variant.color ?? undefined, image: m.variant.images?.[0],
       },
     });

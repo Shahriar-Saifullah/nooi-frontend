@@ -21,6 +21,7 @@
 import { createClient } from "@/utils/supabase/client";
 import type { CartItem } from "@/lib/store/cart.store";
 import { DEFAULT_CURRENCY } from "@/lib/money";
+import { configKey } from "@/lib/listings/configure";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
@@ -30,6 +31,8 @@ export interface ServerCartItem {
   session_id: string | null;
   variant_id: string;
   quantity: number;
+  config?: { width_cm?: number; options?: Record<string, string> };
+  config_key?: string;
 }
 
 // ─── Quote ───────────────────────────────────────────────────────────────────
@@ -47,13 +50,17 @@ export interface QuoteItem {
   sku: string;
   image: string | null;
   unit_price: number;
+  /** width / options as priced, e.g. "240 cm wide · Fabric: Linen" */
+  config_label?: string | null;
+  config_key?: string;
+  price_unit?: "unit" | "metre";
   quantity: number;
   line_total: number;
   /** Listing live, variant active and enough stock for this quantity. Lines
    *  that are not are shown but left out of every total. */
   in_stock: boolean;
   available?: boolean;
-  unavailable_reason?: "unavailable" | "out_of_stock" | "not_enough_stock" | null;
+  unavailable_reason?: "unavailable" | "out_of_stock" | "not_enough_stock" | "options_changed" | null;
   stock_quantity: number;
 }
 
@@ -150,10 +157,10 @@ export async function getServerCart(): Promise<ServerCartItem[]> {
   return json.items ?? [];
 }
 
-async function addServerItem(variantId: string, quantity: number) {
+async function addServerItem(variantId: string, quantity: number, config?: CartItem["config"]) {
   return call("/cart/items", {
     method: "POST",
-    body: JSON.stringify({ variant_id: variantId, quantity }),
+    body: JSON.stringify({ variant_id: variantId, quantity, ...(config ? { config } : {}) }),
   });
 }
 
@@ -190,14 +197,17 @@ export interface PushResult {
  */
 export async function pushLocalCart(local: CartItem[]): Promise<PushResult> {
   const server = await getServerCart();
-  const byVariant = new Map(server.map(i => [i.variant_id, i]));
+  // a line is a variant plus its config (width, options)
+  const lineKey = (variantId: string, key: string | undefined) => `${variantId}|${key ?? ""}`;
+  const byVariant = new Map(server.map(i => [lineKey(i.variant_id, i.config_key), i]));
   const rejected: string[] = [];
 
   for (const item of local) {
-    const existing = byVariant.get(item.variant_id);
+    const key = lineKey(item.variant_id, item.config_key ?? configKey(item.config));
+    const existing = byVariant.get(key);
     try {
       if (!existing) {
-        await addServerItem(item.variant_id, item.quantity);
+        await addServerItem(item.variant_id, item.quantity, item.config);
       } else if (existing.quantity !== item.quantity) {
         await setServerQuantity(existing.id, item.quantity);
       }
@@ -208,7 +218,7 @@ export async function pushLocalCart(local: CartItem[]): Promise<PushResult> {
         throw e;
       }
     }
-    byVariant.delete(item.variant_id);
+    byVariant.delete(key);
   }
 
   // Anything still mapped was removed locally and should go server-side too.

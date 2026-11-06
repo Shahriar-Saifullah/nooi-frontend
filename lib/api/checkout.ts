@@ -198,12 +198,14 @@ export interface MoyasarConfirmResponse {
 export async function createMoyasarCheckout(
   shippingAddress: ShippingAddress,
   promoCode?: string | null,
+  /** The shopper ticked "I agree" — the server records it (version, time, IP). */
+  acceptTerms = false,
 ): Promise<ApiResponse<MoyasarCheckoutResponse>> {
   try {
     const body = await requestJson<MoyasarCheckoutResponse>({
       path: "/orders/moyasar/checkout",
       method: "POST",
-      body: { shipping_address: shippingAddress, promo_code: promoCode ?? null },
+      body: { shipping_address: shippingAddress, promo_code: promoCode ?? null, accept_terms: acceptTerms || undefined },
     });
     return wrap(body);
   } catch (err) {

@@ -242,6 +242,205 @@ export default function WallDecor({ kind, w, h, d, color, glow = 1 }: Props) {
       );
     }
 
+    case "split-ac": {
+      // wall unit: body, a darker air outlet along the bottom with its flap,
+      // intake slots on top and a small display
+      const body = color ?? "#f4f5f4";
+      const slots = Math.max(6, Math.round(w / 0.05));
+      return (
+        <group>
+          <mesh castShadow receiveShadow>
+            <boxGeometry args={[w, h, d]} />
+            <meshStandardMaterial color={body} roughness={0.35} />
+          </mesh>
+          {/* front panel seam */}
+          <mesh position={[0, h * 0.12, d / 2 + 0.001]}>
+            <planeGeometry args={[w * 0.96, h * 0.6]} />
+            <meshStandardMaterial color={body} roughness={0.2} />
+          </mesh>
+          {/* outlet */}
+          <mesh position={[0, -h / 2 + h * 0.13, d / 2 - 0.015]}>
+            <boxGeometry args={[w * 0.9, h * 0.16, 0.03]} />
+            <meshStandardMaterial color="#2b2f31" roughness={0.8} />
+          </mesh>
+          <mesh position={[0, -h / 2 + h * 0.05, d / 2 + 0.006]} rotation={[-0.5, 0, 0]} castShadow>
+            <boxGeometry args={[w * 0.88, h * 0.16, 0.006]} />
+            <meshStandardMaterial color={body} roughness={0.3} />
+          </mesh>
+          {/* intake slots on top */}
+          {Array.from({ length: slots }).map((_, i) => (
+            <mesh key={i} position={[-w * 0.44 + (i * w * 0.88) / (slots - 1), h / 2 + 0.0005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[0.012, d * 0.7]} />
+              <meshStandardMaterial color="#9aa0a3" roughness={0.8} />
+            </mesh>
+          ))}
+          {/* display */}
+          <mesh position={[w * 0.36, h * 0.02, d / 2 + 0.002]}>
+            <planeGeometry args={[0.05, 0.018]} />
+            <meshStandardMaterial color="#1c2a30" emissive="#5ad1ff" emissiveIntensity={0.6} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case "floor-ac": {
+      // cabinet unit: plinth, louvred outlet up top, plain front, display
+      const body = color ?? "#f4f5f4";
+      const louvres = 9;
+      const outH = h * 0.34;
+      const outY = h / 2 - h * 0.08 - outH / 2;
+      return (
+        <group>
+          <mesh castShadow receiveShadow>
+            <boxGeometry args={[w, h, d]} />
+            <meshStandardMaterial color={body} roughness={0.35} />
+          </mesh>
+          <mesh position={[0, -h / 2 + 0.03, 0.004]}>
+            <boxGeometry args={[w * 0.98, 0.06, d]} />
+            <meshStandardMaterial color="#8c9295" roughness={0.6} />
+          </mesh>
+          <mesh position={[0, outY, d / 2 - 0.01]}>
+            <boxGeometry args={[w * 0.82, outH, 0.022]} />
+            <meshStandardMaterial color="#2b2f31" roughness={0.8} />
+          </mesh>
+          {Array.from({ length: louvres }).map((_, i) => (
+            <mesh key={i} position={[0, outY - outH / 2 + ((i + 0.5) * outH) / louvres, d / 2 + 0.004]} rotation={[-0.35, 0, 0]}>
+              <boxGeometry args={[w * 0.8, 0.012, 0.03]} />
+              <meshStandardMaterial color={body} roughness={0.3} />
+            </mesh>
+          ))}
+          <mesh position={[0, outY - outH / 2 - 0.08, d / 2 + 0.002]}>
+            <planeGeometry args={[0.09, 0.03]} />
+            <meshStandardMaterial color="#1c2a30" emissive="#5ad1ff" emissiveIntensity={0.6} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case "ceiling-fan": {
+      // canopy and downrod from the ceiling, motor, five pitched blades and a
+      // frosted light bowl underneath. Origin is the middle of its height.
+      const metal = color ?? "#f2efe9";
+      const bladeL = Math.max(0.2, w / 2 - 0.1);
+      const motorY = -h / 2 + 0.11;
+      const bladeY = motorY - 0.01;
+      return (
+        <group>
+          <mesh position={[0, h / 2 - 0.025, 0]} castShadow>
+            <cylinderGeometry args={[0.07, 0.08, 0.05, 32]} />
+            <meshStandardMaterial color={metal} roughness={0.4} metalness={0.3} />
+          </mesh>
+          <mesh position={[0, (h / 2 - 0.05 + motorY + 0.06) / 2, 0]}>
+            <cylinderGeometry args={[0.012, 0.012, Math.max(0.01, h / 2 - 0.05 - (motorY + 0.06)), 12]} />
+            <meshStandardMaterial color={metal} roughness={0.4} metalness={0.3} />
+          </mesh>
+          <mesh position={[0, motorY, 0]} castShadow>
+            <cylinderGeometry args={[0.1, 0.12, 0.12, 32]} />
+            <meshStandardMaterial color={metal} roughness={0.4} metalness={0.3} />
+          </mesh>
+          {Array.from({ length: 5 }).map((_, i) => {
+            const a = (i / 5) * Math.PI * 2;
+            return (
+              <group key={i} rotation={[0, a, 0]}>
+                <mesh position={[0.11 + bladeL / 2, bladeY, 0]} rotation={[0.18, 0, 0]} castShadow>
+                  <boxGeometry args={[bladeL, 0.008, 0.13]} />
+                  <meshStandardMaterial color="#8a6a4a" roughness={0.6} />
+                </mesh>
+              </group>
+            );
+          })}
+          <mesh position={[0, -h / 2 + 0.04, 0]} rotation={[Math.PI, 0, 0]}>
+            <sphereGeometry args={[0.08, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+            <meshStandardMaterial color="#f7f3ea" emissive="#ffe2b0" emissiveIntensity={0.35 * glow} roughness={0.9} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case "water-heater": {
+      // a white tank on a wall bracket, rounded ends, thermostat dial and the
+      // two pipes underneath
+      const body = color ?? "#f7f7f5";
+      const r = Math.min(w, d) / 2;
+      const tankH = h * 0.86;
+      return (
+        <group>
+          <mesh position={[0, h * 0.04, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[r, r, tankH - r * 0.6, 40]} />
+            <meshStandardMaterial color={body} roughness={0.35} />
+          </mesh>
+          {[1, -1].map(sgn => (
+            <mesh key={sgn} position={[0, h * 0.04 + sgn * (tankH - r * 0.6) / 2, 0]} scale={[1, 0.3, 1]}>
+              <sphereGeometry args={[r, 40, 16, 0, Math.PI * 2, sgn > 0 ? 0 : Math.PI / 2, Math.PI / 2]} />
+              <meshStandardMaterial color={body} roughness={0.35} />
+            </mesh>
+          ))}
+          <mesh position={[0, h * 0.25, -d / 2 + 0.01]}>
+            <boxGeometry args={[w * 0.7, 0.06, 0.02]} />
+            <meshStandardMaterial color="#9aa0a3" roughness={0.5} metalness={0.5} />
+          </mesh>
+          <mesh position={[0, -h * 0.05, r - 0.005]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.035, 0.035, 0.03, 24]} />
+            <meshStandardMaterial color="#3a3f42" roughness={0.5} />
+          </mesh>
+          {[-1, 1].map(sgn => (
+            <mesh key={`p${sgn}`} position={[sgn * r * 0.35, -h / 2 + h * 0.05, 0]}>
+              <cylinderGeometry args={[0.012, 0.012, h * 0.1, 12]} />
+              <meshStandardMaterial color={sgn < 0 ? "#3d6fb8" : "#c0453a"} roughness={0.4} metalness={0.4} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case "socket":
+    case "switch": {
+      // BS 1363 plates: a socket has an earth slot over live and neutral and
+      // its own switch; a switch has one rocker per gang
+      const plate = color ?? "#f6f6f4";
+      const n = kind === "socket" ? (w > 0.12 ? 2 : 1) : (w > 0.12 ? 3 : 1);
+      const cellW = (w - 0.012) / n;
+      const slot = (x: number, y: number, sw: number, sh: number, key: string) => (
+        <mesh key={key} position={[x, y, d / 2 + 0.0006]}>
+          <planeGeometry args={[sw, sh]} />
+          <meshStandardMaterial color="#1f2224" roughness={0.9} />
+        </mesh>
+      );
+      return (
+        <group>
+          <mesh castShadow receiveShadow>
+            <boxGeometry args={[w, h, d]} />
+            <meshStandardMaterial color={plate} roughness={0.3} />
+          </mesh>
+          {Array.from({ length: n }).map((_, i) => {
+            const cx = -w / 2 + 0.006 + cellW * (i + 0.5);
+            if (kind === "switch") {
+              return (
+                <group key={i}>
+                  {slot(cx, 0, cellW - 0.004, h * 0.64, `g${i}`)}
+                  <mesh position={[cx, 0, d / 2 + 0.003]} rotation={[0.08, 0, 0]}>
+                    <boxGeometry args={[cellW - 0.009, h * 0.6, 0.006]} />
+                    <meshStandardMaterial color={plate} roughness={0.25} />
+                  </mesh>
+                </group>
+              );
+            }
+            return (
+              <group key={i}>
+                {slot(cx - 0.006, h * 0.17, 0.004, 0.009, `e${i}`)}
+                {slot(cx - 0.017, -h * 0.08, 0.009, 0.004, `l${i}`)}
+                {slot(cx + 0.005, -h * 0.08, 0.009, 0.004, `n${i}`)}
+                <mesh position={[cx + cellW * 0.32, h * 0.18, d / 2 + 0.002]}>
+                  <boxGeometry args={[0.008, 0.016, 0.004]} />
+                  <meshStandardMaterial color="#d8d8d4" roughness={0.3} />
+                </mesh>
+              </group>
+            );
+          })}
+        </group>
+      );
+    }
+
     case "sconce": {
       // back plate, a short arm, and a fabric drum shade that glows. The light
       // itself comes from the scene's lamp pool (the name matches "sconce").

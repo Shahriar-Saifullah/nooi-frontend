@@ -36,6 +36,10 @@ export interface ShopCanvasItem {
   in_stock?: boolean;
   variant_id?: string | null;
   variant_price?: number | null;
+  price_unit?: "unit" | "metre";
+  min_width_cm?: number | null;
+  max_width_cm?: number | null;
+  options?: import("@/lib/listings/configure").OptionGroup[];
 }
 
 export const shopId = (productId: string) => `${SHOP_ID_PREFIX}${productId}`;
@@ -63,6 +67,10 @@ function toCatalogItem(p: ShopCanvasItem): CatalogItem {
       // the price of what "add to cart" would actually buy
       price: p.variant_price ?? p.price,
       onSale: p.on_sale, variantId: p.variant_id ?? null, inStock: p.in_stock ?? true, image: p.photo,
+      priceUnit: p.price_unit === "metre" ? "metre" : "unit",
+      minWidthCm: p.min_width_cm ?? null,
+      maxWidthCm: p.max_width_cm ?? null,
+      options: p.options ?? [],
     },
   };
 }

@@ -108,6 +108,15 @@ export function proceduralParts(kind: string, hex: string): FinishPart[] {
       { material: "Metal", colour: c(hex), share: 0.6 },
       { material: "Glass shade", colour: c("#f3eee2"), share: 0.4 },
     ];
+    case "split-ac":
+    case "floor-ac":
+    case "water-heater": return [{ material: "Powder-coated steel / ABS", colour: c(hex), share: 1 }];
+    case "ceiling-fan": return [
+      { material: "Metal", colour: c(hex), share: 0.45 },
+      { material: "Wood blades", colour: wood("#8a6a4a"), share: 0.55 },
+    ];
+    case "socket":
+    case "switch": return [{ material: "Plastic plate", colour: c(hex), share: 1 }];
     default: return [{ material: "Painted finish", colour: c(hex), share: 1 }];
   }
 }

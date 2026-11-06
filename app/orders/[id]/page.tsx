@@ -32,6 +32,7 @@ import {
 import ShopHeader from "@/components/marketplace/ShopHeader";
 import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import OrderCancelHelp from "@/components/orders/OrderCancelHelp";
+import InvoiceButton from "@/components/orders/InvoiceButton";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import {
   getOrderById, submitReturnRequest, deriveOrderStage,
@@ -328,6 +329,9 @@ function TrackingInner() {
                 city,
               )}
             </p>
+            <div className="mt-3">
+              <InvoiceButton orderId={order.id} arabic={language === "ar"} />
+            </div>
           </div>
           <span
             className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[11.5px] font-medium ${STAGE_STYLE[orderStage]}`}
@@ -595,6 +599,9 @@ function ShipmentSection({
                   <span className="block truncate text-[12.5px] font-medium text-[#101212]">
                     {title}
                   </span>
+                  {item.config_label && (
+                    <span className="block text-[11px] text-[#4B4F4F]">{item.config_label}</span>
+                  )}
                   <span className="block text-[11px] text-[#8E9493]">
                     {item.product_variants?.color ? `${item.product_variants.color} · ` : ""}
                     {t.qty} {num(item.quantity)} · {money(item.total_price)}

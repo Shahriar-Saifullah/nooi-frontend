@@ -56,6 +56,7 @@ export async function GET(req: Request) {
         total_price,
         item_status,
         production_stage,
+        config_label,
         orders (
           id,
           order_number,
@@ -225,8 +226,10 @@ export async function GET(req: Request) {
       const pColor = variant?.color || "Standard";
       const pMaterial = variant?.material || "Standard finish";
 
+      // Made to measure / chosen options: what to make ("240 cm wide · Fabric: …")
+      const cfgLabel = (it as { config_label?: string | null }).config_label || null;
       entry.lines.push({
-        n: pTitle,
+        n: cfgLabel ? `${pTitle} — ${cfgLabel}` : pTitle,
         q: it.quantity,
         p: Number(it.unit_price),
         d: entry.due,

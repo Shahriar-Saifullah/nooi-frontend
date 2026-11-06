@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { notifyAdmins } from "@/app/api/_lib/notify";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
+import { cleanExtras, cleanCategories, cleanCertificates, cleanPatents, cleanOrigin, cleanShipsTo } from "@/lib/listings/extras";
+import { TERMS_VERSIONS } from "@/lib/legal/terms";
+import { cleanOptionGroups, cleanPricing } from "@/lib/listings/configure";
 
 const CATEGORY_MAP: Record<
   string,
@@ -166,6 +169,16 @@ export async function GET(req: Request) {
         base_price,
         lead_time_days,
         specs_json,
+        categories,
+        certificates,
+        patents,
+        origin,
+        origin_country,
+        ships_to,
+        price_unit,
+        min_width_cm,
+        max_width_cm,
+        options,
         created_at,
         listing_status,
         review_note,
@@ -288,6 +301,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: reason }, { status: 403 });
     }
 
+    // 1b. The vendor (or factory) agreement, current version. Recorded by the
+    //     dashboard's TermsGate; a missing table lets the listing through.
+    {
+      const { data: signed, error: termsErr } = await adminClient
+        .from("terms_acceptances")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("document", "vendor_agreement")
+        .eq("version", TERMS_VERSIONS.vendor_agreement)
+        .limit(1);
+      if (!termsErr && (!signed || signed.length === 0)) {
+        return NextResponse.json(
+          { success: false, code: "TERMS_REQUIRED", error: "Please accept the current Vendor & Factory Agreement before adding listings." },
+          { status: 428 }
+        );
+      }
+    }
+
     // 2. The storefront. decide_vendor_application creates one at approval, so
     //    an approved vendor normally has it already. The fallback stays for
     //    vendors approved before that function existed — it is a backstop, not
@@ -346,6 +377,11 @@ export async function POST(req: Request) {
         // and the order confirmation email. Made-to-order and custom sizes are
         // non-returnable by design; In stock items follow the standard window.
         is_returnable: Boolean(is_returnable),
+        // More categories, certificates, patents, origin, ships-to (lib/listings/extras).
+        ...cleanExtras(category, body),
+        // per piece / per metre of width, and shopper options (lib/listings/configure)
+        ...cleanPricing(body, cleanDimensions(dimensions_cm)?.width ?? null),
+        options: cleanOptionGroups(body.options),
         // Hidden from shoppers until a Nooi admin approves it (/admin/listings).
         listing_status: "pending",
         submitted_at: new Date().toISOString(),
@@ -547,6 +583,13 @@ export async function PATCH(req: Request) {
     if (action === "resubmit" || action === "edit") {
       if (typeof body.title === "string" && body.title.trim()) edits.title = body.title.trim().slice(0, 140);
       if (typeof body.description === "string" && body.description.trim()) edits.description = body.description.trim().slice(0, 4000);
+      if (body.categories !== undefined) edits.categories = cleanCategories(null, body.categories);
+      if (body.certificates !== undefined) edits.certificates = cleanCertificates(body.certificates);
+      if (body.patents !== undefined) edits.patents = cleanPatents(body.patents);
+      if (body.origin !== undefined) Object.assign(edits, cleanOrigin(body.origin, body.origin_country));
+      if (body.ships_to !== undefined) edits.ships_to = cleanShipsTo(body.ships_to);
+      if (body.price_unit !== undefined) Object.assign(edits, cleanPricing(body, Number(body.width_cm) || null));
+      if (body.options !== undefined) edits.options = cleanOptionGroups(body.options);
       newPrice = body.price !== undefined ? parseFloat(body.price) : NaN;
       if (!Number.isNaN(newPrice)) {
         if (!(newPrice > 0)) return NextResponse.json({ success: false, error: "Price must be above zero." }, { status: 400 });

@@ -59,6 +59,7 @@ import { makeFrame } from "@/lib/geometry/planFrame";
 import { WALL_T_MIN, WALL_T_MAX } from "@/lib/placement/snap";
 import { buildFurnitureSheet } from "@/lib/export/furnitureSheet";
 import { pieceSizeCm } from "@/lib/furniture/size";
+import { addCartLine, shopListing, shopPiecePrice } from "@/lib/listings/cartLine";
 import ArrayPanel, { DEFAULT_ARRAY, type ArrayConfig } from "@/components/ArrayPanel";
 import KitchenPanel from "@/components/KitchenPanel";
 import type { KitchenSelection } from "@/components/KitchenLayer";
@@ -67,6 +68,7 @@ import {
   addModuleAt, changeRun, frameOf, newModule, runEdits, runProblem,
   type KitchenData, type KitchenRun, type ModuleKind,
 } from "@/lib/kitchen/model";
+import { WINDOW_STYLES, FRAME_FINISHES, DEFAULT_WINDOW_STYLE, DEFAULT_FRAME, type WindowStyle, type FrameFinish } from "@/lib/walls/windowStyles";
 import { rowSpots, gridSpots, aroundSpots, spotProblem, type Spot } from "@/lib/placement/array";
 import { roomPolygonScene } from "@/lib/export/furnitureSheet";
 import {
@@ -797,7 +799,9 @@ export default function CanvasPage() {
   const [furnishSource, setFurnishSource] = useState<"library" | "shop">("library");
   const [furnishBudget, setFurnishBudget] = useState("");
   const [shopSummary, setShopSummary] = useState<{
-    items: { productId: string; variantId: string | null; title: string; vendor: string | null; price: number; image: string | null; qty: number }[];
+    items: { productId: string; variantId: string | null; title: string; vendor: string | null; price: number; image: string | null; qty: number;
+      /** per-metre listings: ordered at the width placed */
+      config?: import("@/lib/listings/configure").LineConfig; basePrice?: number; listing?: import("@/lib/listings/cartLine").PricedListing; listedWidth?: number }[];
     total: number; currency: string; added?: boolean;
   } | null>(null);
 
@@ -967,13 +971,18 @@ export default function CanvasPage() {
       if (useShop) {
         const lines = new Map<string, NonNullable<typeof shopSummary>["items"][number]>();
         for (const it of newItems) {
-          const shop = it.modelId ? catalogById(it.modelId)?.shop : undefined;
-          if (!shop) continue;
-          const prev = lines.get(shop.productId);
+          const icat = it.modelId ? catalogById(it.modelId) : undefined;
+          const shop = icat?.shop;
+          if (!shop || !icat) continue;
+          // per-metre listings are priced at the width they're drawn
+          const pc = shopPiecePrice(shop, icat.size.w, pieceSizeCm(it, icat).w);
+          const lineId = `${shop.productId}|${pc.widthCm ?? ""}`;
+          const prev = lines.get(lineId);
           if (prev) prev.qty += 1;
-          else lines.set(shop.productId, {
+          else lines.set(lineId, {
             productId: shop.productId, variantId: shop.variantId ?? null, title: it.name,
-            vendor: shop.vendor, price: shop.price, image: shop.image ?? null, qty: 1,
+            vendor: shop.vendor, price: pc.unitPrice, image: shop.image ?? null, qty: 1,
+            config: pc.config, basePrice: shop.price, listing: shopListing(shop), listedWidth: icat.size.w,
           });
         }
         const items = [...lines.values()];
@@ -1525,10 +1534,15 @@ export default function CanvasPage() {
   })();
 
   /** Change the selected opening's width (real cm) or type, keeping its spot if it fits. */
-  const updateSelectedOpening = (patch: { widthCm?: number; type?: OpeningType }) => {
+  const updateSelectedOpening = (patch: { widthCm?: number; type?: OpeningType; style?: WindowStyle; frame?: FrameFinish }) => {
     const i = selectedOpening;
     const op = i !== null ? openings[i] : undefined;
     if (i === null || !op) return;
+    // style / frame only: nothing moves
+    if (patch.widthCm === undefined && patch.type === undefined) {
+      changeOpenings(openings.map((o, k) => (k === i ? { ...o, ...patch } : o)), "end", i);
+      return;
+    }
     const wi = wallIndexOf(op, rfWalls, openingPlanSize);
     if (wi < 0) return;
     const { centre, half } = openingSpan(op, openingPlanSize);
@@ -1969,7 +1983,15 @@ export default function CanvasPage() {
     const cart = useCartStore.getState();
     for (const i of shopSummary.items) {
       if (!i.variantId) continue;
-      const existing = cart.items.find(c => c.variant_id === i.variantId);
+      if (i.config && Object.keys(i.config).length && i.listing) {
+        addCartLine({
+          variantId: i.variantId, basePrice: i.basePrice ?? i.price, listing: i.listing,
+          listedWidth: i.listedWidth ?? null, config: i.config, quantity: i.qty,
+          product: { title: i.title, retailer_name: i.vendor ?? undefined, image: i.image ?? undefined },
+        });
+        continue;
+      }
+      const existing = cart.items.find(c => c.variant_id === i.variantId && !c.config_key);
       if (existing) {
         cart.updateQuantityOptimistic(existing.id, existing.quantity + i.qty);
         continue;
@@ -2695,6 +2717,48 @@ export default function CanvasPage() {
                           cm
                         </span>
                       </label>
+                      {selectedOpeningInfo.op.type === "window" && (
+                        <>
+                          <div>
+                            <span className="text-[11px] text-white/75">Style</span>
+                            <div className="mt-1 grid grid-cols-2 gap-1">
+                              {WINDOW_STYLES.map(ws => {
+                                const on = (selectedOpeningInfo.op.style ?? DEFAULT_WINDOW_STYLE) === ws.id;
+                                return (
+                                  <button
+                                    key={ws.id}
+                                    title={ws.hint}
+                                    onClick={() => !on && updateSelectedOpening({ style: ws.id })}
+                                    className={`rounded-[6px] px-1.5 py-1 text-[10.5px] font-medium transition-colors ${
+                                      on ? "bg-white text-[#0a0a0a]" : "bg-white/10 text-white/80 hover:bg-white/20"
+                                    }`}
+                                  >
+                                    {ws.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-white/75">Frame</span>
+                            <span className="flex items-center gap-1.5">
+                              {FRAME_FINISHES.map(fr => {
+                                const on = (selectedOpeningInfo.op.frame ?? DEFAULT_FRAME) === fr.id;
+                                return (
+                                  <button
+                                    key={fr.id}
+                                    title={fr.name}
+                                    aria-label={`${fr.name} frame`}
+                                    onClick={() => !on && updateSelectedOpening({ frame: fr.id })}
+                                    className={`h-[18px] w-[18px] rounded-full border ${on ? "border-[#c7de7d] ring-2 ring-[#c7de7d]/60" : "border-white/30"}`}
+                                    style={{ background: fr.hex }}
+                                  />
+                                );
+                              })}
+                            </span>
+                          </div>
+                        </>
+                      )}
                       <p className="text-[10.5px] leading-snug text-white/55">Drag it along the wall to move it.</p>
                       <button
                         onClick={deleteSelectedOpening}

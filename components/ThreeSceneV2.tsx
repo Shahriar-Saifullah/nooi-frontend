@@ -30,6 +30,10 @@ import {
   wallLine as openingWallLine, wallIndexOf, openingSpan, placeOpening,
   openingKey, type PlanOpening, type WallLine,
 } from "@/lib/walls/openings";
+import {
+  windowParts, windowSpanY, frameFinish, isWindowStyle, DEFAULT_WINDOW_STYLE,
+  type WindowStyle, type FrameFinish,
+} from "@/lib/walls/windowStyles";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
@@ -199,6 +203,8 @@ export interface Opening {
   y: number;      // ‰ of image height
   width: number;  // ‰ of max(image w, h)
   wall_id?: string;
+  style?: WindowStyle;
+  frame?: FrameFinish;
 }
 
 export interface VWall {
@@ -326,7 +332,7 @@ function makeWorld(totalW: number, totalD: number, visualScale = 1): World {
   };
 }
 
-type Cut = { start: number; end: number; type: "door" | "window"; key: string };
+type Cut = { start: number; end: number; type: "door" | "window"; key: string; style?: WindowStyle; frame?: FrameFinish };
 
 /** Split one wall's along-axis extent into solid pieces + opening cuts. */
 function wallPieces(a0: number, a1: number, cuts: Cut[]) {
@@ -652,16 +658,31 @@ function WallWithOpenings({
             </group>
           );
         }
-        // window: sill below, glass pane, header above
+        // window: wall below and above, then the style's frame, glass and
+        // bars (lib/walls/windowStyles)
+        const wStyle = isWindowStyle(cut.style) ? cut.style : DEFAULT_WINDOW_STYLE;
+        const fin = frameFinish(cut.frame);
+        const span = windowSpanY(wStyle, SILL_H, DOOR_H, WALL_H);
         return (
           <group key={`w${i}`}>
-            {box(cut.start, cut.end, 0, SILL_H, `ws${i}`, null, true)}
-            {box(cut.start, cut.end, DOOR_H, WALL_H, `wh${i}`, null, true)}
-            {box(cut.start + 0.02, cut.end - 0.02,
-                 SILL_H + 0.03, DOOR_H - 0.03, `wg${i}`, glassMat)}
-            {/* thin frame */}
-            {box(cut.start, cut.end, SILL_H, SILL_H + 0.04, `wfa${i}`, frameMat)}
-            {box(cut.start, cut.end, DOOR_H - 0.04, DOOR_H, `wfb${i}`, frameMat)}
+            {box(cut.start, cut.end, 0, span.sill, `ws${i}`, null, true)}
+            {box(cut.start, cut.end, span.head, WALL_H, `wh${i}`, null, true)}
+            {windowParts(wStyle, cut.start, cut.end, span.sill, span.head, t).map((p, k) => (
+              <mesh
+                key={`wp${i}-${k}`}
+                position={horiz
+                  ? [(p.a0 + p.a1) / 2, (p.y0 + p.y1) / 2, c + p.z]
+                  : [c + p.z, (p.y0 + p.y1) / 2, (p.a0 + p.a1) / 2]}
+                castShadow={p.mat !== "glass"}
+              >
+                <boxGeometry args={horiz
+                  ? [p.a1 - p.a0, p.y1 - p.y0, p.depth]
+                  : [p.depth, p.y1 - p.y0, p.a1 - p.a0]} />
+                {p.mat === "glass" ? glassMat
+                  : p.mat === "lattice" ? <meshStandardMaterial color="#7a5634" roughness={0.7} />
+                  : <meshStandardMaterial color={fin.hex} roughness={fin.metal ? 0.4 : 0.6} metalness={fin.metal ? 0.5 : 0} />}
+              </mesh>
+            ))}
           </group>
         );
       })}
@@ -858,10 +879,13 @@ function WallMountedItem({
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const ref = useRef<THREE.Group>(null);
   const size = itemSizeM(item);
+  // Drawn-in-code pieces are mostly wall mounts, but a floor-standing AC
+  // stands on the floor and a ceiling fan hangs from the ceiling.
+  const mount = item.mountType ?? cat?.mountType ?? "wall";
   // the wall it hangs on, found once per position
   const wallId = useMemo(
-    () => nearestWall(item.position[0], item.position[2], walls)?.wall.id ?? null,
-    [item.position, walls],
+    () => mount === "wall" ? nearestWall(item.position[0], item.position[2], walls)?.wall.id ?? null : null,
+    [item.position, walls, mount],
   );
   // hide with the wall when the cutaway lowers it
   useFrame(() => {
@@ -874,7 +898,11 @@ function WallMountedItem({
   return (
     <group
       ref={ref}
-      position={[item.position[0], (item.position[1] ?? 0) + size.h / 2, item.position[2]]}
+      position={[
+        item.position[0],
+        mount === "ceiling" ? WALL_H - size.h / 2 : (item.position[1] ?? 0) + size.h / 2,
+        item.position[2],
+      ]}
       rotation={[0, item.rotation ?? 0, 0]}
       onPointerDown={(e) => { e.stopPropagation(); (window as unknown as { __nooiSelect?: (id: string) => void }).__nooiSelect?.(item.id); }}
       onClick={(e) => e.stopPropagation()}
@@ -1868,7 +1896,7 @@ function cutsPerWall(
     // Stable per-opening key from its plan position (‰ coords, rounded):
     // door finishes are stored against it. An index would be unstable —
     // re-analysing a plan can reorder openings.
-    arr.push({ start: centre - half, end: centre + half, type: op.type, key: openingKey(op as PlanOpening) });
+    arr.push({ start: centre - half, end: centre + half, type: op.type, key: openingKey(op as PlanOpening), style: op.style, frame: op.frame });
     map.set(idx, arr);
   });
   return map;

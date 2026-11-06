@@ -34,9 +34,11 @@ import {
   BarChart2,
   Megaphone,
   Share2,
-  Globe
+  Globe,
+  FileText
 } from "lucide-react";
 import NotificationPrefsPanel from "@/components/profile/NotificationPrefs";
+import DocumentsPanel from "@/components/profile/DocumentsPanel";
 import { getCurrentUser, logout, updateProfile, updatePassword, type AuthUser } from "@/lib/api/auth";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { createClient } from "@/utils/supabase/client";
@@ -340,6 +342,7 @@ export default function ProfilePage() {
     { id: "privacy", label: "Privacy", icon: <Shield className="w-4 h-4" /> },
     { id: "notifications", label: "Notifications", icon: <Bell className="w-4 h-4" /> },
     { id: "billing", label: "Billing", icon: <CreditCard className="w-4 h-4" /> },
+    { id: "documents", label: "Documents", icon: <FileText className="w-4 h-4" /> },
     { id: "preferences", label: "Preferences", icon: <Sliders className="w-4 h-4" /> }
   ];
 
@@ -1552,6 +1555,9 @@ export default function ProfilePage() {
             </div>
           )}
 
+          {/* ──────────── Documents Section ──────────── */}
+          {activeSection === "documents" && <DocumentsPanel />}
+
           {/* ──────────── Preferences Section ──────────── */}
           {activeSection === "preferences" && (
             <div id="preferences" className="bg-white rounded-3xl shadow-sm border border-[#f0f0f0] overflow-hidden">
@@ -1765,7 +1771,7 @@ export default function ProfilePage() {
           )}
 
           {/* Fallback View for other tabs */}
-          {!["profile", "security", "privacy", "notifications", "billing", "preferences", "delete-account"].includes(activeSection) && (
+          {!["profile", "security", "privacy", "notifications", "billing", "documents", "preferences", "delete-account"].includes(activeSection) && (
             <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-[#f0f0f0]">
               <h1 className="text-xl font-[600] text-[#0a0a0a] capitalize">{activeSection} Settings</h1>
               <p className="text-xs text-[#737373] mt-1">Manage your {activeSection} preferences here</p>
