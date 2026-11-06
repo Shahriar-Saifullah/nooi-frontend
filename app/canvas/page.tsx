@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
   Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
-  Ruler, Sparkles, Sun, DoorOpen, FileText,
+  Ruler, Sparkles, Sun, DoorOpen, FileText, CookingPot,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -60,6 +60,13 @@ import { WALL_T_MIN, WALL_T_MAX } from "@/lib/placement/snap";
 import { buildFurnitureSheet } from "@/lib/export/furnitureSheet";
 import { pieceSizeCm } from "@/lib/furniture/size";
 import ArrayPanel, { DEFAULT_ARRAY, type ArrayConfig } from "@/components/ArrayPanel";
+import KitchenPanel from "@/components/KitchenPanel";
+import type { KitchenSelection } from "@/components/KitchenLayer";
+import { DEFAULT_KITCHEN_STYLE } from "@/lib/kitchen/materials";
+import {
+  addModuleAt, changeRun, frameOf, newModule, runEdits, runProblem,
+  type KitchenData, type KitchenRun, type ModuleKind,
+} from "@/lib/kitchen/model";
 import { rowSpots, gridSpots, aroundSpots, spotProblem, type Spot } from "@/lib/placement/array";
 import { roomPolygonScene } from "@/lib/export/furnitureSheet";
 import {
@@ -175,6 +182,8 @@ export default function CanvasPage() {
     setFloorSurfaces({});
     setSelectedFloorRoomId(null);
     setDoorFinishes({});
+    setKitchen({ runs: [], style: DEFAULT_KITCHEN_STYLE });
+    kitchenLoaded.current = false;
     setSelectedWall(null);
     setSelectedDoor(null);
     // critical: without this, the empty furniture array above would pass the
@@ -223,6 +232,11 @@ export default function CanvasPage() {
           if (savedDoorFinishes && typeof savedDoorFinishes === "object") {
             setDoorFinishes(savedDoorFinishes);
           }
+          const savedKitchen = (p.room_data as any)?.kitchen as KitchenData | undefined;
+          if (savedKitchen && Array.isArray(savedKitchen.runs)) {
+            setKitchen({ runs: savedKitchen.runs, style: { ...DEFAULT_KITCHEN_STYLE, ...(savedKitchen.style ?? {}) } });
+          }
+          kitchenLoaded.current = true;
           if (!haveStoreRooms && apiRooms.length > 0) {
             // server rooms only when the store has none — the user's freshly
             // edited names in the store always win
@@ -461,6 +475,10 @@ export default function CanvasPage() {
   const [selectedWall, setSelectedWall] = useState<{ key: string; side: "A" | "B" } | null>(null);
   const [wallSurfaces, setWallSurfaces] = useState<Record<string, string>>({});
   const [doorFinishes, setDoorFinishes] = useState<Record<string, string>>({});
+  // Kitchen builder: cabinet runs along walls (lib/kitchen). `kitchenLoaded`
+  // keeps an early save from wiping a kitchen that hasn't loaded yet.
+  const [kitchen, setKitchen] = useState<KitchenData>({ runs: [], style: DEFAULT_KITCHEN_STYLE });
+  const kitchenLoaded = useRef(false);
   // Per-room floor finish. Keyed by room id, saved alongside the wall ones.
   const [floorSurfaces, setFloorSurfaces] = useState<Record<string, string>>({});
   const [selectedFloorRoomId, setSelectedFloorRoomId] = useState<string | null>(null);
@@ -482,15 +500,17 @@ export default function CanvasPage() {
         && Object.keys(wallColors).length === 0
         && Object.keys(wallSurfaces).length === 0
         && Object.keys(floorSurfaces).length === 0
-        && Object.keys(doorFinishes).length === 0) return;
+        && Object.keys(doorFinishes).length === 0
+        && kitchen.runs.length === 0) return;
     furnitureLoaded.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces, doorFinishes, floorSurfaces)
+      saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces, doorFinishes, floorSurfaces,
+        kitchenLoaded.current ? kitchen : undefined)
         .catch(err => console.error("Scene save failed:", err));
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, currentProject?.id]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen, currentProject?.id]);
 
   // ─── Canvas → Shop ─────────────────────────────────────────────────────────
   // The save above is debounced 1500ms. Navigating inside that window would
@@ -517,6 +537,7 @@ export default function CanvasPage() {
         wallSurfaces,
         doorFinishes,
         floorSurfaces,
+        kitchenLoaded.current ? kitchen : undefined,
       );
       if (picture) await Promise.race([picture, new Promise(r => setTimeout(r, 4000))]);
       router.push(`/marketplace?project=${currentProject.id}`);
@@ -1544,7 +1565,80 @@ export default function CanvasPage() {
     void commitWalls(undefined, snap.openings);
   };
 
+  // ── Kitchen builder (3D) ──────────────────────────────────────────────────
+  // Pick a unit, click a wall: units join into runs with one countertop and
+  // plinth; select a unit to resize, replace, move or delete it. Rules live
+  // in lib/kitchen/model; drawing in components/KitchenLayer.
+  const [kitchenEdit, setKitchenEdit] = useState(false);
+  const [kitchenAdd, setKitchenAdd] = useState<ModuleKind | null>(null);
+  const [kitchenSel, setKitchenSel] = useState<KitchenSelection | null>(null);
+  const kitchenCtx = { walls: rfWalls as (typeof rfWalls[number] & { id?: string })[], size: openingPlanSize, openings };
+
+  const toggleKitchen = () => {
+    setKitchenEdit(on => !on);
+    setKitchenAdd(null);
+    setKitchenSel(null);
+    setEditOpenings(false);
+    setSelectedFurnitureId(null);
+    setSelectedWall(null);
+    setSelectedDoor(null);
+    setSelectedFloorRoomId(null);
+  };
+
+  const kitchenAddAt = (wallIndex: number, side: 1 | -1, along: number) => {
+    if (!kitchenAdd) return;
+    const res = addModuleAt({ data: kitchen, kind: kitchenAdd, ...kitchenCtx, wallIndex, side, along });
+    if ("error" in res) { noRoomToast(res.error); return; }
+    setKitchen(k => ({ ...k, runs: res.runs }));
+    setKitchenSel({ runId: res.runId, index: res.index });
+  };
+
+  /** Change the selected unit's run; refuses (with a toast) what doesn't fit. */
+  const editKitchenRun = (fn: (r: KitchenRun, i: number, dir: 1 | -1) => KitchenRun | null, nextIndex?: (i: number) => number | null) => {
+    if (!kitchenSel) return;
+    const run = kitchen.runs.find(r => r.id === kitchenSel.runId);
+    const f = run ? frameOf(run, kitchenCtx.walls, openingPlanSize) : null;
+    if (!run || !f) return;
+    const res = changeRun(kitchen, run.id, r => fn(r, kitchenSel.index, f.dir), kitchenCtx);
+    if ("error" in res) { noRoomToast(res.error); return; }
+    setKitchen(k => ({ ...k, runs: res.runs }));
+    if (!res.runs.some(r => r.id === run.id)) { setKitchenSel(null); return; }
+    if (nextIndex) {
+      const n = nextIndex(kitchenSel.index);
+      setKitchenSel(n === null ? null : { runId: run.id, index: n });
+    }
+  };
+  const kitchenFits = (r: KitchenRun) => runProblem({ run: r, ...kitchenCtx, runs: kitchen.runs }) === null;
+
+  useEffect(() => {
+    if (!kitchenEdit || viewMode !== "3d") return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t?.isContentEditable) return;
+      if (e.key === "Escape") { if (kitchenAdd) setKitchenAdd(null); else setKitchenSel(null); }
+      else if ((e.key === "Delete" || e.key === "Backspace") && kitchenSel) {
+        e.preventDefault();
+        editKitchenRun((r, i, dir) => runEdits.remove(r, i, dir), () => null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kitchenEdit, kitchenAdd, kitchenSel, kitchen, viewMode]);
+
+  const sceneKitchen = {
+    data: kitchen,
+    editing: kitchenEdit && viewMode === "3d" && cameraView !== "inside",
+    addKind: kitchenAdd,
+    selected: kitchenSel,
+    onSelect: setKitchenSel,
+    onAddAt: kitchenAddAt,
+  };
+
   const toggleEditOpenings = () => {
+    setKitchenEdit(false);
+    setKitchenAdd(null);
+    setKitchenSel(null);
     setEditOpenings(on => !on);
     setAddOpeningType(null);
     setSelectedOpening(null);
@@ -1662,6 +1756,7 @@ export default function CanvasPage() {
     wallSurfaces: Record<string, string>;
     floorSurfaces: Record<string, string>;
     doorFinishes: Record<string, string>;
+    kitchen: KitchenData;
   };
 
   const undoStack = useRef<SceneSnapshot[]>([]);
@@ -1674,7 +1769,7 @@ export default function CanvasPage() {
 
   const currentSnapshot = (): SceneSnapshot => ({
     furniture: placedFurniture,
-    wallColors, wallSurfaces, floorSurfaces, doorFinishes,
+    wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen,
   });
 
   const applySnapshot = (s: SceneSnapshot) => {
@@ -1684,6 +1779,8 @@ export default function CanvasPage() {
     setWallSurfaces(s.wallSurfaces);
     setFloorSurfaces(s.floorSurfaces);
     setDoorFinishes(s.doorFinishes);
+    setKitchen(s.kitchen);
+    setKitchenSel(null);
     setSelectedFurnitureId(null);
     setSelectedWall(null);
     setSelectedDoor(null);
@@ -1711,7 +1808,7 @@ export default function CanvasPage() {
     }, 700);
     return () => { if (historyTimer.current) clearTimeout(historyTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen]);
 
   const undo = () => {
     if (editOpenings && viewMode === "3d") { undoOpenings(); return; }
@@ -1750,7 +1847,7 @@ export default function CanvasPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, editOpenings, openings, viewMode]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen, editOpenings, openings, viewMode]);
 
   // Tooltips should name the shortcut the user actually presses.
   const isMac = typeof navigator !== "undefined"
@@ -2522,6 +2619,23 @@ export default function CanvasPage() {
                rest: every lamp placed emits, every opening admits daylight. */}
           {viewMode === "3d" && !(walkthroughActive && !walkthroughPaused) && (
             <div className="absolute bottom-5 left-5 z-10">
+              {kitchenEdit && (
+                <KitchenPanel
+                  data={kitchen}
+                  addKind={kitchenAdd}
+                  onAddKind={k => { setKitchenAdd(k); if (k) setKitchenSel(null); }}
+                  selected={kitchenSel}
+                  onStyle={st => setKitchen(k => ({ ...k, style: st }))}
+                  onWidth={cm => editKitchenRun((r, i, dir) => runEdits.width(r, i, cm / 100, dir, kitchenFits))}
+                  onReplace={kind => editKitchenRun((r, i) => runEdits.replace(r, i, kind))}
+                  onUpper={u => editKitchenRun((r, i) => runEdits.upper(r, i, u))}
+                  onMove={by => editKitchenRun((r, i) => runEdits.move(r, i, by), i => i + by)}
+                  onInsert={side => editKitchenRun((r, i, dir) => runEdits.insert(r, i, side, newModule("base-door"), dir), i => (side === "left" ? i : i + 1))}
+                  onRemove={() => editKitchenRun((r, i, dir) => runEdits.remove(r, i, dir), () => null)}
+                  onRemoveRun={() => editKitchenRun(() => null, () => null)}
+                  onClose={toggleKitchen}
+                />
+              )}
               {editOpenings && (
                 <div className="mb-2 w-[232px] rounded-[12px] bg-black/70 backdrop-blur-sm p-3.5 text-white">
                   <div className="mb-2.5 flex items-center justify-between">
@@ -2682,6 +2796,18 @@ export default function CanvasPage() {
                   }`}
                 >
                   <DoorOpen size={13} />Doors &amp; windows
+                </button>
+                <button
+                  onClick={toggleKitchen}
+                  title="Build a kitchen: cabinets, sink, cooktop, oven and fridge along a wall"
+                  aria-pressed={kitchenEdit}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
+                    kitchenEdit
+                      ? "bg-white text-[#0a0a0a]"
+                      : "bg-black/50 text-white/80 hover:text-white"
+                  }`}
+                >
+                  <CookingPot size={13} />Kitchen
                 </button>
               </div>
             </div>
@@ -2946,6 +3072,7 @@ export default function CanvasPage() {
                   onWallHandleDrag={handleWallHandleDrag}
                   openingEdit={cameraView === "inside" ? null : sceneOpeningEdit}
                   ghosts={arrayGhosts}
+                  kitchen={sceneKitchen}
                   showDimensions={showDimensions}
                   onFurnitureToggleLight={(id) => setPlacedFurniture(prev => prev.map(f =>
                     f.id === id ? { ...f, lightLevel: (f.lightLevel ?? 1) > 0 ? 0 : 1 } : f))}

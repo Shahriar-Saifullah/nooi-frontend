@@ -20,6 +20,7 @@ import { doorFinishById } from "@/lib/surfaces/doors";
 import { getFaceTextures, getDoorTexture, onSurfaceTextureLoaded } from "@/lib/surfaces/textures";
 import WallDecor from "@/components/decor/WallDecor";
 import FurnitureGizmo from "@/components/FurnitureGizmo";
+import KitchenLayer, { type KitchenSceneProps } from "@/components/KitchenLayer";
 import { RoomAreaLabels, ItemDimensions } from "@/components/Measurements";
 import { Html } from "@react-three/drei";
 import { installBvh, buildBoundsTrees } from "@/lib/three/bvh";
@@ -269,6 +270,8 @@ interface ThreeSceneV2Props {
   openingEdit?: OpeningEditProps | null;
   /** Array preview: where copies would go (green fits, red doesn't). */
   ghosts?: ArrayGhost[] | null;
+  /** Kitchen builder: the cabinet runs, and the editing state. */
+  kitchen?: KitchenSceneProps | null;
 }
 
 export interface ArrayGhost { x: number; z: number; rotation: number; w: number; d: number; h: number; ok: boolean }
@@ -2811,6 +2814,7 @@ function SceneContent({
   onWallHandleDrag,
   openingEdit = null,
   ghosts = null,
+  kitchen = null,
 }: Required<Pick<ThreeSceneV2Props,
   "rooms" | "rfWalls" | "openings" | "furniture">> & {
   world: World;
@@ -2839,13 +2843,17 @@ function SceneContent({
   onWallHandleDrag?: (e: WallHandleDragEvent) => void;
   openingEdit?: OpeningEditProps | null;
   ghosts?: ArrayGhost[] | null;
+  kitchen?: KitchenSceneProps | null;
 }) {
   // While editing doors & windows the editor owns the pointer: walls, doors
   // and furniture stop reacting to clicks.
-  const editingOpenings = !!openingEdit;
+  // (the kitchen editor owns it the same way)
+  const editingOpenings = !!openingEdit || !!kitchen?.editing;
   // drei's ContactShadows is built on GLSL ShaderMaterials, which WebGPU
   // cannot run. On WebGPU the AO pass covers the same contact darkening.
   const isWebGPU = useThree(s => (s.gl as { isWebGPURenderer?: boolean }).isWebGPURenderer === true);
+  const kitchenSize = useMemo(() => ({ totalW: world.totalW, totalD: world.totalD }), [world]);
+  const kitchenRooms = useMemo(() => roomPolysWorld(rooms, world), [rooms, world]);
   const cuts = useMemo(
     () => cutsPerWall(rfWalls, openings, world),
     [rfWalls, openings, world],
@@ -3182,6 +3190,11 @@ function SceneContent({
 
       {ghosts && ghosts.length > 0 && <ArrayGhosts ghosts={ghosts} />}
 
+      {kitchen && (kitchen.data.runs.length > 0 || kitchen.editing) && (
+        <KitchenLayer kitchen={kitchen} walls={rfWalls} openings={openings as PlanOpening[]}
+          size={kitchenSize} rooms={kitchenRooms} />
+      )}
+
       {openingEdit && !insideMode && (
         <OpeningEditor walls={rfWalls} openings={openings} world={world} edit={openingEdit} />
       )}
@@ -3355,6 +3368,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   onPathTracerStats,
   openingEdit = null,
   ghosts = null,
+  kitchen = null,
 }, ref) {
   const world = useMemo(
     () => makeWorld(roomWidthCm / 100, roomDepthCm / 100, visualScale),
@@ -3530,6 +3544,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           onWallHandleDrag={onWallHandleDrag}
           openingEdit={openingEdit}
           ghosts={ghosts}
+          kitchen={kitchen}
           onFurnitureSelect={onFurnitureSelect}
           onFurnitureMove={onFurnitureMove}
           onFurnitureRotate={onFurnitureRotate}
