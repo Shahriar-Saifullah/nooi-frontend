@@ -16,6 +16,7 @@
  */
 
 import { WALL_T_MIN, WALL_T_MAX } from "@/lib/placement/snap";
+import type { WindowStyle, FrameFinish } from "./windowStyles";
 
 export type OpeningType = "door" | "window";
 
@@ -25,6 +26,10 @@ export interface PlanOpening {
   x: number; y: number;   // ‰ of image width / height
   width: number;          // ‰ of max(image w, h)
   wall_id?: string;       // "w<index>" into the walls array
+  /** windows: how it's drawn (lib/walls/windowStyles); default "fixed" */
+  style?: WindowStyle;
+  /** windows: frame finish; default "wood" */
+  frame?: FrameFinish;
 }
 
 export interface PlanWallLike { x1: number; y1: number; x2: number; y2: number; thickness: number }
@@ -173,7 +178,13 @@ export function placeOpening(args: {
   if (!line) return null;
   const widthM = Math.max(MIN_OPENING_WIDTH, args.widthM);
   const c = fitOpening(line, args.centre, widthM / 2, others, meets);
-  return c === null ? null : toPlanOpening(line, c, widthM, args.type, args.size);
+  if (c === null) return null;
+  const placed = toPlanOpening(line, c, widthM, args.type, args.size);
+  // a move / resize keeps the window's style and frame
+  const prev = args.skip != null ? args.openings[args.skip] : undefined;
+  if (prev?.style) placed.style = prev.style;
+  if (prev?.frame) placed.frame = prev.frame;
+  return placed;
 }
 
 /** After deleting wall `index`: drop its openings and renumber the rest. */

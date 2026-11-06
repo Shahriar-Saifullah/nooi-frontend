@@ -78,6 +78,11 @@ const COPY = {
     authorizing: "Authorizing payment",
     pay: (amount: string) => `Pay ${amount}`,
     terms: "By clicking Pay, you agree to Nooi's Terms of Service and Privacy Policy.",
+    agreePrefix: "I agree to Nooi's",
+    termsLink: "Terms of Service",
+    and: "and",
+    privacyLink: "Privacy Policy",
+    mustAgree: "Please accept the Terms of Service and Privacy Policy to continue.",
     emptyTitle: "Your cart is empty",
     emptyBody: "You don't have any items ready for checkout. Explore the marketplace to find something.",
     returnToShop: "Return to marketplace",
@@ -118,6 +123,11 @@ const COPY = {
     authorizing: "جارٍ تفويض الدفع",
     pay: (amount: string) => `ادفع ${amount}`,
     terms: "بالنقر على ادفع، فإنك توافق على شروط الخدمة وسياسة الخصوصية.",
+    agreePrefix: "أوافق على",
+    termsLink: "شروط الخدمة",
+    and: "و",
+    privacyLink: "سياسة الخصوصية",
+    mustAgree: "يرجى الموافقة على شروط الخدمة وسياسة الخصوصية للمتابعة.",
     emptyTitle: "سلتك فارغة",
     emptyBody: "لا توجد منتجات جاهزة للدفع. تصفح المتجر للعثور على ما يناسبك.",
     returnToShop: "العودة إلى المتجر",
@@ -250,6 +260,8 @@ function CheckoutInner() {
   const [checkoutSummary, setCheckoutSummary] = useState<CheckoutSummary | null>(null);
   const [moyasar, setMoyasar] = useState<{ form: MoyasarFormConfig; attemptId: string } | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
+  /** Recorded server-side (version, time, IP) when the checkout starts. */
+  const [agreeTerms, setAgreeTerms] = useState(false);
   const [step, setStep] = useState<"shipping" | "payment">("shipping");
 
   const stripePromise = getStripe();
@@ -283,6 +295,10 @@ function CheckoutInner() {
       setGeneralError(t.requiredFields);
       return;
     }
+    if (!agreeTerms) {
+      setGeneralError(t.mustAgree);
+      return;
+    }
 
     setIsLoadingIntent(true);
 
@@ -308,7 +324,7 @@ function CheckoutInner() {
 
       // The code only. The server derives the amount.
       if (PAYMENT_PROVIDER === "moyasar") {
-        const response = await createMoyasarCheckout(address, promoCode);
+        const response = await createMoyasarCheckout(address, promoCode, agreeTerms);
         if (!response.success) {
           setGeneralError(typeof response.error === "string" ? response.error : t.initFailed);
           setIsLoadingIntent(false);
@@ -479,11 +495,30 @@ function CheckoutInner() {
                         <option value="CA">Canada</option>
                         <option value="GB">United Kingdom</option>
                         <option value="AE">United Arab Emirates</option>
+                        <option value="KW">Kuwait</option>
+                        <option value="QA">Qatar</option>
+                        <option value="BH">Bahrain</option>
+                        <option value="OM">Oman</option>
                         <option value="SA">Saudi Arabia</option>
                       </select>
                     </div>
                   </div>
                 </div>
+
+                <label className="flex items-start gap-2.5 text-[12.5px] text-[#4B4F4F] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={agreeTerms}
+                    onChange={e => { setAgreeTerms(e.target.checked); setGeneralError(null); }}
+                    className="mt-0.5 h-4 w-4 accent-[#004643]"
+                  />
+                  <span>
+                    {t.agreePrefix}{" "}
+                    <a href="/legal/terms" target="_blank" rel="noreferrer" className="text-[#004643] underline underline-offset-2">{t.termsLink}</a>
+                    {" "}{t.and}{" "}
+                    <a href="/legal/privacy" target="_blank" rel="noreferrer" className="text-[#004643] underline underline-offset-2">{t.privacyLink}</a>.
+                  </span>
+                </label>
 
                 <button
                   type="submit"

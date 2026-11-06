@@ -7,6 +7,7 @@
  *                       return window, minimum payout (super admin edits)
  *   Platform contact    support email / phone and legal details shown to
  *                       customers (super admin edits)
+ *   Kitchen prices      what the kitchen builder quotes from (super admin edits)
  *   My account          your name and password
  *   Payments            read-only: gateway, test/live, webhook and payout health
  */
@@ -15,6 +16,7 @@ import React, { useEffect, useState } from "react";
 import { Loader2, Check, AlertCircle, AlertTriangle, ShieldCheck } from "lucide-react";
 
 import AdminShell from "@/components/admin/AdminShell";
+import KitchenPriceListCard from "@/components/admin/KitchenPriceList";
 import {
   getPlatformSettings, updatePlatformSettings, getPaymentStatus, getMe, updateMe, changeMyPassword,
   type PlatformSettings, type PaymentStatus,
@@ -250,6 +252,7 @@ export default function AdminSettingsPage() {
         <p className="mt-1 text-[12.5px] text-[#646968]">Marketplace rules, contact details, your account and payment health.</p>
         <div className="mt-6 space-y-5">
           <PlatformForm />
+          <KitchenPriceListCard />
           <MyAccount />
           <Payments />
         </div>

@@ -25,6 +25,8 @@
  * appear here, that is a bug to find in the backend query, not to route around.
  */
 
+import type { Certificate, Patent, Origin } from "@/lib/listings/extras";
+import type { OptionGroup, PriceUnit } from "@/lib/listings/configure";
 import { createClient } from "@/utils/supabase/client";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
@@ -65,6 +67,20 @@ export interface MarketplaceProduct {
   title: string;
   description: string | null;
   category: string;
+  /** Shop groups it's listed under (its type's group first). */
+  categories?: string[];
+  certificates?: Certificate[];
+  patents?: Patent[];
+  origin?: Origin | null;
+  origin_country?: string | null;
+  /** ISO country codes. */
+  ships_to?: string[];
+  /** "metre": prices are per metre of width, made between min and max */
+  price_unit?: PriceUnit;
+  min_width_cm?: number | null;
+  max_width_cm?: number | null;
+  /** vendor options: fabric, legs, handles … (lib/listings/configure) */
+  options?: OptionGroup[];
   tags: string[];
   base_price: number;
   from_price: number;
@@ -99,6 +115,7 @@ export interface FacetGroup {
 export interface Facets {
   groups: FacetGroup[];
   vendors: RetailerSummary[];
+  origins?: { saudi: number; international: number };
   price: { min: number; max: number };
 }
 
@@ -113,6 +130,9 @@ export interface ProductQuery {
   minPrice?: number;
   maxPrice?: number;
   inStock?: boolean;
+  madeIn?: Origin;
+  /** ISO country code */
+  shipsTo?: string;
   sort?: "price_asc" | "price_desc" | "lead_time" | "newest";
   page?: number;
   limit?: number;
@@ -175,6 +195,16 @@ function normaliseRaw(row: any): MarketplaceProduct {
     title: row.title,
     description: row.description ?? null,
     category: row.category,
+    categories: row.categories ?? [],
+    certificates: row.certificates ?? [],
+    patents: row.patents ?? [],
+    origin: row.origin ?? null,
+    origin_country: row.origin_country ?? null,
+    ships_to: row.ships_to ?? ["SA"],
+    price_unit: row.price_unit === "metre" ? "metre" : "unit",
+    min_width_cm: row.min_width_cm ?? null,
+    max_width_cm: row.max_width_cm ?? null,
+    options: Array.isArray(row.options) ? row.options : [],
     tags: row.tags ?? [],
     base_price: Number(row.base_price),
     from_price: prices.length ? Math.min(...prices) : Number(row.base_price),
@@ -200,6 +230,7 @@ export async function getFacets(): Promise<Facets> {
   return {
     groups: json.groups ?? [],
     vendors: json.vendors ?? [],
+    origins: json.origins,
     price: json.price ?? { min: 0, max: 0 },
   };
 }
@@ -215,6 +246,8 @@ export async function getProducts(q: ProductQuery = {}): Promise<ProductPage> {
   if (q.minPrice != null) p.set("min_price", String(q.minPrice));
   if (q.maxPrice != null) p.set("max_price", String(q.maxPrice));
   if (q.inStock)          p.set("in_stock", "true");
+  if (q.madeIn)           p.set("made_in", q.madeIn);
+  if (q.shipsTo)          p.set("ships_to", q.shipsTo);
   if (q.sort && q.sort !== "newest") p.set("sort", q.sort);
   p.set("page",  String(q.page  ?? 1));
   p.set("limit", String(q.limit ?? 12));

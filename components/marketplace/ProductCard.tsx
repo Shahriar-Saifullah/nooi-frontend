@@ -40,6 +40,10 @@ interface Props {
     soldOut: string;
     days: string;
     from: string;
+    /** Badge for listings made in Saudi Arabia. */
+    madeInSaudi?: string;
+    /** "/ m" after per-metre prices */
+    perMetre?: string;
   };
 }
 
@@ -93,6 +97,11 @@ export default function ProductCard({
               {labels.inCart}
             </span>
           )}
+          {product.origin === "saudi" && labels.madeInSaudi && (
+            <span className="px-2 py-1 rounded-full bg-white/95 border border-[#D5DBDA] text-[10.5px] font-medium text-[#343837]">
+              {labels.madeInSaudi}
+            </span>
+          )}
         </div>
       </div>
 
@@ -101,8 +110,12 @@ export default function ProductCard({
         onClick={() => onOpen(product)}
         className="flex flex-col gap-1 px-3.5 pt-3 pb-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#004643]"
       >
-        <span className="text-[11px] text-[#8E9493] truncate">
-          {product.retailer?.name ?? "\u00A0"}
+        <span className="flex items-center gap-1.5 text-[11px] text-[#8E9493] min-w-0">
+          {product.retailer?.logo_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={product.retailer.logo_url} alt="" className="h-4 w-4 shrink-0 rounded-sm object-contain" />
+          )}
+          <span className="truncate">{product.retailer?.name ?? "\u00A0"}</span>
         </span>
 
         <span className="flex items-baseline justify-between gap-3">
@@ -116,6 +129,9 @@ export default function ProductCard({
               </span>
             )}
             {formatPrice(product.from_price)}
+            {product.price_unit === "metre" && labels.perMetre && (
+              <span className="text-[10.5px] font-normal text-[#8E9493] ms-0.5">{labels.perMetre}</span>
+            )}
           </span>
         </span>
 

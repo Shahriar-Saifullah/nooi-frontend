@@ -26,7 +26,7 @@
 
 export type FurnitureCategory =
   | "living" | "bedroom" | "dining" | "kitchen" | "bath" | "outdoor" | "decor"
-  | "structure" | "lighting";
+  | "structure" | "lighting" | "appliances";
 
 export interface AssetCredit {
   source: string;                 // "CGTrader", "Poly Haven", "in-house"
@@ -37,7 +37,9 @@ export interface AssetCredit {
 
 /** Pieces drawn in code instead of loaded from a .glb (components/decor). */
 export type ProceduralKind =
-  | "tv" | "art-abstract" | "art-lines" | "mirror-round" | "curtains" | "sconce";
+  | "tv" | "art-abstract" | "art-lines" | "mirror-round" | "curtains" | "sconce"
+  // appliances & electrical (round 2)
+  | "split-ac" | "floor-ac" | "ceiling-fan" | "water-heater" | "socket" | "switch";
 
 /** One concrete design the user can drag into the scene. */
 export interface CatalogItem {
@@ -77,7 +79,12 @@ export interface CatalogItem {
 export interface ShopInfo {
   productId: string;
   vendor: string | null;
+  /** per piece — or per metre of width when priceUnit is "metre" */
   price: number;
+  priceUnit?: "unit" | "metre";
+  minWidthCm?: number | null;
+  maxWidthCm?: number | null;
+  options?: import("@/lib/listings/configure").OptionGroup[];
   /** False when the listing has since been taken off sale — it still renders
    *  in rooms that already contain it, but can't be bought. */
   onSale: boolean;
@@ -105,6 +112,7 @@ export const CATEGORY_LABELS: Record<FurnitureCategory, string> = {
   decor: "Decor",
   structure: "Structure",
   lighting: "Lighting",
+  appliances: "Appliances & Electrical",
 };
 
 // ── Helper: keeps the variant rows short and stops category/typeId drifting ──
@@ -368,6 +376,46 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     id: "wall-light", name: "Wall Light", category: "lighting",
     variants: [
       v("lighting", "wall-light", { id: "sconce-brass", name: "Brass Wall Sconce", path: "", procedural: "sconce", thumbnail: "/models/thumbs/proc_sconce-brass.png", size: { w: 18, d: 22, h: 28 }, mountHeight: 185, color: "#a88a5a", tags: ["light", "lamp", "sconce", "wall light", "brass"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+
+  // ══ Appliances & electrical ═══════════════════════════════════════════════
+  // Drawn in code (components/decor/WallDecor.tsx), like the TV. Sizes are
+  // typical Saudi-market units; sockets and switches are BS 1363 (Type G).
+  {
+    id: "air-conditioner", name: "Air Conditioner", category: "appliances",
+    variants: [
+      v("appliances", "air-conditioner", { id: "ac-split-18k", name: "Split AC (18,000 BTU)", path: "", procedural: "split-ac", thumbnail: "/models/thumbs/proc_ac-split-18k.png", size: { w: 100, d: 23, h: 32 }, mountHeight: 225, color: "#f4f5f4", tags: ["ac", "air conditioner", "split", "cooling", "hvac", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("appliances", "air-conditioner", { id: "ac-split-24k", name: "Split AC (24,000 BTU)", path: "", procedural: "split-ac", thumbnail: "/models/thumbs/proc_ac-split-24k.png", size: { w: 112, d: 25, h: 34 }, mountHeight: 225, color: "#f4f5f4", tags: ["ac", "air conditioner", "split", "cooling", "hvac", "wall", "large"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("appliances", "air-conditioner", { id: "ac-floor-48k", name: "Floor-standing AC (48,000 BTU)", path: "", procedural: "floor-ac", thumbnail: "/models/thumbs/proc_ac-floor-48k.png", size: { w: 58, d: 38, h: 185 }, color: "#f4f5f4", tags: ["ac", "air conditioner", "floor", "cabinet", "cooling", "hvac"], customizable: true, mountType: "floor", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "ceiling-fan", name: "Ceiling Fan", category: "appliances",
+    variants: [
+      v("appliances", "ceiling-fan", { id: "fan-ceiling-52", name: "Ceiling Fan (132 cm)", path: "", procedural: "ceiling-fan", thumbnail: "/models/thumbs/proc_fan-ceiling-52.png", size: { w: 132, d: 132, h: 42 }, color: "#f2efe9", tags: ["fan", "ceiling fan", "cooling"], customizable: true, mountType: "ceiling", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "water-heater", name: "Water Heater", category: "appliances",
+    variants: [
+      v("appliances", "water-heater", { id: "water-heater-50l", name: "Water Heater (50 L)", path: "", procedural: "water-heater", thumbnail: "/models/thumbs/proc_water-heater-50l.png", size: { w: 42, d: 44, h: 72 }, mountHeight: 185, color: "#f7f7f5", tags: ["water heater", "geyser", "boiler", "bathroom", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("appliances", "water-heater", { id: "water-heater-80l", name: "Water Heater (80 L)", path: "", procedural: "water-heater", thumbnail: "/models/thumbs/proc_water-heater-80l.png", size: { w: 46, d: 48, h: 95 }, mountHeight: 180, color: "#f7f7f5", tags: ["water heater", "geyser", "boiler", "bathroom", "wall", "large"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "socket", name: "Socket", category: "appliances",
+    variants: [
+      v("appliances", "socket", { id: "socket-single", name: "Single Socket", path: "", procedural: "socket", thumbnail: "/models/thumbs/proc_socket-single.png", size: { w: 8.6, d: 1.2, h: 8.6 }, mountHeight: 30, color: "#f6f6f4", tags: ["socket", "outlet", "plug", "power", "electrical", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("appliances", "socket", { id: "socket-double", name: "Double Socket", path: "", procedural: "socket", thumbnail: "/models/thumbs/proc_socket-double.png", size: { w: 14.6, d: 1.2, h: 8.6 }, mountHeight: 30, color: "#f6f6f4", tags: ["socket", "outlet", "plug", "power", "electrical", "wall", "double"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("appliances", "socket", { id: "socket-counter", name: "Counter Socket", path: "", procedural: "socket", thumbnail: "/models/thumbs/proc_socket-counter.png", size: { w: 14.6, d: 1.2, h: 8.6 }, mountHeight: 110, color: "#f6f6f4", tags: ["socket", "outlet", "kitchen", "counter", "electrical", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
+  {
+    id: "switch", name: "Light Switch", category: "appliances",
+    variants: [
+      v("appliances", "switch", { id: "switch-1gang", name: "1-Gang Switch", path: "", procedural: "switch", thumbnail: "/models/thumbs/proc_switch-1gang.png", size: { w: 8.6, d: 1.2, h: 8.6 }, mountHeight: 120, color: "#f6f6f4", tags: ["switch", "light switch", "electrical", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("appliances", "switch", { id: "switch-3gang", name: "3-Gang Switch", path: "", procedural: "switch", thumbnail: "/models/thumbs/proc_switch-3gang.png", size: { w: 14.6, d: 1.2, h: 8.6 }, mountHeight: 120, color: "#f6f6f4", tags: ["switch", "light switch", "electrical", "wall", "3 gang"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
     ],
   },
 

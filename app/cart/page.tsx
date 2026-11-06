@@ -261,6 +261,7 @@ function CartInner() {
           variantId: i.variant_id,
           title: i.title,
           color: i.color,
+          label: i.config_label ?? null,
           image: i.image,
           unit: i.unit_price,
           quantity: i.quantity,
@@ -284,6 +285,7 @@ function CartInner() {
         variantId: i.variant_id,
         title: i.product_data?.title ?? "Item",
         color: i.product_data?.color ?? null,
+        label: i.product_data?.config_label ?? null,
         image: i.product_data?.image ?? null,
         unit: localUnitPrice(i),
         quantity: i.quantity,
@@ -400,6 +402,9 @@ function CartInner() {
                             </span>
                           </div>
 
+                          {item.label && (
+                            <span className="block mt-0.5 text-[11.5px] text-[#4B4F4F]">{item.label}</span>
+                          )}
                           <span className="block mt-0.5 text-[11.5px] text-[#8E9493]">
                             {item.color ? `${item.color} · ` : ""}
                             {money(item.unit)} {t.each}
@@ -409,6 +414,8 @@ function CartInner() {
                             <span className="mt-1 inline-block text-[11px] text-[#812F28]">
                               {item.reason === "unavailable"
                                 ? t.noLongerAvailable
+                                : item.reason === "options_changed"
+                                  ? (isRtl ? "تغيّرت الخيارات المتاحة. احذفه وأضفه من جديد." : "The vendor changed this product's options. Remove it and add it again.")
                                 : item.reason === "not_enough_stock"
                                   ? t.notEnoughStock(item.stock)
                                   : t.outOfStock}

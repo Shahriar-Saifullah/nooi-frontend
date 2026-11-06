@@ -42,6 +42,35 @@ export async function POST(req: Request) {
       assetType === "product_model" ||
       (!documentType && (isGlb || isImage));
 
+    // Certificates (PDF / photo) and store logos: signed-in vendors only,
+    // with a type and size check. They're public, like product photos.
+    if (assetType === "product_certificate" || assetType === "vendor_logo" || assetType === "option_swatch") {
+      if (!userId) {
+        return NextResponse.json({ success: false, error: "Not authenticated. Please sign in." }, { status: 401 });
+      }
+      // logos and option swatches are small images; certificates may be PDFs
+      const isLogo = assetType === "vendor_logo" || assetType === "option_swatch";
+      const okTypes = isLogo ? ["image/png", "image/jpeg", "image/webp"] : ["application/pdf", "image/png", "image/jpeg"];
+      const maxBytes = isLogo ? 2 * 1024 * 1024 : 10 * 1024 * 1024;
+      if (!okTypes.includes(file.type)) {
+        return NextResponse.json({ success: false, error: isLogo ? "Use a PNG, JPG or WebP image." : "Use a PDF, JPG or PNG file." }, { status: 400 });
+      }
+      if (file.size > maxBytes) {
+        return NextResponse.json({ success: false, error: `The file must be under ${maxBytes / 1024 / 1024} MB.` }, { status: 400 });
+      }
+      const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const folder = assetType === "vendor_logo" ? "logos" : assetType === "option_swatch" ? "swatches" : "certificates";
+      const storagePath = `${folder}/${userId}/${Date.now()}-${safeName}`;
+      const { error: upErr } = await adminClient.storage
+        .from("vendor-assets")
+        .upload(storagePath, Buffer.from(await file.arrayBuffer()), { contentType: file.type, upsert: false });
+      if (upErr) {
+        return NextResponse.json({ success: false, error: `Upload failed: ${upErr.message}` }, { status: 500 });
+      }
+      const { data: pub } = adminClient.storage.from("vendor-assets").getPublicUrl(storagePath);
+      return NextResponse.json({ success: true, url: pub.publicUrl, data: { url: pub.publicUrl, path: storagePath, name: fileName, size: file.size } });
+    }
+
     // ArrayBuffer for Supabase upload
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);

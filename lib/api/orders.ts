@@ -31,6 +31,8 @@ export interface OrderItem {
   quantity: number;
   total_price: number;
   item_status: string;
+  /** made to measure / chosen options, e.g. "240 cm wide · Fabric: Linen" */
+  config_label?: string | null;
   product_variants?: {
     id: string;
     sku: string;

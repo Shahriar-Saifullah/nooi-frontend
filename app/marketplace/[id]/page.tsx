@@ -35,6 +35,10 @@ import {
 } from "lucide-react";
 
 import ShopHeader from "@/components/marketplace/ShopHeader";
+import ProductCredentials from "@/components/marketplace/ProductCredentials";
+import ProductConfigurator from "@/components/marketplace/ProductConfigurator";
+import { configKey, priceLine } from "@/lib/listings/configure";
+import { addCartLine, clampWidth, lineConfig, listedWidthCm } from "@/lib/listings/cartLine";
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
 import { formatMoney } from "@/lib/money";
@@ -100,8 +104,6 @@ function ProductDetailInner() {
   const t = COPY[isArabic ? "ar" : "en"];
 
   const cartItems = useCartStore(s => s.items);
-  const addItemOptimistic = useCartStore(s => s.addItemOptimistic);
-  const updateQuantityOptimistic = useCartStore(s => s.updateQuantityOptimistic);
 
   const [product, setProduct] = useState<MarketplaceProduct | null>(null);
   const [loading, setLoading] = useState(true);
@@ -111,6 +113,9 @@ function ProductDetailInner() {
   const [selectedImageIdx, setSelectedImageIdx] = useState(0);
   const [tab, setTab] = useState<"details" | "reviews">("details");
   const [more, setMore] = useState<MarketplaceProduct[]>([]);
+  // made to measure / options (lib/listings/configure)
+  const [widthCm, setWidthCm] = useState<number | null>(null);
+  const [picked, setPicked] = useState<Record<string, string>>({});
 
   const toArabicDigits = useCallback(
     (s: string) => (isArabic ? s.replace(/[0-9]/g, d => "٠١٢٣٤٥٦٧٨٩"[+d]) : s),
@@ -199,30 +204,49 @@ function ProductDetailInner() {
 
   // ── Cart ───────────────────────────────────────────────────────────────────
 
+  // The piece as configured: width (per-metre listings) and options.
+  const perMetre = product?.price_unit === "metre";
+  const listedW = listedWidthCm(variant);
+  const listing = useMemo(() => ({
+    price_unit: product?.price_unit ?? "unit",
+    min_width_cm: product?.min_width_cm ?? null,
+    max_width_cm: product?.max_width_cm ?? null,
+    options: product?.options ?? [],
+  }), [product]);
+  const width = perMetre ? clampWidth(listing, widthCm ?? listedW ?? 100) : null;
+  const config = useMemo(
+    () => lineConfig(listing, listedW, { width_cm: width, options: picked }),
+    [listing, listedW, width, picked],
+  );
+  const priced = useMemo(
+    () => (variant ? priceLine({ ...listing, width_cm: listedW }, Number(variant.price), config) : null),
+    [listing, listedW, variant, config],
+  );
+  const unitPrice = priced?.ok ? priced.unit_price : Number(variant?.price ?? product?.from_price ?? 0);
+
   const addToCart = useCallback((quantity: number) => {
     if (!product || !variant || variant.is_active === false) return;
-    const existing = cartItems.find(i => i.variant_id === variant.id);
-    // Never more than the vendor has.
-    const room = variant.stock_quantity - (existing?.quantity ?? 0);
-    if (room <= 0) return;
-    quantity = Math.min(quantity, room);
-    if (existing) {
-      updateQuantityOptimistic(existing.id, existing.quantity + quantity);
-      return;
-    }
-    addItemOptimistic({
-      id: variant.id,
-      variant_id: variant.id,
+    // Never more than the vendor has, across every width / option of it.
+    const key = configKey(config);
+    const other = cartItems
+      .filter(i => i.variant_id === variant.id && (i.config_key ?? "") !== key)
+      .reduce((n, i) => n + i.quantity, 0);
+    addCartLine({
+      variantId: variant.id,
+      basePrice: Number(variant.price),
+      listing,
+      listedWidth: listedW,
+      config,
       quantity,
-      product_data: {
+      max: variant.stock_quantity - other,
+      product: {
         title: product.title,
-        price: Number(variant.price),
-        retailer_name: product.retailer?.name,
+        retailer_name: product.retailer?.name ?? undefined,
         color: variant.color ?? undefined,
         image: variant.images?.[0],
       },
     });
-  }, [product, variant, cartItems, addItemOptimistic, updateQuantityOptimistic]);
+  }, [product, variant, cartItems, config, listing, listedW]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -361,8 +385,12 @@ function ProductDetailInner() {
           <div className="flex flex-col">
             <button
               onClick={() => product.retailer && router.push(`/marketplace?retailer=${product.retailer.id}`)}
-              className="self-start text-[12px] text-[#646968] hover:text-[#004643]"
+              className="self-start flex items-center gap-2 text-[12px] text-[#646968] hover:text-[#004643]"
             >
+              {product.retailer?.logo_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={product.retailer.logo_url} alt="" className="h-6 w-6 rounded object-contain border border-[#EAEDEC] bg-white" />
+              )}
               {product.retailer?.name}
             </button>
 
@@ -371,12 +399,19 @@ function ProductDetailInner() {
             {dims && <span className="mt-1.5 text-[12px] text-[#8E9493]">{dims}</span>}
 
             <div className="mt-4 text-[24px] font-semibold text-[#004643]">
-              {money(Number(variant?.price ?? product.from_price))}
+              {money(unitPrice)}
             </div>
+            {perMetre && (
+              <span className="mt-0.5 text-[12px] text-[#8E9493]">
+                {money(Number(variant?.price ?? product.from_price))} {isArabic ? "لكل متر من العرض" : "per metre of width"}
+              </span>
+            )}
 
             {product.description && (
               <p className="mt-3 text-[13px] leading-relaxed text-[#4B4F4F]">{product.description}</p>
             )}
+
+            <ProductCredentials product={product} arabic={language === "ar"} />
 
             {/* Finish */}
             {product.variants.length > 1 && (
@@ -404,6 +439,22 @@ function ProductDetailInner() {
                   ))}
                 </div>
               </div>
+            )}
+
+            {(perMetre || (product.options?.length ?? 0) > 0) && (
+              <ProductConfigurator
+                perMetre={perMetre}
+                minWidth={product.min_width_cm ?? 20}
+                maxWidth={product.max_width_cm ?? 1500}
+                width={width ?? 0}
+                onWidth={setWidthCm}
+                groups={product.options ?? []}
+                picked={picked}
+                onPick={(g, c) => setPicked(p => ({ ...p, [g]: c }))}
+                money={money}
+                num={num}
+                arabic={isArabic}
+              />
             )}
 
             {/* Quantity + actions */}

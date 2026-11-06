@@ -7,6 +7,13 @@ import VendorPaymentsPanel from "@/components/vendor/VendorPaymentsPanel";
 import VendorSupportPanel from "@/components/support/SupportCenter";
 import NotificationBell from "@/components/NotificationBell";
 import ListingReviewActions, { listingUiStatus } from "@/components/vendor/ListingReviewActions";
+import ListingExtrasFields from "@/components/vendor/ListingExtrasFields";
+import ListingOptionsFields, { EMPTY_PRICING, pricingPayload, pricingProblem, type ListingPricingValue } from "@/components/vendor/ListingOptionsFields";
+import StoreLogoField, { uploadVendorAsset } from "@/components/vendor/StoreLogoField";
+import TermsGate from "@/components/legal/TermsGate";
+import { EMPTY_EXTRAS, extrasProblem, type ListingExtras } from "@/lib/listings/extras";
+import { countryName } from "@/lib/listings/countries";
+import { requestApi } from "@/lib/api/http";
 import { useVendorStore } from "@/lib/store";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -224,6 +231,10 @@ export default function VendorDashboardView({
   /** Real size in cm. The 3D model is shown at exactly this size in shoppers' rooms. */
   const [nlDims, setNlDims] = useState({ width: "", depth: "", height: "" });
   const [nlStock, setNlStock] = useState("");
+  /** More categories, origin, ships-to, certificates, patents. */
+  const [nlExtras, setNlExtras] = useState<ListingExtras>(EMPTY_EXTRAS);
+  /** Per piece / per metre of width, and shopper options (fabric, legs …). */
+  const [nlPricing, setNlPricing] = useState<ListingPricingValue>(EMPTY_PRICING);
   const [nlVars, setNlVars] = useState<Array<{ id: string; name: string; sku: string; stock: string }>>([
     { id: "1", name: "Standard", sku: "", stock: "" },
   ]);
@@ -1055,6 +1066,11 @@ export default function VendorDashboardView({
 
   const handleSaveStoreName = () => {
     setStoreProfile({ storeName: storeNameInput });
+    // Saved to the vendor profile too (and mirrored onto the storefront).
+    if (storeNameInput.trim().length >= 2) {
+      requestApi({ path: "/vendor/profile", method: "PUT", body: { store_name: storeNameInput.trim() } })
+        .then((res) => { if (!res.success) showToast(typeof res.error === "string" ? res.error : "Couldn't save the store name."); });
+    }
     setSavedSuccess(true);
     setDeliveryRegionsDone(true);
     if (typeof window !== "undefined") {
@@ -1081,6 +1097,8 @@ export default function VendorDashboardView({
     setNlKind(fulfillmentType === "Factory" ? "Made to order" : "In stock");
     setNlPrice("");
     setNlDims({ width: "", depth: "", height: "" });
+    setNlExtras(EMPTY_EXTRAS);
+    setNlPricing(EMPTY_PRICING);
     setNlStock("");
     setNlVars([{ id: "1", name: "Standard", sku: "", stock: "" }]);
     setNlImages([]);
@@ -1276,6 +1294,13 @@ export default function VendorDashboardView({
           // is_returnable is false for made-to-order and custom pieces; shoppers
           // are shown a "no returns" notice on the product and order pages.
           is_returnable: nlKind === "In stock",
+          categories: nlExtras.categories,
+          certificates: nlExtras.certificates.map((c) => ({ ...c, uploading: undefined })),
+          patents: nlExtras.patents,
+          origin: nlExtras.origin,
+          origin_country: nlExtras.origin_country,
+          ships_to: nlExtras.ships_to,
+          ...pricingPayload(nlPricing),
           storeName,
           businessName: accountData.businessName || storeName,
           workEmail,
@@ -1338,6 +1363,7 @@ export default function VendorDashboardView({
         fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
       }}
     >
+      <TermsGate context="vendor_dashboard" />
       {/* ── Left Sidebar ── */}
       <aside
         style={{
@@ -3200,6 +3226,8 @@ export default function VendorDashboardView({
                     gap: "14px",
                   }}
                 >
+                  <StoreLogoField storeName={storeNameInput || storeName} />
+
                   <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px", fontWeight: 500, color: "#343837" }}>
                     Store name
                     <input
@@ -3757,6 +3785,20 @@ export default function VendorDashboardView({
                     </span>
                   </div>
 
+                  <ListingExtrasFields
+                    value={nlExtras}
+                    onChange={(x) => { setNlExtras(x); setNlErr(""); }}
+                    mainCategory={nlCat}
+                    uploadFile={(f) => uploadVendorAsset(f, "product_certificate")}
+                  />
+
+                  <ListingOptionsFields
+                    value={nlPricing}
+                    onChange={(v) => { setNlPricing(v); setNlErr(""); }}
+                    priceLabel={nlPrice}
+                    uploadSwatch={(f) => uploadVendorAsset(f, "option_swatch")}
+                  />
+
                   {/* No-returns warning — shown for Made to order */}
                   {nlKind === "Made to order" && (
                     <div
@@ -3808,6 +3850,11 @@ export default function VendorDashboardView({
                         return !v.trim() || !Number.isFinite(n) || n < 1 || n > 2000;
                       })) {
                         setNlErr("Please enter the width, depth and height in cm (1–2000).");
+                        return;
+                      }
+                      const extrasErr = extrasProblem(nlExtras) ?? pricingProblem(nlPricing, Number(nlDims.width));
+                      if (extrasErr) {
+                        setNlErr(extrasErr);
                         return;
                       }
                       setNlStep(1);
@@ -4478,6 +4525,29 @@ export default function VendorDashboardView({
                     <span style={{ color: "#646968" }}>Size</span>
                     <span style={{ color: "#101212" }}>
                       {nlDims.width} × {nlDims.depth} × {nlDims.height} cm (W × D × H)
+                    </span>
+
+                    <span style={{ color: "#646968" }}>Made in</span>
+                    <span style={{ color: "#101212" }}>
+                      {nlExtras.origin === "saudi" ? "Saudi Arabia" : countryName(nlExtras.origin_country) || "Imported"}
+                      {" · ships to "}
+                      {nlExtras.ships_to.map((c) => countryName(c)).join(", ")}
+                    </span>
+
+                    <span style={{ color: "#646968" }}>Pricing</span>
+                    <span style={{ color: "#101212" }}>
+                      {nlPricing.price_unit === "metre"
+                        ? `SAR ${nlPrice} per metre · made ${nlPricing.min_width_cm || "?"}–${nlPricing.max_width_cm || "?"} cm wide`
+                        : `SAR ${nlPrice} per piece`}
+                      {nlPricing.options.filter((g) => g.name.trim()).length
+                        ? ` · options: ${nlPricing.options.filter((g) => g.name.trim()).map((g) => g.name).join(", ")}`
+                        : ""}
+                    </span>
+
+                    <span style={{ color: "#646968" }}>Certificates</span>
+                    <span style={{ color: "#101212" }}>
+                      {nlExtras.certificates.filter((c) => c.name.trim()).length || "None"}
+                      {nlExtras.patents.filter((p) => p.number.trim()).length ? ` · ${nlExtras.patents.filter((p) => p.number.trim()).length} patent(s)` : ""}
                     </span>
 
                     <span style={{ color: "#646968" }}>3D Model</span>

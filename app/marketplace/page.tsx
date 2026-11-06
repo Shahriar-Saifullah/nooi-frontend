@@ -44,6 +44,10 @@ import {
   type Facets, type MarketplaceProduct, type ProductVariant, type ProductQuery,
 } from "@/lib/api/marketplace";
 import { groupPlacedFurniture, type FurnitureGroup } from "@/components/FurnitureListPanel";
+import { SHIP_TO_CHOICES, countryName } from "@/lib/listings/countries";
+import { configKey } from "@/lib/listings/configure";
+import { addCartLine, lineConfig, listedWidthCm } from "@/lib/listings/cartLine";
+import { pieceSizeCm } from "@/lib/furniture/size";
 import { rankProducts, type ProductMatch } from "@/lib/matching/products";
 import { ensureShopItems } from "@/lib/furniture/shopCatalog";
 import { recentProjectThumb } from "@/lib/projectThumb";
@@ -67,6 +71,12 @@ const COPY = {
     vendor: "Vendor",
     price: "Price",
     allVendors: "All vendors",
+    madeAnywhere: "Made anywhere",
+    madeSaudi: "Made in Saudi",
+    madeImported: "Imported",
+    shipsAnywhere: "Ships to any country",
+    shipsTo: (c: string) => `Ships to ${c}`,
+    madeInKsa: "Made in KSA",
     anyPrice: "Any price",
     inStockOnly: "In stock",
     threeDOnly: "3D ready",
@@ -103,6 +113,12 @@ const COPY = {
     vendor: "المورد",
     price: "السعر",
     allVendors: "كل الموردين",
+    madeAnywhere: "كل بلدان الصنع",
+    madeSaudi: "صُنع في السعودية",
+    madeImported: "مستورد",
+    shipsAnywhere: "يُشحن لأي دولة",
+    shipsTo: (c: string) => `يُشحن إلى ${c}`,
+    madeInKsa: "صنع سعودي",
     anyPrice: "أي سعر",
     inStockOnly: "متوفر",
     threeDOnly: "جاهز ثلاثي الأبعاد",
@@ -152,7 +168,6 @@ function MarketplaceInner() {
   const isArabic = language === "ar";
 
   const cartItems = useCartStore(s => s.items);
-  const addItemOptimistic = useCartStore(s => s.addItemOptimistic);
   const removeItemOptimistic = useCartStore(s => s.removeItemOptimistic);
   const updateQuantityOptimistic = useCartStore(s => s.updateQuantityOptimistic);
 
@@ -162,10 +177,12 @@ function MarketplaceInner() {
   const [priceBand, setPriceBand] = useState("All");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [threeDOnly, setThreeDOnly] = useState(false);
+  const [madeIn, setMadeIn] = useState<"" | "saudi" | "international">("");
+  const [shipsTo, setShipsTo] = useState("");
   const [sort, setSort] = useState<ProductQuery["sort"]>("newest");
   const [page, setPage] = useState(1);
 
-  const filterKey = `${group}|${retailerId}|${priceBand}|${inStockOnly}|${threeDOnly}|${search}|${sort}`;
+  const filterKey = `${group}|${retailerId}|${priceBand}|${inStockOnly}|${threeDOnly}|${madeIn}|${shipsTo}|${search}|${sort}`;
   const prevFilterKeyRef = useRef(filterKey);
 
   // Data
@@ -234,6 +251,8 @@ function MarketplaceInner() {
       minPrice: band ? band[0] : undefined,
       maxPrice: band && band[1] ? band[1] : undefined,
       inStock: inStockOnly || undefined,
+      madeIn: madeIn || undefined,
+      shipsTo: shipsTo || undefined,
       sort,
       page,
       limit: PAGE_SIZE,
@@ -263,7 +282,7 @@ function MarketplaceInner() {
       .finally(() => !cancelled && setLoading(false));
 
     return () => { cancelled = true; };
-  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, search, sort, page, filterKey]);
+  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, madeIn, shipsTo, search, sort, page, filterKey]);
 
   // ── Room band ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -351,34 +370,36 @@ function MarketplaceInner() {
   );
 
   const addToCart = useCallback(
-    (product: MarketplaceProduct, quantity = 1) => {
+    (product: MarketplaceProduct, quantity = 1, widthCm?: number | null) => {
       const variant = defaultVariant(product);
       if (!variant) return;
-
-      const existing = cartItems.find(i => i.variant_id === variant.id);
-      // Never more than the vendor has.
-      const room = variant.stock_quantity - (existing?.quantity ?? 0);
-      if (room <= 0) return;
-      quantity = Math.min(quantity, room);
-      if (existing) {
-        updateQuantityOptimistic(existing.id, existing.quantity + quantity);
-        return;
-      }
-
-      addItemOptimistic({
-        id: variant.id, // local cart keys on the variant; server sync replaces it
-        variant_id: variant.id,
-        quantity,
-        product_data: {
+      // per-metre listings carry a width: the room's (stretched) piece, or the
+      // listed width; options start at each group's first choice
+      const listing = {
+        price_unit: product.price_unit ?? "unit",
+        min_width_cm: product.min_width_cm ?? null,
+        max_width_cm: product.max_width_cm ?? null,
+        options: product.options ?? [],
+      };
+      const listedW = listedWidthCm(variant);
+      const config = lineConfig(listing, listedW, { width_cm: widthCm ?? null });
+      // Never more than the vendor has, across every line of this variant.
+      const key = configKey(config);
+      const other = cartItems
+        .filter(i => i.variant_id === variant.id && (i.config_key ?? "") !== key)
+        .reduce((n, i) => n + i.quantity, 0);
+      addCartLine({
+        variantId: variant.id, basePrice: Number(variant.price), listing, listedWidth: listedW, config,
+        quantity, max: variant.stock_quantity - other,
+        product: {
           title: product.title,
-          price: Number(variant.price),
-          retailer_name: product.retailer?.name,
+          retailer_name: product.retailer?.name ?? undefined,
           color: variant.color ?? undefined,
           image: variant.images?.[0],
         },
       });
     },
-    [cartItems, addItemOptimistic, updateQuantityOptimistic],
+    [cartItems],
   );
 
   const decrement = useCallback(
@@ -395,7 +416,9 @@ function MarketplaceInner() {
   const addSelectedRoomItems = useCallback(() => {
     for (const row of roomRows) {
       if (!row.match || !selected.has(row.group.key)) continue;
-      addToCart(row.match.product, row.group.qty);
+      // a stretched piece in the room is ordered at that width
+      const w = row.match.product.price_unit === "metre" ? pieceSizeCm(row.group.sample, row.group.cat).w : null;
+      addToCart(row.match.product, row.group.qty, w);
     }
   }, [roomRows, selected, addToCart]);
 
@@ -403,11 +426,12 @@ function MarketplaceInner() {
 
   const anyFilter =
     group !== "All" || retailerId !== "All" || priceBand !== "All" ||
-    inStockOnly || threeDOnly || search.trim().length > 0;
+    inStockOnly || threeDOnly || Boolean(madeIn) || Boolean(shipsTo) || search.trim().length > 0;
 
   const clearAll = () => {
     setGroup("All"); setRetailerId("All"); setPriceBand("All");
     setInStockOnly(false); setThreeDOnly(false); setSort("newest");
+    setMadeIn(""); setShipsTo("");
     if (search) {
       const next = new URLSearchParams(params.toString());
       next.delete("q");
@@ -624,6 +648,29 @@ function MarketplaceInner() {
               ))}
             </select>
 
+            <select
+              value={madeIn}
+              onChange={e => setMadeIn(e.target.value as typeof madeIn)}
+              aria-label={t.madeAnywhere}
+              className="px-3 py-1.5 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] text-[#343837] focus:outline-none focus:border-[#87DDD7]"
+            >
+              <option value="">{t.madeAnywhere}</option>
+              <option value="saudi">{t.madeSaudi}{facets?.origins ? ` (${formatNumber(facets.origins.saudi)})` : ""}</option>
+              <option value="international">{t.madeImported}{facets?.origins ? ` (${formatNumber(facets.origins.international)})` : ""}</option>
+            </select>
+
+            <select
+              value={shipsTo}
+              onChange={e => setShipsTo(e.target.value)}
+              aria-label={t.shipsAnywhere}
+              className="px-3 py-1.5 rounded-full border border-[#D5DBDA] bg-white text-[12.5px] text-[#343837] focus:outline-none focus:border-[#87DDD7]"
+            >
+              <option value="">{t.shipsAnywhere}</option>
+              {SHIP_TO_CHOICES.map(c => (
+                <option key={c} value={c}>{t.shipsTo(countryName(c, isArabic ? "ar" : "en"))}</option>
+              ))}
+            </select>
+
             {[
               { on: inStockOnly, set: setInStockOnly, label: t.inStockOnly },
               { on: threeDOnly, set: setThreeDOnly, label: t.threeDOnly },
@@ -728,6 +775,8 @@ function MarketplaceInner() {
                       soldOut: t.soldOut,
                       days: t.days,
                       from: t.from,
+                      madeInSaudi: t.madeInKsa,
+                      perMetre: isArabic ? "/ م" : "/ m",
                     }}
                   />
                 ))}

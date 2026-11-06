@@ -18,6 +18,7 @@ import { toDeg } from "@/lib/placement/gizmo";
 import SimilarProducts from "@/components/SimilarProducts";
 import type { MarketplaceProduct } from "@/lib/api/marketplace";
 import { pieceSizeCm, naturalSizeCm } from "@/lib/furniture/size";
+import { shopPiecePrice } from "@/lib/listings/cartLine";
 import { stretchModeFor, getShares, subscribeShares, getSharesVersion, repeatsFor } from "@/lib/furniture/stretch";
 
 interface Props {
@@ -34,6 +35,8 @@ export default function FurnitureInspector({ item, onChange, onDelete, onUseProd
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const customizable = cat ? cat.customizable : true;
   const sizeScale = item.sizeScale ?? 1;
+  // per-metre shop listings are made to the width drawn in the room
+  const shopPrice = cat?.shop ? shopPiecePrice(cat.shop, cat.size.w, pieceSizeCm(item, cat).w) : null;
   const mountType = item.mountType ?? cat?.mountType ?? "floor";
   const isLight = isLightFixture(item);
   const level = Math.max(0, Math.min(1, item.lightLevel ?? 1));
@@ -69,7 +72,10 @@ export default function FurnitureInspector({ item, onChange, onDelete, onUseProd
           <div className="text-gray-500">{cat.shop.vendor ?? "Nooi vendor"}</div>
           <div className="flex items-center justify-between gap-2 mt-0.5">
             <span className="font-semibold text-teal-800">
-              {cat.shop.onSale ? formatMoney(cat.shop.price) : "No longer for sale"}
+              {cat.shop.onSale ? formatMoney(shopPrice!.unitPrice) : "No longer for sale"}
+              {shopPrice?.perMetre && cat.shop.onSale && (
+                <span className="ms-1 text-[10px] font-normal text-gray-500">({formatMoney(cat.shop.price)} / m)</span>
+              )}
             </span>
             <a
               href={`/marketplace/${cat.shop.productId}`}
@@ -80,7 +86,36 @@ export default function FurnitureInspector({ item, onChange, onDelete, onUseProd
               View product
             </a>
           </div>
-          <div className="mt-1 text-[10px] text-gray-400">Shown at its real size, so it can&apos;t be resized.</div>
+          {shopPrice?.perMetre ? (
+            <label className="mt-2 flex items-center justify-between gap-2 text-[11px] text-gray-600">
+              Made to measure — width
+              <span className="flex items-center gap-1">
+                <input
+                  key={shopPrice.widthCm ?? 0}
+                  type="number"
+                  min={cat.shop.minWidthCm ?? 20}
+                  max={cat.shop.maxWidthCm ?? 1500}
+                  defaultValue={shopPrice.widthCm ?? cat.size.w}
+                  onBlur={e => {
+                    const lo = cat.shop!.minWidthCm ?? 20, hi = cat.shop!.maxWidthCm ?? 1500;
+                    const w = Math.round(Math.max(lo, Math.min(hi, Number(e.currentTarget.value) || cat.size.w)));
+                    e.currentTarget.value = String(w);
+                    if (w !== shopPrice.widthCm) onChange({ dims: { w, d: cat.size.d, h: cat.size.h }, sizeScale: 1 });
+                  }}
+                  onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                  className="w-[64px] rounded border border-gray-200 px-1.5 py-0.5 text-right"
+                />
+                cm
+              </span>
+            </label>
+          ) : (
+            <div className="mt-1 text-[10px] text-gray-400">Shown at its real size, so it can&apos;t be resized.</div>
+          )}
+          {shopPrice?.perMetre && (
+            <div className="mt-1 text-[10px] text-gray-400">
+              Made between {cat.shop.minWidthCm ?? 20} and {cat.shop.maxWidthCm ?? 1500} cm. The price follows the width.
+            </div>
+          )}
         </div>
       )}
 
