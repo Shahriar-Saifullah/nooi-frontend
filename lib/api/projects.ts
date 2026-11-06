@@ -218,6 +218,8 @@ export async function saveFurniture(
   /** Per-room floor finish, keyed by room id — unlike the wall maps above,
    *  which are keyed by wall face. */
   floorSurfaces?: Record<string, string>,
+  /** Kitchen builder data (lib/kitchen/model); omitted = left as saved. */
+  kitchen?: unknown,
 ) {
   const headers = await getAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch(`${BASE_URL}/projects/${projectId}/furniture`, {
@@ -233,6 +235,7 @@ export async function saveFurniture(
       ...(wallSurfaces !== undefined ? { wall_surfaces: wallSurfaces } : {}),
       ...(doorFinishes !== undefined ? { door_finishes: doorFinishes } : {}),
       ...(floorSurfaces !== undefined ? { floor_surfaces: floorSurfaces } : {}),
+      ...(kitchen !== undefined ? { kitchen } : {}),
     }),
   });
   const json = await res.json();
