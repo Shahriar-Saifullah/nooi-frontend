@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 import NotificationBell from "@/components/NotificationBell";
+import { SearchTrigger } from "@/components/search/GlobalSearch";
 import { listProjects, type Project } from "@/lib/api/projects";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -159,6 +160,8 @@ export default function DashboardPage() {
             <Crown className="w-4 h-4 text-[#004643]" />
             <span className="text-xs font-medium text-[#004643]">Upgrade Plan</span>
           </button>
+
+          <SearchTrigger compact />
 
           <NotificationBell
             buttonClassName="relative flex h-10 w-10 items-center justify-center rounded-full bg-[#f5f5f5] text-[#0a0a0a] hover:bg-[#efefef] transition-colors"

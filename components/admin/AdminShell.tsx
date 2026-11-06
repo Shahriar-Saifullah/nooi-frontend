@@ -31,6 +31,7 @@ import {
 import { getCurrentUser, logout, type AuthUser } from "@/lib/api/auth";
 import { getVendorQueue, getOpsCounts, type OpsCounts } from "@/lib/api/admin";
 import NotificationBell from "@/components/NotificationBell";
+import { SearchTrigger } from "@/components/search/GlobalSearch";
 
 interface NavItem {
   label: string;
@@ -200,7 +201,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             Admin
           </span>
         </div>
-        <NotificationBell className="ms-auto me-2" buttonClassName="relative flex h-8 w-8 items-center justify-center rounded-md border border-[#D5DBDA] bg-[#F8FAF9] text-[#4B4F4F] hover:bg-[#F1F4F4]" />
+        <SearchTrigger compact className="ms-auto me-1 !h-8 !w-8 !rounded-md border border-[#D5DBDA] !bg-[#F8FAF9] !text-[#4B4F4F]" label="Search" />
+        <NotificationBell className="me-2" buttonClassName="relative flex h-8 w-8 items-center justify-center rounded-md border border-[#D5DBDA] bg-[#F8FAF9] text-[#4B4F4F] hover:bg-[#F1F4F4]" />
         <button
           type="button"
           onClick={handleLogout}
@@ -226,6 +228,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             Admin
           </span>
           <NotificationBell className="ms-auto" placement="below-start" buttonClassName="relative flex h-8 w-8 items-center justify-center rounded-md border border-[#D5DBDA] bg-[#F8FAF9] text-[#4B4F4F] hover:bg-[#F1F4F4]" />
+        </div>
+
+        <div className="px-3 pb-3">
+          <SearchTrigger className="w-full !rounded-md border-[#D5DBDA] !bg-[#F8FAF9] !py-1.5 text-[12.5px]" label="Search orders, vendors…" />
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 pb-4">

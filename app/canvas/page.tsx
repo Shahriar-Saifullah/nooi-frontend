@@ -61,6 +61,7 @@ import { buildFurnitureSheet } from "@/lib/export/furnitureSheet";
 import { pieceSizeCm } from "@/lib/furniture/size";
 import { addCartLine, shopListing, shopPiecePrice } from "@/lib/listings/cartLine";
 import ArrayPanel, { DEFAULT_ARRAY, type ArrayConfig } from "@/components/ArrayPanel";
+import ControlsHelp from "@/components/ControlsHelp";
 import KitchenPanel from "@/components/KitchenPanel";
 import type { KitchenSelection } from "@/components/KitchenLayer";
 import { DEFAULT_KITCHEN_STYLE } from "@/lib/kitchen/materials";
@@ -2620,19 +2621,15 @@ export default function CanvasPage() {
             </div>
           )}
 
-          {/* 3D controls hint — adapts to walkthrough state */}
-          {viewMode === "3d" && (
+          {/* Walkthrough status. The camera controls help lives behind the
+               "?" button in the toolbar (ControlsHelp) — as a strip here it
+               covered the Doors & windows and Kitchen buttons. */}
+          {viewMode === "3d" && walkthroughActive && (
             <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 flex items-center gap-4 bg-black/50 backdrop-blur-sm text-white/80 text-[11px] px-4 py-2 rounded-full pointer-events-none">
-              {walkthroughActive && !walkthroughPaused ? (
+              {!walkthroughPaused ? (
                 <><span>🎬 Walkthrough playing</span><span className="opacity-40">·</span><span>⏸ Pause to orbit freely</span></>
-              ) : walkthroughActive && walkthroughPaused ? (
-                <><span>⏸ Paused — orbit freely</span><span className="opacity-40">·</span><span>▶ Resume when ready</span></>
               ) : (
-                pathTracing
-                  ? <><span>✨ Rendered — move as usual</span><span className="opacity-40">·</span><span>it sharpens when you stop</span></>
-                  : cameraView === "inside"
-                  ? <><span>🖱 Drag to look</span><span>⚡ Scroll to fly</span><span>⌨ WASD to move</span><span>⬆ Q/E or Shift/Space for Up/Down</span></>
-                  : <><span>🖱 Drag to orbit</span><span>⚡ Scroll to zoom</span><span>✋ Right-click to pan</span><span>⌨ WASD / Arrows to shift camera</span></>
+                <><span>⏸ Paused — orbit freely</span><span className="opacity-40">·</span><span>▶ Resume when ready</span></>
               )}
             </div>
           )}
@@ -2873,6 +2870,7 @@ export default function CanvasPage() {
                 >
                   <CookingPot size={13} />Kitchen
                 </button>
+                <ControlsHelp mode={pathTracing ? "rendered" : cameraView === "inside" ? "inside" : "orbit"} />
               </div>
             </div>
           )}

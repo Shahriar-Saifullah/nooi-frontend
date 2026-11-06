@@ -24,6 +24,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ShoppingCart, X, LayoutDashboard, LogOut, ChevronDown } from "lucide-react";
+import { SearchTrigger } from "@/components/search/GlobalSearch";
 
 import { useLanguage } from "@/lib/i18n/useTranslations";
 import { useCartStore } from "@/lib/store/cart.store";
@@ -218,6 +219,8 @@ export default function ShopHeader() {
               leftover width collects to the right of the avatar instead of
               between the search and the controls. */}
           <div className="ms-auto flex items-center gap-2 shrink-0">
+          {/* everything on Nooi — the field on the left filters products only */}
+          <SearchTrigger compact className="!h-[40px] !w-[40px] md:!h-[46px] md:!w-[46px] !rounded-[12px] border border-[#e6e6e8] !bg-white !text-[#4B4F4F] hover:!bg-neutral-50" label={isRtl ? "ابحث في كل نوي" : "Search everything"} />
           <button
             onClick={toggleLanguage}
             className="hidden md:flex items-center justify-center h-[40px] px-3 rounded-[12px] border border-[#e6e6e8] bg-white text-[13px] text-[#4B4F4F] hover:bg-neutral-50 shrink-0"

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Schibsted_Grotesk, Instrument_Serif, Scada, Outfit, DM_Sans, Figtree, Playfair_Display } from "next/font/google";
 import "./globals.css";
+import GlobalSearch from "@/components/search/GlobalSearch";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -68,6 +69,8 @@ export default function RootLayout({
     >
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         {children}
+        {/* ⌘K search palette, available on every page */}
+        <GlobalSearch />
       </body>
     </html>
   );

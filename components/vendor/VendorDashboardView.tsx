@@ -14,6 +14,7 @@ import TermsGate from "@/components/legal/TermsGate";
 import { EMPTY_EXTRAS, extrasProblem, type ListingExtras } from "@/lib/listings/extras";
 import { countryName } from "@/lib/listings/countries";
 import { requestApi } from "@/lib/api/http";
+import { openGlobalSearch } from "@/lib/search/search";
 import { useVendorStore } from "@/lib/store";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -313,6 +314,8 @@ export default function VendorDashboardView({
   // /sell/support?ticket=<id> opens that ticket.
   const searchParams = useSearchParams();
   const orderParam = searchParams.get("order");
+  // /sell/products?product=<id> (from search) opens that listing
+  const productParam = searchParams.get("product");
   const ticketParam = searchParams.get("ticket");
   const openedFromLink = useRef<string | null>(null);
   const [trackingInput, setTrackingInput] = useState("");
@@ -598,6 +601,15 @@ export default function VendorDashboardView({
       setOpenOrderId(match.id);
     }
   }, [orderParam, orders]);
+
+  const openedProductFromLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (!productParam || openedProductFromLink.current === productParam) return;
+    if (products.some(p => p.id === productParam)) {
+      openedProductFromLink.current = productParam;
+      setOpenProductId(productParam);
+    }
+  }, [productParam, products]);
 
   // Build packing groups from selected orders
   const buildPackingGroups = () => {
@@ -1720,9 +1732,14 @@ export default function VendorDashboardView({
             zIndex: 5,
           }}
         >
-          {/* Search bar */}
+          {/* Search bar — opens the platform search (⌘K) */}
           <div
+            role="button"
+            tabIndex={0}
+            onClick={() => openGlobalSearch()}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openGlobalSearch(); } }}
             style={{
+              cursor: "pointer",
               flex: 1,
               maxWidth: "360px",
               display: "flex",
