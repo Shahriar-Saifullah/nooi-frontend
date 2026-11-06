@@ -172,8 +172,18 @@ function MarketplaceInner() {
   const updateQuantityOptimistic = useCartStore(s => s.updateQuantityOptimistic);
 
   // Filters
-  const [group, setGroup] = useState("All");
-  const [retailerId, setRetailerId] = useState("All");
+  // ?group=Seating (search, category links) and ?retailer=<id> (vendor links)
+  const [group, setGroup] = useState(() => params.get("group") || "All");
+  const [retailerId, setRetailerId] = useState(() => params.get("retailer") || "All");
+  // a later link to this page (search → a category or vendor) updates them
+  const groupParam = params.get("group");
+  const retailerParam = params.get("retailer");
+  const [seenParams, setSeenParams] = useState(`${groupParam}|${retailerParam}`);
+  if (seenParams !== `${groupParam}|${retailerParam}`) {
+    setSeenParams(`${groupParam}|${retailerParam}`);
+    if (groupParam) setGroup(groupParam);
+    if (retailerParam) setRetailerId(retailerParam);
+  }
   const [priceBand, setPriceBand] = useState("All");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [threeDOnly, setThreeDOnly] = useState(false);
