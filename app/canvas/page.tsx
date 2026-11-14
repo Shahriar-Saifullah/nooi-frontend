@@ -10,7 +10,7 @@ import {
   Image as ImageIcon, Box,
   Video, Pause, Play, Square, Circle,
   Link2, Check, X, Camera, Maximize2, ArrowLeftRight, Undo2, Redo2,
-  Ruler, Sparkles, Sun, DoorOpen, FileText, CookingPot,
+  Ruler, Sparkles, Sun, DoorOpen, FileText, CookingPot, ArrowUpDown, Eye,
 } from "lucide-react";
 import { startCanvasRecording, stopAndDownload, type RecordingSession } from "@/lib/walkthrough-recorder";
 import CanvasPromptBox from "@/components/CanvasPromptBox";
@@ -25,8 +25,16 @@ import { useCartStore } from "@/lib/store/cart.store";
 import FurnitureInspector from "@/components/FurnitureInspector";
 import FurnitureListPanel from "@/components/FurnitureListPanel";
 import {
-  catalogById, FURNITURE_CATALOG, MATERIAL_PRESETS, type CatalogItem,
+  catalogById, FURNITURE_CATALOG, MATERIAL_PRESETS, CATEGORY_LABELS, typeById, type CatalogItem, type FurnitureCategory,
 } from "@/lib/furniture/catalog";
+import RoomHeightsPanel from "@/components/RoomHeightsPanel";
+import { isLightFixture } from "@/components/LightingRig";
+import VisibilityPanel from "@/components/VisibilityPanel";
+import {
+  EMPTY_HIDDEN, LIGHTING, cleanHidden, isHidden, nothingHidden, pruneHidden, toggleGroup, toggleItem, toggleKitchen as toggleKitchenHidden, toggleType,
+  visibilityRows, type HiddenSet,
+} from "@/lib/scene/visibility";
+import { cleanCeiling, DEFAULT_CEILING_M, MAX_CEILING_M, MIN_CEILING_M } from "@/lib/walls/heights";
 import {
   snapToWall, resolveCollision, prefersWall, pointInPoly, pushOutOfWalls,
   planWallsToWorld, settleClearOfWalls,
@@ -46,6 +54,8 @@ import {
 import { useRendererBackend } from "@/lib/three/rendererBackend";
 import { capturePanoPair } from "@/lib/panoTest";
 import { useProjectStore } from "@/lib/store";
+import PhotoRenderButton from "@/components/PhotoRenderButton";
+import { listRenders } from "@/lib/api/renders";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls, saveThumbnail } from "@/lib/api/projects";
 import { rememberProjectThumb } from "@/lib/projectThumb";
 import { type GridRoom } from "@/components/RoomLayoutGrid";
@@ -141,12 +151,32 @@ export default function CanvasPage() {
   // session render history: newest first. `source` is the 3D capture that
   // produced a scene render, enabling the before/after compare.
   const [renders, setRenders] = useState<{ url: string; source?: string; at: number }[]>([]);
+  // Earlier photo renders of this project are kept on the server: list them
+  // when a project opens, after this session's (the strip is newest first).
+  const rendersProjectId = currentProject?.id;
+  useEffect(() => {
+    if (!rendersProjectId) return;
+    let live = true;
+    listRenders(rendersProjectId).then(res => {
+      if (!live || !res.success) return;
+      const past = res.data.items
+        .filter(r => r.status === "done" && r.url)
+        .map(r => ({ url: r.url!, at: Date.parse(r.finishedAt ?? r.createdAt) || 0 }));
+      setRenders(prev => {
+        const have = new Set(prev.map(p => p.url));
+        return [...prev, ...past.filter(p => !have.has(p.url))];
+      });
+    }).catch(() => { /* renders are optional */ });
+    return () => { live = false; };
+  }, [rendersProjectId]);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [compareMode, setCompareMode] = useState(false);
   const [isGeneratingRender, setIsGeneratingRender] = useState(false);
   const [renderError, setRenderError] = useState<string | null>(null);
 
   const [placedFurniture, setPlacedFurniture] = useState<PlacedFurniture[]>([]);
+  // what is hidden in the 3D view (lib/scene/visibility), saved with the project
+  const [hidden, setHidden] = useState<HiddenSet>(EMPTY_HIDDEN);
   const sceneRef = useRef<ThreeSceneHandle>(null);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
@@ -178,6 +208,7 @@ export default function CanvasPage() {
     setRooms([]);
     setFetchedRooms([]);
     setPlacedFurniture([]);
+    setHidden(EMPTY_HIDDEN);
     setRfWalls([]);
     setOpenings([]);
     setWallColors({});
@@ -235,6 +266,8 @@ export default function CanvasPage() {
           if (savedDoorFinishes && typeof savedDoorFinishes === "object") {
             setDoorFinishes(savedDoorFinishes);
           }
+          const savedHidden = (p.room_data as { hidden?: unknown } | undefined)?.hidden;
+          if (savedHidden) setHidden(cleanHidden(savedHidden));
           const savedKitchen = (p.room_data as any)?.kitchen as KitchenData | undefined;
           if (savedKitchen && Array.isArray(savedKitchen.runs)) {
             setKitchen({ runs: savedKitchen.runs, style: { ...DEFAULT_KITCHEN_STYLE, ...(savedKitchen.style ?? {}) } });
@@ -509,11 +542,11 @@ export default function CanvasPage() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces, doorFinishes, floorSurfaces,
-        kitchenLoaded.current ? kitchen : undefined)
+        kitchenLoaded.current ? kitchen : undefined, kitchenLoaded.current ? { hidden } : undefined)
         .catch(err => console.error("Scene save failed:", err));
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen, currentProject?.id]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen, hidden, currentProject?.id]);
 
   // ─── Canvas → Shop ─────────────────────────────────────────────────────────
   // The save above is debounced 1500ms. Navigating inside that window would
@@ -541,6 +574,7 @@ export default function CanvasPage() {
         doorFinishes,
         floorSurfaces,
         kitchenLoaded.current ? kitchen : undefined,
+        kitchenLoaded.current ? { hidden } : undefined,
       );
       if (picture) await Promise.race([picture, new Promise(r => setTimeout(r, 4000))]);
       router.push(`/marketplace?project=${currentProject.id}`);
@@ -768,6 +802,10 @@ export default function CanvasPage() {
   // so the only things left to decide are how bright and how warm.
   const [lighting, setLighting] = useState<LightingSettings>(DEFAULT_LIGHTING);
   const [lightPanelOpen, setLightPanelOpen] = useState(false);
+  // Ceiling heights panel, and show / hide (saved with the project)
+  const [heightsOpen, setHeightsOpen] = useState(false);
+  const [savingHeights, setSavingHeights] = useState(false);
+  const [showHideOpen, setShowHideOpen] = useState(false);
   // Room areas + distance-to-wall lines for the selected item.
   const [showDimensions, setShowDimensions] = useState(false);
   // "Edit doors & windows" (3D): select / drag / add / resize openings
@@ -1641,8 +1679,53 @@ export default function CanvasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kitchenEdit, kitchenAdd, kitchenSel, kitchen, viewMode]);
 
+  // ── show / hide ──
+  const pieceHidden = (f: PlacedFurniture) => {
+    const cat = f.modelId ? catalogById(f.modelId) : undefined;
+    return isHidden(f, cat, isLightFixture(f), hidden);
+  };
+  const visibleFurniture = nothingHidden(hidden) ? placedFurniture : placedFurniture.filter(f => !pieceHidden(f));
+  const visRows = visibilityRows(
+    placedFurniture,
+    f => {
+      const cat = f.modelId ? catalogById(f.modelId) : undefined;
+      return cat ? { category: cat.category, typeId: cat.typeId, typeName: typeById(cat.typeId)?.name ?? cat.name } : undefined;
+    },
+    f => isLightFixture(f),
+    hidden,
+    g => (g === LIGHTING ? "Lighting" : CATEGORY_LABELS[g as FurnitureCategory] ?? g),
+  );
+  const changeHidden = (next: HiddenSet) => {
+    setHidden(pruneHidden(next, new Set(placedFurniture.map(f => f.id))));
+    // a piece that just disappeared can't stay selected
+    const sel = placedFurniture.find(f => f.id === selectedFurnitureId);
+    if (sel) {
+      const cat = sel.modelId ? catalogById(sel.modelId) : undefined;
+      if (isHidden(sel, cat, isLightFixture(sel), next)) setSelectedFurnitureId(null);
+    }
+  };
+
+  // ── ceiling heights: one room or several ──
+  const applyRoomHeights = async (ids: string[], metres: number) => {
+    const h = cleanCeiling(metres);
+    if (!h || !ids.length) return;
+    const next = rooms.map(r => (ids.includes(r.id) ? { ...r, height: h } : r));
+    setRooms(next);
+    if (!currentProject?.id) return;
+    setSavingHeights(true);
+    try {
+      await saveRooms(currentProject.id, next as unknown as Parameters<typeof saveRooms>[1]);
+    } catch (err) {
+      console.error("Failed to save ceiling heights:", err);
+      setToast("Couldn't save the ceiling heights. Try again.");
+    } finally {
+      setSavingHeights(false);
+    }
+  };
+
   const sceneKitchen = {
-    data: kitchen,
+    // hidden cabinets disappear, unless the kitchen is being edited
+    data: hidden.kitchen && !kitchenEdit ? { ...kitchen, runs: [] } : kitchen,
     editing: kitchenEdit && viewMode === "3d" && cameraView !== "inside",
     addKind: kitchenAdd,
     selected: kitchenSel,
@@ -2771,6 +2854,29 @@ export default function CanvasPage() {
                   )}
                 </div>
               )}
+              {heightsOpen && (
+                <RoomHeightsPanel
+                  rooms={rooms.map(r => ({ id: r.id, name: r.name, color: r.color, height: r.height }))}
+                  onApply={applyRoomHeights}
+                  onClose={() => setHeightsOpen(false)}
+                  saving={savingHeights}
+                />
+              )}
+              {showHideOpen && (
+                <VisibilityPanel
+                  groups={visRows.groups}
+                  types={visRows.types}
+                  hidden={hidden}
+                  hasKitchen={kitchen.runs.length > 0}
+                  hiddenPieces={placedFurniture.filter(f => hidden.items.includes(f.id)).map(f => ({ id: f.id, name: f.name }))}
+                  onGroup={g => changeHidden(toggleGroup(hidden, g))}
+                  onType={t => changeHidden(toggleType(hidden, t))}
+                  onKitchen={() => changeHidden(toggleKitchenHidden(hidden))}
+                  onPiece={id => changeHidden(toggleItem(hidden, id))}
+                  onShowAll={() => changeHidden(EMPTY_HIDDEN)}
+                  onClose={() => setShowHideOpen(false)}
+                />
+              )}
               {lightPanelOpen && (
                 <div className="mb-2 w-[214px] rounded-[12px] bg-black/70 backdrop-blur-sm p-3.5 text-white">
                   {/* Time of day: sun angle and colour, sky, and lamps, all at
@@ -2870,6 +2976,27 @@ export default function CanvasPage() {
                 >
                   <CookingPot size={13} />Kitchen
                 </button>
+                <button
+                  onClick={() => setHeightsOpen(o => !o)}
+                  title="Ceiling height for one room or several"
+                  aria-pressed={heightsOpen}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
+                    heightsOpen ? "bg-white text-[#0a0a0a]" : "bg-black/50 text-white/80 hover:text-white"
+                  }`}
+                >
+                  <ArrowUpDown size={13} />Heights
+                </button>
+                <button
+                  onClick={() => setShowHideOpen(o => !o)}
+                  title="Show or hide lighting, furniture types, the kitchen or single pieces"
+                  aria-pressed={showHideOpen}
+                  className={`relative flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium backdrop-blur-sm transition-colors ${
+                    showHideOpen ? "bg-white text-[#0a0a0a]" : "bg-black/50 text-white/80 hover:text-white"
+                  }`}
+                >
+                  <Eye size={13} />Show / hide
+                  {!nothingHidden(hidden) && <span className="h-1.5 w-1.5 rounded-full bg-[#c7de7d]" aria-label="some things are hidden" />}
+                </button>
                 <ControlsHelp mode={pathTracing ? "rendered" : cameraView === "inside" ? "inside" : "orbit"} />
               </div>
             </div>
@@ -2939,13 +3066,34 @@ export default function CanvasPage() {
             <button
               onClick={() => handleSceneRender("")}
               disabled={isGeneratingRender}
-              title="Turn the current view into a photorealistic image"
+              title="A quick AI-styled image of this view. For an exact image of your design, use Photo render."
               className="absolute bottom-[68px] right-5 z-10 flex items-center gap-2 pl-3.5 pr-4 py-2 rounded-full bg-[#004643] hover:bg-[#003633] disabled:opacity-70 text-white text-[12px] font-medium shadow-[0_4px_12px_rgba(0,0,0,0.25)] transition-colors"
             >
               {isGeneratingRender
                 ? <><Loader2 size={14} className="animate-spin" />Rendering…</>
-                : <><Camera size={14} />Render view</>}
+                : <><Camera size={14} />AI render</>}
             </button>
+          )}
+
+          {/* Photo render — the exact scene, path-traced on the GPU server.
+               Stays mounted (only hidden) while tracing or walking, so a
+               render in progress keeps its status. */}
+          {viewMode === "3d" && (
+            <PhotoRenderButton
+              // a new project starts fresh (and drops a render being followed)
+              key={currentProject?.id ?? "none"}
+              className={`absolute bottom-[156px] right-5 z-10 ${pathTracing || (walkthroughActive && !walkthroughPaused) ? "hidden" : ""}`}
+              projectId={currentProject?.id}
+              exportGlb={() => sceneRef.current?.exportGlb() ?? Promise.resolve(null)}
+              renderSpec={q => sceneRef.current?.renderSpec(q) ?? null}
+              onReady={r => {
+                if (!r.url) return;
+                setGeneratedImageUrl(r.url);
+                setRenders(prev => [{ url: r.url!, at: Date.now() }, ...prev]);
+                setCompareMode(false);
+                setViewerUrl(r.url);
+              }}
+            />
           )}
 
           {/* 2D View */}
@@ -3125,7 +3273,7 @@ export default function CanvasPage() {
                   rooms={rooms}
                   rfWalls={rfWalls}
                   openings={openings}
-                  furniture={placedFurniture}
+                  furniture={visibleFurniture}
                   onFurnitureSelect={(id) => {
                     setSelectedFurnitureId(id);
                     if (id) { setSelectedWall(null); setSelectedDoor(null); setSelectedFloorRoomId(null); }
@@ -3272,6 +3420,23 @@ export default function CanvasPage() {
                     </label>
                   </div>
 
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold text-[#737373] tracking-[0.06em] uppercase">Ceiling height (m)</span>
+                    <input
+                      key={`${selectedRoom.id}-${selectedRoom.height ?? ""}`}
+                      type="number" min={MIN_CEILING_M} max={MAX_CEILING_M} step="0.05"
+                      defaultValue={(cleanCeiling(selectedRoom.height) ?? DEFAULT_CEILING_M).toFixed(2)}
+                      onBlur={e => {
+                        const v = cleanCeiling(e.currentTarget.value);
+                        if (v && v !== cleanCeiling(selectedRoom.height)) applyRoomHeights([selectedRoom.id], v);
+                        else e.currentTarget.value = (cleanCeiling(selectedRoom.height) ?? DEFAULT_CEILING_M).toFixed(2);
+                      }}
+                      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                      className="w-[84px] px-2.5 py-1.5 border border-[#e5e5e5] rounded-[8px] text-[13px] text-right
+                                 focus:outline-none focus:ring-2 focus:ring-[#c7de7d]"
+                    />
+                  </label>
+
                   {dimDraft && parseFloat(dimDraft.w) > 0 && parseFloat(dimDraft.l) > 0 && (
                     <p className="text-[11px] text-[#737373]">
                       Floor area ≈ {(parseFloat(dimDraft.w) * parseFloat(dimDraft.l)).toFixed(1)} m²
@@ -3316,6 +3481,7 @@ export default function CanvasPage() {
                     onDelete={handleDelete}
                     onUseProduct={swapInProduct}
                     onArray={() => setArrayItemId(selectedFurniture.id)}
+                    onHide={() => changeHidden(toggleItem(hidden, selectedFurniture.id))}
                   />
                 </>
               ) : selectedFloorRoomId ? (() => {

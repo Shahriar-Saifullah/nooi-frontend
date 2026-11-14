@@ -34,7 +34,9 @@ import {
   windowParts, windowSpanY, frameFinish, isWindowStyle, DEFAULT_WINDOW_STYLE,
   type WindowStyle, type FrameFinish,
 } from "@/lib/walls/windowStyles";
+import { DEFAULT_CEILING_M, FLAT_HEIGHTS, buildHeights, cleanCeiling, type HeightRoom, type SceneHeights } from "@/lib/walls/heights";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { buildRenderSpec, type RenderQuality, type RenderSpec } from "@/lib/render/sceneSpec";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 import { pieceSizeCm, drawnSizeCm, naturalSizeCm } from "@/lib/furniture/size";
@@ -185,6 +187,8 @@ export interface ThreeSceneHandle {
   captureDepthMap: () => string | null;
   /** export the whole scene (rooms, walls, furniture) as a binary glTF blob */
   exportGlb: () => Promise<Blob | null>;
+  /** camera, sun, lamps and size for a photo render of the current view */
+  renderSpec: (quality: RenderQuality) => RenderSpec | null;
   /** get the HTML canvas element for recording */
   getCanvasElement: () => HTMLCanvasElement | null;
   /** smoothly move the camera to a preset view */
@@ -300,7 +304,31 @@ function ArrayGhosts({ ghosts }: { ghosts: ArrayGhost[] }) {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const WALL_H = 2.8;
+/** Default wall / ceiling height. Rooms can set their own (lib/walls/heights);
+ *  read the real one through useHeights(). */
+const WALL_H = DEFAULT_CEILING_M;
+// Joinery (real metres; the trims are thin enough that the plan's
+// horizontal scale makes no visible difference).
+const TRIM_COLOR = "#f6f3ee";
+const SKIRT_H = 0.09;       // skirting board height
+const SKIRT_PROUD = 0.012;  // how far it stands off the wall face
+const CASING_W = 0.07;      // door casing width
+const CASING_PROUD = 0.018;
+const SILL_PROUD = 0.035;   // window board overhang
+const HeightsContext = React.createContext<SceneHeights>(FLAT_HEIGHTS);
+const useHeights = () => React.useContext(HeightsContext);
+
+/** Room outlines in scene metres with their ceiling heights. */
+function roomHeightsWorld(rooms: PolyRoom[], world: World): HeightRoom[] {
+  const out: HeightRoom[] = [];
+  for (const r of rooms) {
+    const h = cleanCeiling((r as { height?: unknown }).height);
+    if (!h) continue;
+    const poly = roomPolysWorld([r], world)[0];
+    if (poly) out.push({ poly, h });
+  }
+  return out;
+}
 const DOOR_H = 2.1;
 const SILL_H = 0.9;
 const MIN_WALL_T = WALL_T_MIN;
@@ -432,9 +460,11 @@ function SwingDoor({
 
 function WallWithOpenings({
   wall, cuts, world, wallKey, colors, surfaces, selectedSide, onSelect,
-  doorFinishes, selectedDoorKey, onDoorSelect,
+  doorFinishes, selectedDoorKey, onDoorSelect, wallH = WALL_H,
 }: {
   wall: VWall; cuts: Cut[]; world: World;
+  /** this wall's height (the taller of the rooms either side) */
+  wallH?: number;
   doorFinishes?: Record<string, string>;
   selectedDoorKey?: string | null;
   onDoorSelect?: (key: string | null) => void;
@@ -546,15 +576,40 @@ function WallWithOpenings({
   };
 
   const wallMat = <meshStandardMaterial color="#f2f0ec" roughness={0.9} />;
-  const frameMat = <meshStandardMaterial color="#8a7360" roughness={0.7} />;
+  // Door jambs, casings, skirting and sills share one satin white, like
+  // painted MDF joinery. The old brown jamb posts read as unfinished timber.
+  const frameMat = <meshStandardMaterial color={TRIM_COLOR} roughness={0.42} />;
+  // Clear glass: mostly see-through, with the sky's reflection on top. The
+  // old 32% teal tint over a dark background read as a solid grey panel.
   const glassMat = (
-    <meshPhysicalMaterial color="#bcd6de" transparent opacity={0.32}
-      roughness={0.05} metalness={0.1} />
+    <meshPhysicalMaterial name="nooi-glass" color="#e6f1f4" transparent opacity={0.16}
+      roughness={0.02} metalness={0} envMapIntensity={1.6} depthWrite={false} />
   );
+
+  // Joinery that every real room has and a box-model room lacks: skirting
+  // along the floor, casings round doors, a sill board under windows. Slightly
+  // deeper than the wall so it stands proud of both faces. Not paintable and
+  // not pickable — a click goes to the wall behind it.
+  const trim = (
+    from: number, to: number, y0: number, y1: number, proud: number, key: string,
+  ) => {
+    if (to - from < 0.02) return null;
+    const len = to - from;
+    const mid = (from + to) / 2;
+    const d = t + proud * 2;
+    return (
+      <mesh key={key} raycast={() => null} receiveShadow
+        position={horiz ? [mid, (y0 + y1) / 2, c] : [c, (y0 + y1) / 2, mid]}>
+        <boxGeometry args={horiz ? [len, y1 - y0, d] : [d, y1 - y0, len]} />
+        {frameMat}
+      </mesh>
+    );
+  };
 
   return (
     <group>
-      {solids.map(([f, tt], i) => box(f, tt, 0, WALL_H, `s${i}`, null, true))}
+      {solids.map(([f, tt], i) => box(f, tt, 0, wallH, `s${i}`, null, true))}
+      {solids.map(([f, tt], i) => trim(f, tt, 0, SKIRT_H, SKIRT_PROUD, `sk${i}`))}
       {clipped.map((cut, i) => {
         const cw = cut.end - cut.start;
         if (cut.type === "door") {
@@ -568,10 +623,14 @@ function WallWithOpenings({
           return (
             <group key={`d${i}`}>
               {/* header above the opening */}
-              {box(cut.start, cut.end, DOOR_H, WALL_H, `dh${i}`, null, true)}
+              {box(cut.start, cut.end, DOOR_H, wallH, `dh${i}`, null, true)}
               {/* slim jamb posts */}
               {box(cut.start, cut.start + 0.05, 0, DOOR_H, `dfa${i}`, frameMat)}
               {box(cut.end - 0.05, cut.end, 0, DOOR_H, `dfb${i}`, frameMat)}
+              {/* casing: two legs and a head, round the face of the opening */}
+              {trim(cut.start - CASING_W, cut.start + 0.05, 0, DOOR_H + CASING_W, CASING_PROUD, `dca${i}`)}
+              {trim(cut.end - 0.05, cut.end + CASING_W, 0, DOOR_H + CASING_W, CASING_PROUD, `dcb${i}`)}
+              {trim(cut.start - CASING_W, cut.end + CASING_W, DOOR_H, DOOR_H + CASING_W, CASING_PROUD, `dch${i}`)}
 
               {realW <= HINGED_MAX && (
                 // hinged leaf, pivoted at the jamb (not its own centre)
@@ -631,8 +690,9 @@ function WallWithOpenings({
                           <boxGeometry args={horiz
                             ? [pw - 0.04, DOOR_H - 0.1, 0.03]
                             : [0.03, DOOR_H - 0.1, pw - 0.04]} />
-                          <meshPhysicalMaterial color="#bcd6de" transparent
-                            opacity={0.3} roughness={0.05} metalness={0.1} />
+                          <meshPhysicalMaterial name="nooi-glass" color="#e6f1f4" transparent
+                            opacity={0.16} roughness={0.02} metalness={0}
+                            envMapIntensity={1.6} depthWrite={false} />
                         </mesh>
                         {/* thin panel frame rails */}
                         <mesh position={horiz
@@ -662,11 +722,13 @@ function WallWithOpenings({
         // bars (lib/walls/windowStyles)
         const wStyle = isWindowStyle(cut.style) ? cut.style : DEFAULT_WINDOW_STYLE;
         const fin = frameFinish(cut.frame);
-        const span = windowSpanY(wStyle, SILL_H, DOOR_H, WALL_H);
+        const span = windowSpanY(wStyle, SILL_H, DOOR_H, wallH);
         return (
           <group key={`w${i}`}>
             {box(cut.start, cut.end, 0, span.sill, `ws${i}`, null, true)}
-            {box(cut.start, cut.end, span.head, WALL_H, `wh${i}`, null, true)}
+            {trim(cut.start, cut.end, 0, Math.min(SKIRT_H, span.sill), SKIRT_PROUD, `wsk${i}`)}
+            {span.sill > 0.3 && trim(cut.start - 0.05, cut.end + 0.05, span.sill - 0.03, span.sill, SILL_PROUD, `wsl${i}`)}
+            {box(cut.start, cut.end, span.head, wallH, `wh${i}`, null, true)}
             {windowParts(wStyle, cut.start, cut.end, span.sill, span.head, t).map((p, k) => (
               <mesh
                 key={`wp${i}-${k}`}
@@ -729,9 +791,10 @@ function wallLine(wall: VWall, world: World) {
 }
 
 function CutawayWall({
-  wall, wallKey, world, enabled, outside, children,
+  wall, wallKey, world, enabled, outside, children, wallH = WALL_H,
 }: {
   wall: VWall; wallKey: string; world: World; enabled: boolean;
+  wallH?: number;
   /** which side of this wall faces outside; 0 = interior, never cut */
   outside: OutsideSide;
   children: React.ReactNode;
@@ -766,10 +829,10 @@ function CutawayWall({
     const g = ref.current;
     if (!g) return;
     const dt = frameDt(rawDt);
-    g.userData.cutawayFor = (c: THREE.Vector3) => (cutFor(c) ? CUTAWAY_H / WALL_H : 1);
+    g.userData.cutawayFor = (c: THREE.Vector3) => (cutFor(c) ? CUTAWAY_H / wallH : 1);
     const cut = cutFor(camera.position);
 
-    const target = cut ? CUTAWAY_H / WALL_H : 1;
+    const target = cut ? CUTAWAY_H / wallH : 1;
     const y = g.scale.y;
     if (Math.abs(y - target) < 0.002) {
       if (y !== target) g.scale.y = target;
@@ -799,7 +862,12 @@ interface WallFaceHit {
   horiz: boolean;
   /** the wall's extent along its own axis */
   a0: number; a1: number;
+  /** the wall's height */
+  top?: number;
 }
+
+/** World walls may carry their height (see SceneContent / the root). */
+const heightOfWall = (w: WorldWall) => (w as WorldWall & { height?: number }).height ?? WALL_H;
 
 function wallHitFromRay(ray: THREE.Ray, walls: WorldWall[]): WallFaceHit | null {
   let best: WallFaceHit | null = null;
@@ -807,7 +875,7 @@ function wallHitFromRay(ray: THREE.Ray, walls: WorldWall[]): WallFaceHit | null 
   for (const w of walls) {
     const horiz = w.z1 === w.z2;
     const half = w.thickness / 2;
-    const top = WALL_H * (wallCutScale.get(w.id ?? "") ?? 1);
+    const top = heightOfWall(w) * (wallCutScale.get(w.id ?? "") ?? 1);
     const c = horiz ? w.z1 : w.x1;
     const a0 = horiz ? Math.min(w.x1, w.x2) : Math.min(w.z1, w.z2);
     const a1 = horiz ? Math.max(w.x1, w.x2) : Math.max(w.z1, w.z2);
@@ -825,7 +893,7 @@ function wallHitFromRay(ray: THREE.Ray, walls: WorldWall[]): WallFaceHit | null 
       const along = horiz ? px : pz;
       if (along < a0 || along > a1 || py < 0 || py > top) continue;
       bestT = t;
-      best = { x: px, y: py, z: pz, nx: horiz ? 0 : side, nz: horiz ? side : 0, horiz, a0, a1 };
+      best = { x: px, y: py, z: pz, nx: horiz ? 0 : side, nz: horiz ? side : 0, horiz, a0, a1, top: heightOfWall(w) };
     }
   }
   return best;
@@ -844,9 +912,9 @@ function nearestWallFace(x: number, z: number, walls: WorldWall[]): WallFaceHit 
   const half = w.thickness / 2;
   return {
     x: horiz ? hit.px : w.x1 + nx * half,
-    y: WALL_H / 2,
+    y: heightOfWall(w) / 2,
     z: horiz ? w.z1 + nz * half : hit.pz,
-    nx, nz, horiz,
+    nx, nz, horiz, top: heightOfWall(w),
     a0: horiz ? Math.min(w.x1, w.x2) : Math.min(w.z1, w.z2),
     a1: horiz ? Math.max(w.x1, w.x2) : Math.max(w.z1, w.z2),
   };
@@ -859,7 +927,7 @@ function placeOnWall(
   const along0 = hit.horiz ? hit.x : hit.z;
   const lo = hit.a0 + size.w / 2 + 0.02, hi = hit.a1 - size.w / 2 - 0.02;
   const along = lo <= hi ? Math.max(lo, Math.min(hi, along0)) : (hit.a0 + hit.a1) / 2;
-  const cy = Math.max(size.h / 2 + 0.02, Math.min(WALL_H - size.h / 2 - 0.02, centreY));
+  const cy = Math.max(size.h / 2 + 0.02, Math.min((hit.top ?? WALL_H) - size.h / 2 - 0.02, centreY));
   // a few millimetres proud of the face, so the back never z-fights the paint
   const off = size.d / 2 + 0.004;
   const x = hit.horiz ? along : hit.x + hit.nx * off;
@@ -878,7 +946,12 @@ function WallMountedItem({
 }: { item: PlacedFurniture; walls: WorldWall[] }) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const ref = useRef<THREE.Group>(null);
-  const size = itemSizeM(item);
+  const heights = useHeights();
+  // floor-to-ceiling pieces (a lift core) take the room's height
+  const size0 = itemSizeM(item);
+  const size = cat?.fitToWallHeight
+    ? { ...size0, h: heights.at(item.position[0], item.position[2]) * (item.sizeScale ?? 1) }
+    : size0;
   // Drawn-in-code pieces are mostly wall mounts, but a floor-standing AC
   // stands on the floor and a ceiling fan hangs from the ceiling.
   const mount = item.mountType ?? cat?.mountType ?? "wall";
@@ -900,7 +973,7 @@ function WallMountedItem({
       ref={ref}
       position={[
         item.position[0],
-        mount === "ceiling" ? WALL_H - size.h / 2 : (item.position[1] ?? 0) + size.h / 2,
+        mount === "ceiling" ? heights.at(item.position[0], item.position[2]) - size.h / 2 : (item.position[1] ?? 0) + size.h / 2,
         item.position[2],
       ]}
       rotation={[0, item.rotation ?? 0, 0]}
@@ -1224,7 +1297,7 @@ function RoomFloor({
 
 // ─── Roof / Ceiling ─────────────────────────────────────────────────────────
 
-function RoomRoof({ room, world }: { room: PolyRoom; world: World }) {
+function RoomRoof({ room, world, h = WALL_H }: { room: PolyRoom; world: World; h?: number }) {
   const shape = useMemo(() => {
     const s = new THREE.Shape();
     if (room.polygon && room.polygon.length >= 3) {
@@ -1253,7 +1326,7 @@ function RoomRoof({ room, world }: { room: PolyRoom; world: World }) {
   if (outdoor) return null; // outdoor spaces (balconies/patios) do not render roofs
 
   return (
-    <group position={[0, WALL_H, 0]}>
+    <group position={[0, h, 0]}>
       {/* Indoor ceiling underside visible from inside room.
            Named so the path tracer can turn it into a light — see
            PathTracerLayer. In raster the room is lit by a directional light
@@ -1267,8 +1340,11 @@ function RoomRoof({ room, world }: { room: PolyRoom; world: World }) {
           side={THREE.DoubleSide}
         />
       </mesh>
-      {/* Outer top roof slab */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0]} castShadow receiveShadow>
+      {/* Outer top roof slab. The extrusion runs DOWN from its origin once
+          rotated, so it is lifted by its own depth to sit on top of the
+          ceiling. At y=0 it hung 8 cm below the ceiling and hid it — the
+          grey-brown "ceiling" seen from inside was the slab's underside. */}
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.08, 0]} castShadow receiveShadow>
         <extrudeGeometry args={[shape, { depth: 0.08, bevelEnabled: false }]} />
         <meshStandardMaterial
           color="#d5d0c8"
@@ -1315,6 +1391,8 @@ function GltfModel({
 }: { item: PlacedFurniture; selected: boolean; world: World }) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const { scene } = useGLTF(cat!.path);
+  // the ceiling over this piece (stairs span to it; pendants hang from it)
+  const ceilingH = useHeights().at(item.position[0], item.position[2]);
   const clone = useMemo(() => scene.clone(true), [scene]);
   // picking a detailed model tests a bounds tree, not every triangle
   useEffect(() => { buildBoundsTrees(clone); }, [clone]);
@@ -1354,7 +1432,7 @@ function GltfModel({
     const drawn = drawnSizeCm(item, cat);
     const tw = drawn.w / 100;
     // architecture (stairs) spans floor to ceiling regardless of catalog height
-    const th = cat!.fitToWallHeight ? (WALL_H * s) : drawn.h / 100;
+    const th = cat!.fitToWallHeight ? (ceilingH * s) : drawn.h / 100;
     const td = drawn.d / 100;
     const sx = size.x > 1e-4 ? tw / size.x : 1;
     const sy = size.y > 1e-4 ? th / size.y : 1;
@@ -1364,12 +1442,12 @@ function GltfModel({
     const minY = box.min.y * sy;
     const maxY = box.max.y * sy;
     const yOffset = mountType === "ceiling"
-      ? WALL_H - maxY
+      ? ceilingH - maxY
       : -minY;
     return { scale: [sx, sy, sz] as [number, number, number], yOffset, mountType, tw };
     // dimsKey stands in for item.dims (a new object on every save)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseSize, cat, item.sizeScale, item.mountType, dimsKey]);
+  }, [baseSize, cat, item.sizeScale, item.mountType, dimsKey, ceilingH]);
 
   // ── smart stretch: wider by repeating seats / bays, or by lengthening the
   // middle, not by fattening the whole model (lib/furniture/stretch) ──
@@ -1442,7 +1520,8 @@ function BoxFurniture({
   const cm = item.dims || cat ? drawnSizeCm(item, cat) : pieceSizeCm(item, cat, { w: 80, d: 80, h: 80 });
   const w = cm.w / 100, d = cm.d / 100, h = cm.h / 100;
   const mountType = item.mountType ?? cat?.mountType ?? "floor";
-  const posY = mountType === "ceiling" ? WALL_H - h / 2 : (item.position[1] ?? 0) + h / 2;
+  const ceilingH = useHeights().at(item.position[0], item.position[2]);
+  const posY = mountType === "ceiling" ? ceilingH - h / 2 : (item.position[1] ?? 0) + h / 2;
   return (
     <mesh
       position={[item.position[0], posY, item.position[2]]}
@@ -1646,6 +1725,7 @@ function OpeningEditor({
   walls: VWall[]; openings: Opening[]; world: World; edit: OpeningEditProps;
 }) {
   const get = useThree(st => st.get);
+  const heights = useHeights();
   const size = useMemo(() => ({ totalW: world.totalW, totalD: world.totalD }), [world]);
   const lines = useMemo(() => walls.map((w, i) => openingWallLine(w, i, size)), [walls, size]);
   const spans = useMemo(() => openings.map((op) => {
@@ -1657,8 +1737,8 @@ function OpeningEditor({
   const [preview, setPreview] = useState<{ wi: number; centre: number; half: number; ok: boolean } | null>(null);
 
   // the listeners live for the whole mode; they read everything current here
-  const latest = useRef({ walls, openings, lines, spans, edit, size, world });
-  useEffect(() => { latest.current = { walls, openings, lines, spans, edit, size, world }; });
+  const latest = useRef({ walls, openings, lines, spans, edit, size, world, heights });
+  useEffect(() => { latest.current = { walls, openings, lines, spans, edit, size, world, heights }; });
 
   useEffect(() => {
     const { gl } = get();
@@ -1704,7 +1784,7 @@ function OpeningEditor({
       let best: { wi: number; along: number; dist: number } | null = null;
       ls.forEach((L, wi) => {
         const key = (ws[wi] as { id?: string }).id ?? `wi${wi}`;
-        const h = WALL_H * (wallCutScale.get(key) ?? 1);
+        const h = latest.current.heights.wall(key) * (wallCutScale.get(key) ?? 1);
         setBox(L, L.a0 - L.t / 2, L.a1 + L.t / 2, 0, h, 0.02);
         if (!ray.ray.intersectBox(box, v)) return;
         const dist = v.distanceTo(ray.ray.origin);
@@ -1976,22 +2056,28 @@ function PlacementBridge({
   world: World;
 }) {
   const { camera } = useThree();
+  const heights = useHeights();
   useEffect(() => {
     const ray = new THREE.Raycaster();
     const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const ceilingPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), WALL_H);
+    const ceilingPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), heights.max);
     const hit = new THREE.Vector3();
     const polys = roomPolysWorld(rooms, world);
     register((nx, ny, mountType = "floor") => {
       ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
       const targetPlane = mountType === "ceiling" ? ceilingPlane : floorPlane;
       if (!ray.ray.intersectPlane(targetPlane, hit)) return null;
+      // ceilings differ per room: aim again at the ceiling actually there
+      if (mountType === "ceiling") {
+        const h = heights.at(hit.x, hit.z);
+        if (h !== heights.max) ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, -1, 0), h), hit);
+      }
       // A ceiling mount must land under an actual ceiling, so a drop outside
       // the building is pulled to the nearest room rather than left floating.
       if (mountType === "ceiling") return clampIntoRooms(hit.x, hit.z, polys);
       return [hit.x, hit.z];
     });
-  }, [camera, register, rooms, world]);
+  }, [camera, register, rooms, world, heights]);
   return null;
 }
 
@@ -2022,6 +2108,7 @@ interface WalkObstacle { minX: number; maxX: number; minZ: number; maxZ: number;
 
 function buildWalkObstacles(
   rfWalls: VWall[], openings: Opening[], world: World, furniture: PlacedFurniture[],
+  heights: SceneHeights = FLAT_HEIGHTS,
 ): WalkObstacle[] {
   const out: WalkObstacle[] = [];
   const cuts = cutsPerWall(rfWalls, openings, world);
@@ -2033,8 +2120,8 @@ function buildWalkObstacles(
     const doors = (cuts.get(i) ?? []).filter(c => c.type === "door");
     for (const [f, t] of wallPieces(a0, a1, doors).solids) {
       out.push(horiz
-        ? { minX: f, maxX: t, minZ: w.z1 - half, maxZ: w.z1 + half, top: WALL_H }
-        : { minX: w.x1 - half, maxX: w.x1 + half, minZ: f, maxZ: t, top: WALL_H });
+        ? { minX: f, maxX: t, minZ: w.z1 - half, maxZ: w.z1 + half, top: heights.wall(w.id) }
+        : { minX: w.x1 - half, maxX: w.x1 + half, minZ: f, maxZ: t, top: heights.wall(w.id) });
     }
   });
   for (const f of furniture) {
@@ -2093,6 +2180,7 @@ function WalkControls({
   /** Room outlines in metres; walk mode always starts inside one. */
   roomPolys: [number, number][][];
 }) {
+  const heights = useHeights();
   const { camera, gl, controls } = useThree() as any;
   const targetYaw = useRef(0);
   const targetPitch = useRef(0);
@@ -2111,7 +2199,7 @@ function WalkControls({
     const bx = world.totalW * 0.9, bz = world.totalD * 0.9;
     p.x = Math.max(-bx, Math.min(bx, p.x));
     p.z = Math.max(-bz, Math.min(bz, p.z));
-    p.y = Math.max(0.15, Math.min(WALL_H - 0.05, p.y));
+    p.y = Math.max(0.15, Math.min(heights.at(p.x, p.z) - 0.05, p.y));
   };
 
   // entering: glide down to eye height INSIDE A ROOM, facing the way the
@@ -2335,6 +2423,7 @@ function CameraRig({
   furniture?: PlacedFurniture[];
 }) {
   const { camera, size, controls } = useThree() as any;
+  const heights = useHeights();
   const anim = useRef<null | {
     fromPos: THREE.Vector3; toPos: THREE.Vector3;
     fromTgt: THREE.Vector3; toTgt: THREE.Vector3;
@@ -2530,7 +2619,7 @@ function CameraRig({
       const t = controls.target;
       const bx = world.totalW * 1.35;
       const bz = world.totalD * 1.35;
-      const maxY = WALL_H * 2.0;
+      const maxY = heights.max * 2.0;
       const minY = -0.5;
 
       const pullFactor = 1 - Math.exp(-12 * delta);
@@ -2548,7 +2637,7 @@ function CameraRig({
     // on-demand rendering: ask for the next frame while anything here moves
     const t = controls?.target;
     const outside = !!t && (Math.abs(t.x) > world.totalW * 1.35 + 1e-3
-      || Math.abs(t.z) > world.totalD * 1.35 + 1e-3 || t.y > WALL_H * 2 + 1e-3 || t.y < -0.5 - 1e-3);
+      || Math.abs(t.z) > world.totalD * 1.35 + 1e-3 || t.y > heights.max * 2 + 1e-3 || t.y < -0.5 - 1e-3);
     if (mvF !== 0 || mvR !== 0 || mvU !== 0 || anim.current || outside) state.invalidate();
   });
 
@@ -2563,6 +2652,8 @@ export interface SceneExportApi {
   captureDepth: () => string;
   exportGlb: () => Promise<Blob>;
   getCamera: () => THREE.Camera;
+  /** what a photo render needs besides the GLB (lib/render/sceneSpec) */
+  renderSpec: (quality: RenderQuality) => RenderSpec;
 }
 
 /** Size of the project picture (4:3, JPEG). */
@@ -2577,6 +2668,7 @@ function ExportBridge({
   building: { minX: number; maxX: number; minZ: number; maxZ: number } | null;
 }) {
   const { gl, scene, camera, invalidate } = useThree();
+  const heights = useHeights();
   useEffect(() => {
     register({
       // The project picture: the standard ¾ "3D" view of the whole home,
@@ -2600,9 +2692,9 @@ function ExportBridge({
         const vFov = 2 * Math.atan(tanV * (cropH / h));
         const hFov = 2 * Math.atan(tanV * (cropW / h));
         const bw = b.maxX - b.minX, bd = b.maxZ - b.minZ;
-        const r = 0.5 * Math.hypot(bw, bd, WALL_H) * 0.9;
+        const r = 0.5 * Math.hypot(bw, bd, heights.max) * 0.9;
         const dist = r / Math.sin(Math.min(vFov, hFov) / 2);
-        const tgt = new THREE.Vector3((b.minX + b.maxX) / 2, WALL_H * 0.3, (b.minZ + b.maxZ) / 2);
+        const tgt = new THREE.Vector3((b.minX + b.maxX) / 2, heights.max * 0.3, (b.minZ + b.maxZ) / 2);
         const dir = new THREE.Vector3(0.55, 0.62, 0.95).normalize();
         let d = dist;
         const place = () => {
@@ -2616,7 +2708,7 @@ function ExportBridge({
         // tighten: centre them in the crop and fill ~90% of it.
         const sx = cropW / w, sy = cropH / h;          // crop size in NDC units (of 2)
         const corners: THREE.Vector3[] = [];
-        for (const x of [b.minX, b.maxX]) for (const y of [0, WALL_H]) for (const z of [b.minZ, b.maxZ]) {
+        for (const x of [b.minX, b.maxX]) for (const y of [0, heights.max]) for (const z of [b.minZ, b.maxZ]) {
           corners.push(new THREE.Vector3(x, y, z));
         }
         for (let pass = 0; pass < 2; pass++) {
@@ -2825,8 +2917,12 @@ function ExportBridge({
             { binary: true },  // onlyVisible defaults to true → drag plane skipped
           );
         }),
+      renderSpec: (quality: RenderQuality) => {
+        const el = gl.domElement;
+        return buildRenderSpec(scene, camera, el.clientWidth / Math.max(1, el.clientHeight), quality);
+      },
     });
-  }, [gl, scene, camera, register, building, world, invalidate]);
+  }, [gl, scene, camera, register, building, world, invalidate, heights.max]);
   return null;
 }
 
@@ -2877,6 +2973,7 @@ function SceneContent({
   // and furniture stop reacting to clicks.
   // (the kitchen editor owns it the same way)
   const editingOpenings = !!openingEdit || !!kitchen?.editing;
+  const heights = useHeights();
   // drei's ContactShadows is built on GLSL ShaderMaterials, which WebGPU
   // cannot run. On WebGPU the AO pass covers the same contact darkening.
   const isWebGPU = useThree(s => (s.gl as { isWebGPURenderer?: boolean }).isWebGPURenderer === true);
@@ -2943,7 +3040,7 @@ function SceneContent({
     if (!draggingId || !isDraggingCeiling) return;
     const ceilingPolys = roomPolysWorld(rooms, world);
     const el = gl.domElement as HTMLCanvasElement;
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -WALL_H);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -heights.max);
     const ray = new THREE.Raycaster();
     const hit = new THREE.Vector3();
 
@@ -2961,6 +3058,8 @@ function SceneContent({
       const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
       ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
       if (!ray.ray.intersectPlane(plane, hit)) return;
+      const hAt = heights.at(hit.x, hit.z);
+      if (hAt !== heights.max) ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -hAt), hit);
 
       if (!dragStart.current) {
         dragStart.current = { x: hit.x, z: hit.z };
@@ -2977,13 +3076,13 @@ function SceneContent({
 
     window.addEventListener("pointermove", move);
     return () => window.removeEventListener("pointermove", move);
-  }, [draggingId, isDraggingCeiling, camera, gl, controls, onFurnitureMove, rooms, world]);
+  }, [draggingId, isDraggingCeiling, camera, gl, controls, onFurnitureMove, rooms, world, heights]);
 
   // Walls in world space for the snap engine. VWall stores percentages of the
   // source image; thickness is a percentage of the larger image dimension.
   const worldWalls = useMemo<WorldWall[]>(
-    () => planWallsToWorld(rfWalls, world.totalW, world.totalD),
-    [rfWalls, world],
+    () => planWallsToWorld(rfWalls, world.totalW, world.totalD).map(w => ({ ...w, height: heights.wall(w.id) })),
+    [rfWalls, world, heights],
   );
   // outer walls and which way they face — only these are cut away
   const wallOutside = useMemo(() => outsideSides(worldWalls), [worldWalls]);
@@ -3184,14 +3283,17 @@ function SceneContent({
       ))}
 
       {/* Roof / Ceiling — ONLY rendered when Inside Mode is active */}
-      {insideMode && rooms.map((r) => <RoomRoof key={`roof-${r.id}`} room={r} world={world} />)}
+      {insideMode && rooms.map((r) => (
+        <RoomRoof key={`roof-${r.id}`} room={r} world={world}
+          h={cleanCeiling((r as { height?: unknown }).height) ?? heights.fallback} />
+      ))}
 
       {rfWalls.map((wl, i) => {
         const wallKey = wl.id ?? `wi${i}`;
         return (
           <CutawayWall key={wallKey} wall={wl} wallKey={wallKey} world={world} enabled={wallCutaway}
-            outside={wallOutside[i] ?? 0}>
-          <WallWithOpenings wall={wl}
+            outside={wallOutside[i] ?? 0} wallH={heights.wall(wallKey)}>
+          <WallWithOpenings wall={wl} wallH={heights.wall(wallKey)}
             cuts={cuts.get(i) ?? []} world={world}
             wallKey={wallKey}
             colors={{
@@ -3310,7 +3412,7 @@ function SceneContent({
  * vignette or grain: each of those was tried, and each made the room look
  * hazier or blurrier rather than more real.
  */
-function Postprocessing({ enabled }: { enabled: boolean }) {
+function Postprocessing({ enabled, inside = false }: { enabled: boolean; inside?: boolean }) {
   if (!enabled) return null;
   return (
     /*
@@ -3354,7 +3456,10 @@ function Postprocessing({ enabled }: { enabled: boolean }) {
         "architectural render" look, and it hides soft or low-poly edges.
         After the grade so the line colour is exactly what is asked for.
       */}
-      <InkEdges color="#2b2622" opacity={0.45} />
+      {/* Lighter than it was (0.45): strong outlines are what made the view
+          read as a drawing. Lighter still from inside a room, where the eye
+          is close and the lines would sit on every cushion. */}
+      <InkEdges color="#2b2622" opacity={inside ? 0.14 : 0.3} />
     </EffectComposer>
   );
 }
@@ -3425,6 +3530,15 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
     () => planWallsToWorld(rfWalls, world.totalW, world.totalD),
     [rfWalls, world],
   );
+  // ceiling heights per room, and each wall's (lib/walls/heights)
+  const heights = useMemo(
+    () => buildHeights(roomHeightsWorld(rooms, world), worldWallsRoot),
+    [rooms, world, worldWallsRoot],
+  );
+  const worldWallsTall = useMemo(
+    () => worldWallsRoot.map(w => ({ ...w, height: heights.wall(w.id) })),
+    [worldWallsRoot, heights],
+  );
   // the home's footprint, for framing the project picture
   const buildingBox = useMemo(() => {
     if (!worldWallsRoot.length) return null;
@@ -3433,8 +3547,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   }, [worldWallsRoot]);
   // Everything the walker cannot pass through in Inside mode.
   const walkObstacles = useMemo(
-    () => buildWalkObstacles(rfWalls, openings, world, furniture),
-    [rfWalls, openings, world, furniture],
+    () => buildWalkObstacles(rfWalls, openings, world, furniture, heights),
+    [rfWalls, openings, world, furniture, heights],
   );
 
   const roomPolys = useMemo(() => roomPolysWorld(rooms, world), [rooms, world]);
@@ -3461,6 +3575,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       exportApi.current ? exportApi.current.captureDepth() : null,
     exportGlb: async () =>
       exportApi.current ? exportApi.current.exportGlb() : null,
+    renderSpec: (quality: RenderQuality) =>
+      exportApi.current ? exportApi.current.renderSpec(quality) : null,
     getCanvasElement: () => canvasElementRef.current,
     getCamera: () => exportApi.current ? exportApi.current.getCamera() : null,
     setCameraView: (view: CameraViewPreset) => {
@@ -3505,7 +3621,11 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       }}
       style={{ width: "100%", height: "100%" }}
     >
-      <color attach="background" args={["#12161a"]} />
+      {/* From inside a room the background is what you see through the
+          windows: a pale sky, not the dark studio of the orbit view. */}
+      <color attach="background"
+        args={[insideMode || (walkthroughActive && !walkthroughPaused) ? "#dce7ee" : "#12161a"]} />
+      <HeightsContext.Provider value={heights}>
 
       {/*
         Image-based lighting now lives in LightingRig (a generated sky
@@ -3518,7 +3638,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       */}
       <LightingRig
         furniture={furniture}
-        wallHeight={WALL_H}
+        wallHeight={heights.max}
+        heightAt={heights.at}
         settings={lighting}
         insideMode={insideMode}
         world={world}
@@ -3531,7 +3652,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       <PlacementBridge register={(fn) => { raycastFn.current = fn; }}
                        rooms={rooms} world={world} />
       <WallPlacementBridge register={(fn) => { wallPlaceFn.current = fn; }}
-                           walls={worldWallsRoot} />
+                           walls={worldWallsTall} />
       <ExportBridge register={(api) => { exportApi.current = api; }} world={world} building={buildingBox} />
       <CanvasBridge onCanvasReady={(el) => { canvasElementRef.current = el; }} />
       <DemandDriver kickRef={kickRef} />
@@ -3606,7 +3727,8 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           occlusion anyway, so AO is redundant while it runs. */}
       {backend === "webgl" ? (
         <>
-          <Postprocessing enabled={aoEnabled && !pathTracing} />
+          <Postprocessing enabled={aoEnabled && !pathTracing}
+            inside={insideMode || (!!walkthroughActive && !walkthroughPaused)} />
           {/* three-gpu-pathtracer is WebGL-only; the toolbar hides the toggle
               on WebGPU. */}
           <PathTracerLayer active={pathTracing} onStats={onPathTracerStats} />
@@ -3628,6 +3750,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
         minDistance={0.8}
         maxDistance={world.maxDim * 3.5}
         enabled={!insideMode && !(walkthroughActive && !walkthroughPaused)} />
+      </HeightsContext.Provider>
     </Canvas>
   );
 });
