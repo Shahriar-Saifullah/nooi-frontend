@@ -37,6 +37,7 @@ import {
 import ShopHeader from "@/components/marketplace/ShopHeader";
 import ProductCredentials from "@/components/marketplace/ProductCredentials";
 import ProductConfigurator from "@/components/marketplace/ProductConfigurator";
+import FavouriteButton from "@/components/FavouriteButton";
 import { configKey, priceLine } from "@/lib/listings/configure";
 import { addCartLine, clampWidth, lineConfig, listedWidthCm } from "@/lib/listings/cartLine";
 import { useLanguage } from "@/lib/i18n/useTranslations";
@@ -485,6 +486,8 @@ function ProductDetailInner() {
                 <ShoppingCart size={13} />
                 {stock === 0 ? t.soldOut : t.addToCart}
               </button>
+
+              <FavouriteButton fav={{ kind: "product", ref: product.id }} arabic={isArabic} />
 
               {stock > 0 && (
                 <button

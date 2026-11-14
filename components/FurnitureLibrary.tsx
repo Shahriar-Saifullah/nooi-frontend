@@ -18,14 +18,17 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, Heart } from "lucide-react";
 import {
   FURNITURE_CATALOG, FURNITURE_TYPES, CATEGORY_LABELS,
-  typesByCategory, typeById,
+  typesByCategory, typeById, catalogById,
   type CatalogItem, type FurnitureType, type FurnitureCategory,
 } from "@/lib/furniture/catalog";
 import { getThumbnail } from "@/lib/furniture/thumbnails";
-import { listShopItems } from "@/lib/furniture/shopCatalog";
+import { ensureShopItems, listShopItems, useShopCatalogVersion } from "@/lib/furniture/shopCatalog";
+import FavouriteButton from "@/components/FavouriteButton";
+import { favouriteFor, useFavourites } from "@/lib/favourites";
+
 import { formatMoney } from "@/lib/money";
 
 export const DND_MIME = "application/x-nooi-furniture";
@@ -156,7 +159,11 @@ function VariantCard({
                  hover:border-teal-300 hover:shadow-sm transition"
       title={`Drag into the scene — ${item.size.w}×${item.size.d} cm`}
     >
-      <Thumb item={item} />
+      <div className="relative">
+        <Thumb item={item} />
+        <FavouriteButton fav={favouriteFor(item.id)} label={false} size={12}
+          className="absolute top-1 left-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-white/90 shadow-sm" />
+      </div>
       <div className="mt-1.5 text-[12px] font-medium text-gray-800 leading-tight">
         {item.name}
       </div>
@@ -214,7 +221,20 @@ interface Props {
 
 export default function FurnitureLibrary({ onQuickAdd }: Props) {
   const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<FurnitureCategory | "all">("all");
+  const [category, setCategory] = useState<FurnitureCategory | "all" | "favourites">("all");
+  const favourites = useFavourites();
+  useShopCatalogVersion();   // re-render once hearted vendor pieces load
+  const favProductIds = favourites.refs("product");
+  const favProductKey = favProductIds.join(",");
+  useEffect(() => {
+    if (category === "favourites" && favProductKey) void ensureShopItems(favProductKey.split(",").map(id => `shop:${id}`));
+  }, [category, favProductKey]);
+  const favouriteItems = category === "favourites"
+    ? [
+        ...favourites.refs("library").map(id => catalogById(id)),
+        ...favProductIds.map(id => catalogById(`shop:${id}`)),
+      ].filter((i): i is CatalogItem => !!i)
+    : [];
   const [openTypeId, setOpenTypeId] = useState<string | null>(null);
   // Library = Nooi's own models. Shop = real products you can buy.
   const [source, setSource] = useState<"library" | "shop">("library");
@@ -233,7 +253,7 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
     );
   }, [q, searching]);
 
-  const types = useMemo(() => typesByCategory(category), [category]);
+  const types = useMemo(() => (category === "favourites" ? [] : typesByCategory(category)), [category]);
   const openType: FurnitureType | undefined =
     openTypeId ? FURNITURE_TYPES.find(t => t.id === openTypeId) : undefined;
 
@@ -275,6 +295,15 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
       {/* ── Level 1: categories (horizontal scroll) ── */}
       {!searching && source === "library" && (
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide -mx-0.5 px-0.5 pb-0.5">
+          <button
+            onClick={() => { setCategory("favourites"); setOpenTypeId(null); }}
+            className={`shrink-0 flex items-center gap-1 whitespace-nowrap px-3 py-1.5 rounded-full text-[11px] font-medium border transition
+              ${category === "favourites"
+                ? "bg-teal-700 text-white border-teal-700"
+                : "bg-white text-gray-600 border-gray-200 hover:border-gray-300"}`}
+          >
+            <Heart size={11} className={category === "favourites" ? "fill-white" : ""} />Favourites
+          </button>
           {cats.map(c => (
             <button
               key={c}
@@ -337,8 +366,21 @@ export default function FurnitureLibrary({ onQuickAdd }: Props) {
           </>
         )}
 
+        {/* ── Favourites ── */}
+        {source === "library" && !searching && category === "favourites" && (
+          favouriteItems.length ? (
+            <div className="grid grid-cols-2 gap-2">
+              {favouriteItems.map(item => <VariantCard key={item.id} item={item} onQuickAdd={onQuickAdd} />)}
+            </div>
+          ) : (
+            <div className="text-sm text-gray-400 text-center py-8 px-4">
+              Tap the heart on any piece to keep it here.
+            </div>
+          )
+        )}
+
         {/* ── Level 2: types in the selected category ── */}
-        {source === "library" && !searching && !openType && (
+        {source === "library" && !searching && !openType && category !== "favourites" && (
           <>
             {(category === "all"
               ? cats.filter((c): c is FurnitureCategory => c !== "all")

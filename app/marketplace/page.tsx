@@ -30,7 +30,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  SlidersHorizontal, Check, X, ArrowLeft, Box, Loader2,
+  SlidersHorizontal, Check, X, ArrowLeft, Box, Loader2, Heart,
 } from "lucide-react";
 
 import ShopHeader from "@/components/marketplace/ShopHeader";
@@ -48,6 +48,8 @@ import { SHIP_TO_CHOICES, countryName } from "@/lib/listings/countries";
 import { configKey } from "@/lib/listings/configure";
 import { addCartLine, lineConfig, listedWidthCm } from "@/lib/listings/cartLine";
 import { pieceSizeCm } from "@/lib/furniture/size";
+import { useFavourites } from "@/lib/favourites";
+
 import { rankProducts, type ProductMatch } from "@/lib/matching/products";
 import { ensureShopItems } from "@/lib/furniture/shopCatalog";
 import { recentProjectThumb } from "@/lib/projectThumb";
@@ -188,11 +190,15 @@ function MarketplaceInner() {
   const [inStockOnly, setInStockOnly] = useState(false);
   const [threeDOnly, setThreeDOnly] = useState(false);
   const [madeIn, setMadeIn] = useState<"" | "saudi" | "international">("");
+  const [favOnly, setFavOnly] = useState(false);
+  const favourites = useFavourites();
+  const favIds = favOnly ? favourites.refs("product") : null;
+  const favKey = favIds ? favIds.join(",") : "";
   const [shipsTo, setShipsTo] = useState("");
   const [sort, setSort] = useState<ProductQuery["sort"]>("newest");
   const [page, setPage] = useState(1);
 
-  const filterKey = `${group}|${retailerId}|${priceBand}|${inStockOnly}|${threeDOnly}|${madeIn}|${shipsTo}|${search}|${sort}`;
+  const filterKey = `${group}|${retailerId}|${priceBand}|${inStockOnly}|${threeDOnly}|${madeIn}|${shipsTo}|${favOnly}|${favKey}|${search}|${sort}`;
   const prevFilterKeyRef = useRef(filterKey);
 
   // Data
@@ -263,6 +269,7 @@ function MarketplaceInner() {
       inStock: inStockOnly || undefined,
       madeIn: madeIn || undefined,
       shipsTo: shipsTo || undefined,
+      ids: favOnly ? favKey.split(",").filter(Boolean) : undefined,
       sort,
       page,
       limit: PAGE_SIZE,
@@ -292,7 +299,7 @@ function MarketplaceInner() {
       .finally(() => !cancelled && setLoading(false));
 
     return () => { cancelled = true; };
-  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, madeIn, shipsTo, search, sort, page, filterKey]);
+  }, [group, retailerId, priceBand, inStockOnly, threeDOnly, madeIn, shipsTo, favOnly, favKey, search, sort, page, filterKey]);
 
   // ── Room band ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -436,12 +443,12 @@ function MarketplaceInner() {
 
   const anyFilter =
     group !== "All" || retailerId !== "All" || priceBand !== "All" ||
-    inStockOnly || threeDOnly || Boolean(madeIn) || Boolean(shipsTo) || search.trim().length > 0;
+    inStockOnly || threeDOnly || Boolean(madeIn) || Boolean(shipsTo) || favOnly || search.trim().length > 0;
 
   const clearAll = () => {
     setGroup("All"); setRetailerId("All"); setPriceBand("All");
     setInStockOnly(false); setThreeDOnly(false); setSort("newest");
-    setMadeIn(""); setShipsTo("");
+    setMadeIn(""); setShipsTo(""); setFavOnly(false);
     if (search) {
       const next = new URLSearchParams(params.toString());
       next.delete("q");
@@ -680,6 +687,19 @@ function MarketplaceInner() {
                 <option key={c} value={c}>{t.shipsTo(countryName(c, isArabic ? "ar" : "en"))}</option>
               ))}
             </select>
+
+            <button
+              onClick={() => setFavOnly(v => !v)}
+              aria-pressed={favOnly}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[12.5px] transition-colors
+                ${favOnly
+                  ? "bg-[#FFF5F4] border-[#E8B4AE] text-[#B42318]"
+                  : "bg-white border-[#D5DBDA] text-[#343837] hover:bg-[#F1F4F4]"}`}
+            >
+              <Heart size={12} className={favOnly ? "fill-[#E5484D] text-[#E5484D]" : ""} />
+              {isArabic ? "المفضلة" : "Favourites"}
+              {favourites.refs("product").length > 0 && <span className="text-[11px] opacity-70">{favourites.refs("product").length}</span>}
+            </button>
 
             {[
               { on: inStockOnly, set: setInStockOnly, label: t.inStockOnly },

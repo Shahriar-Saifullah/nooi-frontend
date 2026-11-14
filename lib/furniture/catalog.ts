@@ -39,7 +39,9 @@ export interface AssetCredit {
 export type ProceduralKind =
   | "tv" | "art-abstract" | "art-lines" | "mirror-round" | "curtains" | "sconce"
   // appliances & electrical (round 2)
-  | "split-ac" | "floor-ac" | "ceiling-fan" | "water-heater" | "socket" | "switch";
+  | "split-ac" | "floor-ac" | "ceiling-fan" | "water-heater" | "socket" | "switch"
+  // structure (phase 1)
+  | "elevator";
 
 /** One concrete design the user can drag into the scene. */
 export interface CatalogItem {
@@ -456,10 +458,19 @@ export const FURNITURE_TYPES: FurnitureType[] = [
       }),
     ],
   },
+  {
+    // Lift cores, drawn in code (components/decor/WallDecor.tsx). Floor to
+    // ceiling, whatever the room's height; the doors face +z (into the room).
+    id: "elevator", name: "Elevator", category: "structure",
+    variants: [
+      v("structure", "elevator", { id: "lift-home", name: "Home Lift (3 persons)", path: "", procedural: "elevator", thumbnail: "/models/thumbs/proc_lift-home.png", size: { w: 120, d: 130, h: 280 }, color: "#d9dcdc", tags: ["elevator", "lift", "home lift", "villa", "floors"], customizable: true, mountType: "floor", fitToWallHeight: true, credit: { source: "in-house", license: "Nooi original" } }),
+      v("structure", "elevator", { id: "lift-passenger", name: "Passenger Lift (8 persons)", path: "", procedural: "elevator", thumbnail: "/models/thumbs/proc_lift-passenger.png", size: { w: 180, d: 190, h: 280 }, color: "#d9dcdc", tags: ["elevator", "lift", "passenger", "building", "apartment", "floors"], customizable: true, mountType: "floor", fitToWallHeight: true, credit: { source: "in-house", license: "Nooi original" } }),
+    ],
+  },
 
   // ══ Lighting ══════════════════════════════════════════════════════════════
   // Ceiling-mount fixtures. mountType "ceiling" anchors the model's top to
-  // WALL_H (2.8 m). Drop placement uses the ceiling raycast plane; enable
+  // the room's ceiling (its own height, default 2.8 m). Drop placement uses the ceiling raycast plane; enable
   // "Inside" mode so the ceiling is visible before placing.
   {
     id: "chandelier", name: "Chandelier", category: "lighting",

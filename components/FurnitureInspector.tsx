@@ -29,9 +29,11 @@ interface Props {
   onUseProduct?: (product: MarketplaceProduct) => Promise<boolean> | boolean;
   /** open the Array tool for this piece */
   onArray?: () => void;
+  /** hide this piece in the 3D view (show it again from Show / hide) */
+  onHide?: () => void;
 }
 
-export default function FurnitureInspector({ item, onChange, onDelete, onUseProduct, onArray }: Props) {
+export default function FurnitureInspector({ item, onChange, onDelete, onUseProduct, onArray, onHide }: Props) {
   const cat = item.modelId ? catalogById(item.modelId) : undefined;
   const customizable = cat ? cat.customizable : true;
   const sizeScale = item.sizeScale ?? 1;
@@ -58,13 +60,25 @@ export default function FurnitureInspector({ item, onChange, onDelete, onUseProd
             </div>
           )}
         </div>
-        <button
-          onClick={onDelete}
-          className="text-[11px] px-2 py-1 rounded-md bg-red-50 text-red-600
-                     border border-red-100 hover:bg-red-100"
-        >
-          Delete
-        </button>
+        <span className="flex items-center gap-1.5">
+          {onHide && (
+            <button
+              onClick={onHide}
+              title="Hide in the 3D view. Show it again from Show / hide."
+              className="text-[11px] px-2 py-1 rounded-md bg-white text-gray-600
+                         border border-gray-200 hover:border-gray-300"
+            >
+              Hide
+            </button>
+          )}
+          <button
+            onClick={onDelete}
+            className="text-[11px] px-2 py-1 rounded-md bg-red-50 text-red-600
+                       border border-red-100 hover:bg-red-100"
+          >
+            Delete
+          </button>
+        </span>
       </div>
 
       {cat?.shop && (

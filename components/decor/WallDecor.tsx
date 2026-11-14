@@ -147,12 +147,15 @@ export default function WallDecor({ kind, w, h, d, color, glow = 1 }: Props) {
           {/* body */}
           <mesh castShadow receiveShadow>
             <boxGeometry args={[w, h, d]} />
-            <meshStandardMaterial color={color ?? "#141518"} roughness={0.45} metalness={0.3} />
+            <meshStandardMaterial color={color ?? "#141518"} roughness={0.4} metalness={0.2} />
           </mesh>
           {/* glass: near-black and glossy, so it picks up the room's light */}
           <mesh position={[0, 0, d / 2 + 0.001]}>
             <planeGeometry args={[w - bezel * 2, h - bezel * 2]} />
-            <meshStandardMaterial color="#07080a" roughness={0.08} metalness={0.6} />
+            {/* Dark slate, not black: a switched-off screen still shows the
+                room in it. The clear coat is the glass's reflection. */}
+            <meshPhysicalMaterial name="nooi-screen" color="#23272c" roughness={0.4} metalness={0}
+              clearcoat={1} clearcoatRoughness={0.04} envMapIntensity={1.4} />
           </mesh>
         </group>
       );
@@ -437,6 +440,52 @@ export default function WallDecor({ kind, w, h, d, color, glow = 1 }: Props) {
               </group>
             );
           })}
+        </group>
+      );
+    }
+
+    case "elevator": {
+      // a lift core: the shaft, a steel portal, two sliding doors, the call
+      // buttons beside them and the floor display above
+      const shaft = color ?? "#d9dcdc";
+      const doorH = Math.min(2.1, h - 0.35);
+      const portalW = Math.min(w * 0.78, 1.1);
+      const y0 = -h / 2;
+      const front = d / 2;
+      return (
+        <group>
+          <mesh castShadow receiveShadow>
+            <boxGeometry args={[w, h, d]} />
+            <meshStandardMaterial color={shaft} roughness={0.8} />
+          </mesh>
+          {/* portal */}
+          <mesh position={[0, y0 + (doorH + 0.08) / 2, front + 0.012]}>
+            <boxGeometry args={[portalW + 0.12, doorH + 0.08, 0.024]} />
+            <meshStandardMaterial color="#9aa1a5" roughness={0.35} metalness={0.45} />
+          </mesh>
+          {/* doors, with the seam between them */}
+          {[-1, 1].map(s => (
+            <mesh key={s} position={[s * (portalW / 4 + 0.003), y0 + doorH / 2, front + 0.027]}>
+              <boxGeometry args={[portalW / 2 - 0.006, doorH, 0.01]} />
+              <meshStandardMaterial color="#c9ced1" roughness={0.35} metalness={0.45} />
+            </mesh>
+          ))}
+          {/* call buttons */}
+          <mesh position={[portalW / 2 + 0.16, y0 + 1.1, front + 0.008]}>
+            <boxGeometry args={[0.07, 0.16, 0.012]} />
+            <meshStandardMaterial color="#8f969a" roughness={0.3} metalness={0.8} />
+          </mesh>
+          {[0.03, -0.03].map((dy, i) => (
+            <mesh key={i} position={[portalW / 2 + 0.16, y0 + 1.1 + dy, front + 0.016]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.012, 0.012, 0.006, 16]} />
+              <meshStandardMaterial color="#f4f4f2" emissive="#9fd6ff" emissiveIntensity={0.4 * glow} />
+            </mesh>
+          ))}
+          {/* floor display */}
+          <mesh position={[0, y0 + doorH + 0.2, front + 0.006]}>
+            <planeGeometry args={[0.22, 0.08]} />
+            <meshStandardMaterial color="#141a1f" emissive="#ff8a3d" emissiveIntensity={0.35 * glow} />
+          </mesh>
         </group>
       );
     }

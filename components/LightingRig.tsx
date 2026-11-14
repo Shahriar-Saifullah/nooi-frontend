@@ -51,6 +51,9 @@ const POOL_SIZE = 8;
 /** How often the pool is reassigned to the nearest lamps. */
 const REASSIGN_S = 0.2;
 
+/** Share of the sun that comes back up off the floor (see the rig). */
+const BOUNCE = 0.16;
+
 /** Environment (IBL) strength at brightness 1. */
 const ENV_INTENSITY = 0.6;
 
@@ -135,6 +138,8 @@ interface PlacedLike {
 interface Props {
   furniture: PlacedLike[];
   wallHeight: number;
+  /** ceiling height over a point, when rooms have their own (lib/walls/heights) */
+  heightAt?: (x: number, z: number) => number;
   settings?: LightingSettings;
   /** Ceiling mounts only render inside; their lights should match. */
   insideMode?: boolean;
@@ -156,26 +161,85 @@ function temperature(warmth: number): THREE.Color {
 
 const ZENITH = [0.4, 0.56, 0.78] as const;
 const HORIZON = [0.95, 0.84, 0.66] as const;
-const GROUND = [0.38, 0.35, 0.3] as const;
+// Light coming back up off a pale floor. Was 0.38 grey: the ceiling, lit
+// almost only from below, came out a muddy taupe.
+const GROUND = [0.5, 0.46, 0.4] as const;
+
+/**
+ * Soft "windows" in the environment: bright, warm-white panels round the
+ * horizon and a broad one overhead.
+ *
+ * A plain gradient lights a room evenly but gives glossy things nothing to
+ * reflect — a TV, a lacquered cabinet, polished tile or chrome all came out
+ * as flat dark colour, which is most of what made the view look like a
+ * diagram. Panels give every gloss a highlight to catch. (Studio and
+ * archviz renders use the same trick: area lights seen in reflection.)
+ */
+const PANELS: { az: number; el: number; w: number; h: number; v: number }[] = [
+  { az: 0.10, el: 0.18, w: 0.10, h: 0.22, v: 2.6 },
+  { az: 0.42, el: 0.20, w: 0.14, h: 0.24, v: 2.2 },
+  { az: 0.70, el: 0.16, w: 0.08, h: 0.20, v: 1.8 },
+  { az: 0.25, el: 0.85, w: 0.60, h: 0.12, v: 1.4 },
+];
+
+/** Smooth 0…1 falloff at a panel's edge, so highlights are soft, not boxy. */
+const soft = (d: number, half: number) => {
+  const k = 1 - Math.max(0, Math.min(1, (Math.abs(d) - half * 0.7) / (half * 0.6)));
+  return k * k * (3 - 2 * k);
+};
+
+function skyBase(lat: number): [number, number, number] {
+  if (lat <= 0) {
+    const k = 1 + lat * 0.35;
+    return [GROUND[0] * k, GROUND[1] * k, GROUND[2] * k];
+  }
+  const t = lat ** 0.65;
+  return [
+    HORIZON[0] + (ZENITH[0] - HORIZON[0]) * t,
+    HORIZON[1] + (ZENITH[1] - HORIZON[1]) * t,
+    HORIZON[2] + (ZENITH[2] - HORIZON[2]) * t,
+  ];
+}
 
 function buildGradientSky(): THREE.DataTexture {
-  const W = 64, H = 32;
+  const W = 256, H = 128;
   const data = new Float32Array(W * H * 4);
+  // first pass: the plain gradient's average, so adding the panels can be
+  // balanced out — they are for reflections, not to brighten the room
+  let base = 0, withPanels = 0;
+  const rows: number[][] = [];
   for (let y = 0; y < H; y++) {
-    const lat = ((y + 0.5) / H) * 2 - 1; // -1 straight down … +1 straight up
-    let r: number, g: number, b: number;
-    if (lat <= 0) {
-      const k = 1 + lat * 0.35;
-      r = GROUND[0] * k; g = GROUND[1] * k; b = GROUND[2] * k;
-    } else {
-      const t = lat ** 0.65;
-      r = HORIZON[0] + (ZENITH[0] - HORIZON[0]) * t;
-      g = HORIZON[1] + (ZENITH[1] - HORIZON[1]) * t;
-      b = HORIZON[2] + (ZENITH[2] - HORIZON[2]) * t;
-    }
+    const v = (y + 0.5) / H;
+    const lat = v * 2 - 1; // -1 straight down … +1 straight up
+    const [r, g, b] = skyBase(lat);
+    const wgt = Math.cos(lat * Math.PI / 2); // equirect rows shrink to the poles
+    const row: number[] = [];
     for (let x = 0; x < W; x++) {
+      const u = (x + 0.5) / W;
+      let p = 0;
+      for (const P of PANELS) {
+        let du = u - P.az; du -= Math.round(du);
+        p = Math.max(p, soft(du, P.w / 2) * soft(v - 0.5 - P.el / 2, P.h / 2) * P.v);
+      }
+      row.push(p);
+      const lum = (r + g + b) / 3;
+      base += lum * wgt;
+      withPanels += Math.max(lum, p) * wgt;
+    }
+    rows.push(row);
+  }
+  const k = base / withPanels; // keep the room's overall light where it was
+  for (let y = 0; y < H; y++) {
+    const lat = ((y + 0.5) / H) * 2 - 1;
+    const [r, g, b] = skyBase(lat);
+    for (let x = 0; x < W; x++) {
+      const p = rows[y][x];
       const i = (y * W + x) * 4;
-      data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 1;
+      // panels are a warm white
+      data[i] = Math.max(r, p * 1.0) * k;
+      data[i + 1] = Math.max(g, p * 0.97) * k;
+      data[i + 2] = Math.max(b, p * 0.9) * k;
+      data[i + 3] = 1;
     }
   }
   const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
@@ -221,7 +285,7 @@ function SceneEnvironment({ intensity }: { intensity: number }) {
 // ── Rig ─────────────────────────────────────────────────────────────────────
 
 export default function LightingRig({
-  furniture, wallHeight, settings = DEFAULT_LIGHTING, insideMode = false,
+  furniture, wallHeight, heightAt, settings = DEFAULT_LIGHTING, insideMode = false,
   world, roomCentres = [],
 }: Props) {
   const b = Math.max(0.1, settings.brightness);
@@ -242,7 +306,7 @@ export default function LightingRig({
         // near the top of a standing lamp. A light at the model's origin is
         // inside its own base and lights the floor it stands on.
         const y = ceiling
-          ? wallHeight - 0.35
+          ? (heightAt?.(f.position[0], f.position[2]) ?? wallHeight) - 0.35
           : (f.position[1] ?? 0) + ((f.height ?? 150) / 100) * 0.85;
         return {
           id: f.id,
@@ -264,13 +328,13 @@ export default function LightingRig({
       .filter(([x, z]) => !lamps.some(l => Math.hypot(l.pos.x - x, l.pos.z - z) < 2))
       .map(([x, z], i) => ({
         id: `room-light-${i}`,
-        pos: new THREE.Vector3(x, wallHeight - 0.15, z),
+        pos: new THREE.Vector3(x, (heightAt?.(x, z) ?? wallHeight) - 0.15, z),
         ceiling: true,
         virtual: true,
         level: 1,
       }));
     return [...lamps, ...virtual];
-  }, [furniture, insideMode, wallHeight, preset.roomLights, roomCentres]);
+  }, [furniture, insideMode, wallHeight, heightAt, preset.roomLights, roomCentres]);
 
   // ── Pool assignment ──
   const poolRefs = useRef<Array<THREE.PointLight | null>>([]);
@@ -378,6 +442,18 @@ export default function LightingRig({
         position={[-world.totalW, world.maxDim, -world.totalD]}
         color={preset.fill.color}
         intensity={preset.fill.intensity * b}
+      />
+
+      {/*
+        Floor bounce: daylight that lands on the floor and lights the ceiling
+        and the undersides of things. Pointing straight up, no shadows. Without
+        it a ceiling — lit only by the dim lower half of the sky — came out a
+        muddy taupe that no real room has. Follows the sun, so night stays dark.
+      */}
+      <directionalLight
+        position={[0, -world.maxDim, 0]}
+        color="#f4e8d6"
+        intensity={preset.sun.intensity * BOUNCE * b}
       />
 
       {/*

@@ -20,6 +20,7 @@
 import React from "react";
 import { ShoppingCart, Plus, Minus, Trash2, Box } from "lucide-react";
 import type { MarketplaceProduct } from "@/lib/api/marketplace";
+import FavouriteButton from "@/components/FavouriteButton";
 
 interface Props {
   product: MarketplaceProduct;
@@ -86,6 +87,8 @@ export default function ProductCard({
           )}
         </button>
 
+        <FavouriteButton fav={{ kind: "product", ref: product.id }} label={false} size={14}
+          className="absolute top-2 end-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-[#343837] shadow-sm hover:bg-white" />
         <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
           {product.is_3d && (
             <span className="px-2 py-1 rounded-full bg-[#F3FEFD] border border-[#87DDD7] text-[10.5px] font-medium text-[#004643]">

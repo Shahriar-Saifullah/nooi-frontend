@@ -131,6 +131,8 @@ export interface ProductQuery {
   maxPrice?: number;
   inStock?: boolean;
   madeIn?: Origin;
+  /** only these products (favourites) */
+  ids?: string[];
   /** ISO country code */
   shipsTo?: string;
   sort?: "price_asc" | "price_desc" | "lead_time" | "newest";
@@ -247,6 +249,7 @@ export async function getProducts(q: ProductQuery = {}): Promise<ProductPage> {
   if (q.maxPrice != null) p.set("max_price", String(q.maxPrice));
   if (q.inStock)          p.set("in_stock", "true");
   if (q.madeIn)           p.set("made_in", q.madeIn);
+  if (q.ids)              p.set("ids", q.ids.join(",") || "none");
   if (q.shipsTo)          p.set("ships_to", q.shipsTo);
   if (q.sort && q.sort !== "newest") p.set("sort", q.sort);
   p.set("page",  String(q.page  ?? 1));

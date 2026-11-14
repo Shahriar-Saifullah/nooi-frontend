@@ -117,6 +117,10 @@ export function proceduralParts(kind: string, hex: string): FinishPart[] {
     ];
     case "socket":
     case "switch": return [{ material: "Plastic plate", colour: c(hex), share: 1 }];
+    case "elevator": return [
+      { material: "Shaft enclosure", colour: c(hex), share: 0.8 },
+      { material: "Stainless steel doors", colour: c("#c3c8cb"), share: 0.2 },
+    ];
     default: return [{ material: "Painted finish", colour: c(hex), share: 1 }];
   }
 }
