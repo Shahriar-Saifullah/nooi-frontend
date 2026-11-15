@@ -310,6 +310,8 @@ const WALL_H = DEFAULT_CEILING_M;
 // Joinery (real metres; the trims are thin enough that the plan's
 // horizontal scale makes no visible difference).
 const TRIM_COLOR = "#f6f3ee";
+/** The editor's selection tint on walls, floors and doors (emissive). */
+const SELECTION_GLOW = 0xc7de7d;
 const SKIRT_H = 0.09;       // skirting board height
 const SKIRT_PROUD = 0.012;  // how far it stands off the wall face
 const CASING_W = 0.07;      // door casing width
@@ -1273,6 +1275,8 @@ function RoomFloor({
       >
         <shapeGeometry args={[shape]} />
         <meshStandardMaterial
+          // the photo render worker finds floors by this name
+          name="nooi-floor"
           // Same reason as the walls: swapping `map` on a live material needs
           // a shader recompile that R3F will not trigger, so a changing key
           // forces a fresh one instead.
@@ -2905,7 +2909,23 @@ function ExportBridge({
               hidden.push(o);
             }
           });
-          const restore = () => hidden.forEach((o) => { o.visible = true; });
+          // The selection glow (a selected floor, wall or door is tinted
+          // green) is editor feedback, not part of the design: switch it off
+          // for the export, or it ends up in the file — and in photo renders.
+          const glowing: [THREE.MeshStandardMaterial, number][] = [];
+          scene.traverse((o) => {
+            const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[] | undefined;
+            for (const mat of Array.isArray(m) ? m : m ? [m] : []) {
+              if (mat?.emissive && mat.emissiveIntensity > 0 && mat.emissive.getHex() === SELECTION_GLOW) {
+                glowing.push([mat, mat.emissiveIntensity]);
+                mat.emissiveIntensity = 0;
+              }
+            }
+          });
+          const restore = () => {
+            hidden.forEach((o) => { o.visible = true; });
+            glowing.forEach(([mat, v]) => { mat.emissiveIntensity = v; });
+          };
           const exporter = new GLTFExporter();
           exporter.parse(
             scene,
