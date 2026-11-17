@@ -37,6 +37,11 @@ import {
 import { DEFAULT_CEILING_M, FLAT_HEIGHTS, buildHeights, cleanCeiling, type HeightRoom, type SceneHeights } from "@/lib/walls/heights";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { buildRenderSpec, type RenderQuality, type RenderSpec } from "@/lib/render/sceneSpec";
+import { buildTour } from "@/lib/tour/graph";
+import { cleanCeilingSpec } from "@/lib/walls/ceiling";
+import CeilingDesign from "@/components/decor/CeilingDesign";
+import WallPanelling from "@/components/decor/WallPanelling";
+import { cleanPanelSpec, type PanelSpec } from "@/lib/walls/panelling";
 import type { GridRoom } from "@/components/RoomLayoutGrid";
 import { catalogById, MATERIAL_PRESETS } from "@/lib/furniture/catalog";
 import { pieceSizeCm, drawnSizeCm, naturalSizeCm } from "@/lib/furniture/size";
@@ -189,6 +194,9 @@ export interface ThreeSceneHandle {
   exportGlb: () => Promise<Blob | null>;
   /** camera, sun, lamps and size for a photo render of the current view */
   renderSpec: (quality: RenderQuality) => RenderSpec | null;
+  /** where each room's 360° panorama is taken from, and the doors between
+   *  rooms (lib/tour/graph). Only the given rooms, if any are given. */
+  tourLayout: (roomIds?: string[]) => ReturnType<typeof buildTour>;
   /** get the HTML canvas element for recording */
   getCanvasElement: () => HTMLCanvasElement | null;
   /** smoothly move the camera to a preset view */
@@ -239,6 +247,8 @@ interface ThreeSceneV2Props {
   wallColors?: Record<string, string>;
   /** per-side wall surface: "wallKey:A" | "wallKey:B" → surface id */
   wallSurfaces?: Record<string, string>;
+  /** per-side panelling: "wallKey:A" | "wallKey:B" → { style, color? } (lib/walls/panelling) */
+  wallPanels?: Record<string, unknown>;
   /** per-room floor surface: room id → surface id */
   floorSurfaces?: Record<string, string>;
   selectedFloorRoomId?: string | null;
@@ -309,6 +319,14 @@ function ArrayGhosts({ ghosts }: { ghosts: ArrayGhost[] }) {
 const WALL_H = DEFAULT_CEILING_M;
 // Joinery (real metres; the trims are thin enough that the plan's
 // horizontal scale makes no visible difference).
+/**
+ * Surface normal maps are OpenGL-style (the glTF convention). three.js reads
+ * them that way on a mesh without tangents only with the green channel
+ * flipped — which is exactly what GLTFLoader does on import. It also matters
+ * for export: without it, GLTFExporter bakes a flipped copy of the normal map
+ * for EVERY wall segment, and a four-wall room exported at over 100 MB.
+ */
+const OPENGL_NORMALS = new THREE.Vector2(1, -1);
 const TRIM_COLOR = "#f6f3ee";
 /** The editor's selection tint on walls, floors and doors (emissive). */
 const SELECTION_GLOW = 0xc7de7d;
@@ -462,9 +480,11 @@ function SwingDoor({
 
 function WallWithOpenings({
   wall, cuts, world, wallKey, colors, surfaces, selectedSide, onSelect,
-  doorFinishes, selectedDoorKey, onDoorSelect, wallH = WALL_H,
+  doorFinishes, selectedDoorKey, onDoorSelect, wallH = WALL_H, panels,
 }: {
   wall: VWall; cuts: Cut[]; world: World;
+  /** panelling on each side (lib/walls/panelling) */
+  panels?: { A?: PanelSpec | null; B?: PanelSpec | null };
   /** this wall's height (the taller of the rooms either side) */
   wallH?: number;
   doorFinishes?: Record<string, string>;
@@ -565,6 +585,14 @@ function WallWithOpenings({
                   attach={`material-${fi}`}
                   map={tex?.map}
                   normalMap={tex?.normalMap}
+                  normalScale={OPENGL_NORMALS}
+                  roughnessMap={tex?.roughnessMap}
+                  // The same texture as the "metalness" map, at metalness 0, so
+                  // it changes nothing on screen. It's for the GLB export: given
+                  // two separate maps, the exporter bakes a new combined image
+                  // for every wall segment (a 4-wall room came out at 115 MB).
+                  // Given one, it writes the image once and shares it.
+                  metalnessMap={tex?.roughnessMap}
                   color={tex ? (surf?.color ?? "#ffffff") : (painted ?? BASE_WALL)}
                   roughness={surf?.roughness ?? 0.9}
                   emissive={isSel ? "#c7de7d" : "#000000"}
@@ -612,6 +640,25 @@ function WallWithOpenings({
     <group>
       {solids.map(([f, tt], i) => box(f, tt, 0, wallH, `s${i}`, null, true))}
       {solids.map(([f, tt], i) => trim(f, tt, 0, SKIRT_H, SKIRT_PROUD, `sk${i}`))}
+      {(["A", "B"] as const).map(side => {
+        const spec = panels?.[side];
+        if (!spec) return null;
+        // the visible face: the ends tuck into the corners by half a thickness
+        const lo = a0 + t, hi = a1 - t;
+        const stretches: [number, number, number][] = [
+          ...solids.map(([f, tt]) => [Math.max(f, lo), Math.min(tt, hi), wallH] as [number, number, number]),
+          // under each window, the panelling's lower part carries on
+          ...clipped.filter(cu => cu.type === "window").map(cu => {
+            const span = windowSpanY(isWindowStyle(cu.style) ? cu.style : DEFAULT_WINDOW_STYLE, SILL_H, DOOR_H, wallH);
+            return [Math.max(cu.start, lo), Math.min(cu.end, hi), span.sill] as [number, number, number];
+          }),
+        ].filter(([f, tt]) => tt > f);
+        return (
+          <WallPanelling key={`pn-${side}`} spec={spec} stretches={stretches} wallH={wallH}
+            horiz={horiz} c={c} t={t} side={side} scale={world.frame.visualScale}
+            color={spec.color ?? colors?.[side] ?? "#f4f1ec"} />
+        );
+      })}
       {clipped.map((cut, i) => {
         const cw = cut.end - cut.start;
         if (cut.type === "door") {
@@ -983,7 +1030,7 @@ function WallMountedItem({
       onClick={(e) => e.stopPropagation()}
     >
       <WallDecor
-        kind={cat.procedural} w={size.w} h={size.h} d={size.d} color={item.color}
+        kind={cat.procedural} w={size.w} h={size.h} d={size.d} color={item.color} variant={cat.id}
         glow={Math.max(0, Math.min(1, item.lightLevel ?? 1))}
       />
     </group>
@@ -1283,6 +1330,14 @@ function RoomFloor({
           key={surf?.id ?? "base"}
           map={tex?.map}
           normalMap={tex?.normalMap}
+          normalScale={OPENGL_NORMALS}
+          roughnessMap={tex?.roughnessMap}
+          // The same texture as the "metalness" map, at metalness 0, so
+          // it changes nothing on screen. It's for the GLB export: given
+          // two separate maps, the exporter bakes a new combined image
+          // for every wall segment (a 4-wall room came out at 115 MB).
+          // Given one, it writes the image once and shares it.
+          metalnessMap={tex?.roughnessMap}
           color={tex ? (surf?.color ?? "#ffffff") : "#d9c7a7"}
           // Floors never go glossier than 0.38. The tile finishes are 0.15
           // (mirror gloss), and with no reflected environment to show, the
@@ -1302,6 +1357,8 @@ function RoomFloor({
 // ─── Roof / Ceiling ─────────────────────────────────────────────────────────
 
 function RoomRoof({ room, world, h = WALL_H }: { room: PolyRoom; world: World; h?: number }) {
+  const ceiling = cleanCeilingSpec((room as { ceiling?: unknown }).ceiling);
+  const poly = useMemo(() => roomPolysWorld([room], world)[0] ?? null, [room, world]);
   const shape = useMemo(() => {
     const s = new THREE.Shape();
     if (room.polygon && room.polygon.length >= 3) {
@@ -1356,11 +1413,21 @@ function RoomRoof({ room, world, h = WALL_H }: { room: PolyRoom; world: World; h
           side={THREE.DoubleSide}
         />
       </mesh>
+      {/* stepped border with an LED cove, coffers, or beams */}
+      {ceiling && poly && <CeilingDesign poly={poly} spec={ceiling} scale={world.frame.visualScale} />}
     </group>
   );
 }
 
 // ─── Furniture ──────────────────────────────────────────────────────────────
+
+/**
+ * Each mesh's own material, before any colour override. Kept here and NOT in
+ * `userData`: the GLB exporter writes userData into the file, and a whole
+ * material object serialised as JSON made one pair of cushions a 75 MB scene
+ * (a furnished room never finished exporting).
+ */
+const ORIGINAL_MATERIAL = new WeakMap<THREE.Object3D, THREE.Material | THREE.Material[]>();
 
 // Apply color/material overrides + selection highlight to a cloned model
 function applyOverrides(
@@ -1372,9 +1439,8 @@ function applyOverrides(
     if (!n.isMesh) return;
     n.castShadow = true;
     n.receiveShadow = true;
-    if (!n.userData._origMat) n.userData._origMat = n.material;
-    const base: THREE.MeshStandardMaterial =
-      (n.userData._origMat as THREE.MeshStandardMaterial);
+    if (!ORIGINAL_MATERIAL.has(n)) ORIGINAL_MATERIAL.set(n, n.material);
+    const base = ORIGINAL_MATERIAL.get(n) as THREE.MeshStandardMaterial;
     // only override when the user asked for it, else keep the model's material
     // Selection is shown by SelectionBrackets now, not by tinting the model:
     // a green-washed sofa hid the very colour and fabric being chosen.
@@ -1497,13 +1563,15 @@ function GltfModel({
   return (
     <group
       ref={group}
-      // position[1] is the SUPPORT height for floor items (0 = floor, >0 =
-      // resting on another item's top). Ceiling/wall mounts already have their
-      // height baked into fit.yOffset, so adding it there would push them
-      // through the roof.
+      // position[1] is the height of the item's BOTTOM: 0 / a table top for
+      // floor items, the hanging height for wall items (the same rule the
+      // drawn-in-code wall decor uses). Ceiling mounts have their height
+      // baked into fit.yOffset, so adding it would push them through the roof.
+      // (Wall-hung models used to land on the floor: no model was wall-hung
+      // until the Poly Haven mirrors and frames.)
       position={[
         item.position[0],
-        (fit.mountType !== "floor" ? 0 : (item.position[1] ?? 0)) + fit.yOffset,
+        (fit.mountType === "ceiling" ? 0 : (item.position[1] ?? 0)) + fit.yOffset,
         item.position[2],
       ]}
       rotation={[0, item.rotation, 0]}
@@ -2949,7 +3017,7 @@ function ExportBridge({
 function SceneContent({
   rooms, rfWalls, openings, furniture, world,
   onFurnitureSelect, onFurnitureMove, onFurnitureRotate, onFurnitureToggleLight, selectedFurnitureId,
-  wallColors, wallSurfaces, selectedWallSide, onWallSelect,
+  wallColors, wallSurfaces, wallPanels, selectedWallSide, onWallSelect,
   floorSurfaces, selectedFloorRoomId, onFloorSelect,
   doorFinishes, selectedDoorKey, onDoorSelect, onDoorKeys,
   insideMode = false,
@@ -2971,6 +3039,7 @@ function SceneContent({
   selectedFurnitureId?: string | null;
   wallColors?: Record<string, string>;
   wallSurfaces?: Record<string, string>;
+  wallPanels?: Record<string, unknown>;
   selectedWallSide?: string | null;
   onWallSelect?: (sel: WallSideSelection | null) => void;
   floorSurfaces?: Record<string, string>;
@@ -3324,6 +3393,10 @@ function SceneContent({
               A: wallSurfaces?.[`${wallKey}:A`],
               B: wallSurfaces?.[`${wallKey}:B`],
             }}
+            panels={{
+              A: cleanPanelSpec(wallPanels?.[`${wallKey}:A`]),
+              B: cleanPanelSpec(wallPanels?.[`${wallKey}:B`]),
+            }}
             selectedSide={
               selectedWallSide && selectedWallSide.startsWith(`${wallKey}:`)
                 ? (selectedWallSide.endsWith(":A") ? "A" : "B")
@@ -3495,6 +3568,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   furniture = [],
   wallColors,
   wallSurfaces,
+  wallPanels,
   floorSurfaces,
   selectedFloorRoomId = null,
   onFloorSelect,
@@ -3582,6 +3656,11 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
   );
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
 
+  const tourInputs = useRef({ rooms, roomPolys, openings, rfWalls, worldWallsRoot, world, heights });
+  useEffect(() => {
+    tourInputs.current = { rooms, roomPolys, openings, rfWalls, worldWallsRoot, world, heights };
+  }, [rooms, roomPolys, openings, rfWalls, worldWallsRoot, world, heights]);
+
   useImperativeHandle(ref, () => ({
     floorPointFromNdc: (nx: number, ny: number, mountType?: "floor" | "ceiling") =>
       raycastFn.current ? raycastFn.current(nx, ny, mountType) : null,
@@ -3597,6 +3676,33 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
       exportApi.current ? exportApi.current.exportGlb() : null,
     renderSpec: (quality: RenderQuality) =>
       exportApi.current ? exportApi.current.renderSpec(quality) : null,
+    tourLayout: (roomIds?: string[]) => {
+      // read through a ref: this handle is made once, the plan changes
+      const { rooms, roomPolys, openings, rfWalls, worldWallsRoot, world, heights } = tourInputs.current;
+      const want = roomIds ? new Set(roomIds) : null;
+      const vs = world.frame.visualScale;
+      const tourRooms = rooms
+        .map((r, i) => ({ id: String(r.id), name: r.name || `Room ${i + 1}`, poly: roomPolys[i] }))
+        .filter(r => r.poly && (!want || want.has(r.id)));
+      const size = { totalW: world.totalW, totalD: world.totalD };
+      const doors = openings
+        .filter(op => op.type === "door")
+        .flatMap(op => {
+          const idx = wallIndexOf(op as PlanOpening, rfWalls, size);
+          const w = worldWallsRoot[idx];
+          if (idx < 0 || !w) return [];
+          const { centre } = openingSpan(op as PlanOpening, size);
+          const horiz = Math.abs(w.x2 - w.x1) >= Math.abs(w.z2 - w.z1);
+          const c = horiz ? (w.z1 + w.z2) / 2 : (w.x1 + w.x2) / 2;
+          return [{ x: horiz ? centre : c, z: horiz ? c : centre, reach: w.thickness / 2 + 0.5 * vs }];
+        });
+      return buildTour(tourRooms, doors, {
+        // eye height, or lower under a low ceiling
+        eyeHeight: (x, z) => Math.min(1.55, heights.at(x, z) - 0.45),
+        minArea: 1.5 * vs * vs,
+        wallTol: 0.4 * vs,
+      });
+    },
     getCanvasElement: () => canvasElementRef.current,
     getCamera: () => exportApi.current ? exportApi.current.getCamera() : null,
     setCameraView: (view: CameraViewPreset) => {
@@ -3721,6 +3827,7 @@ const ThreeSceneV2 = forwardRef<ThreeSceneHandle, ThreeSceneV2Props>(function Th
           selectedFurnitureId={selectedFurnitureId}
           wallColors={wallColors}
           wallSurfaces={wallSurfaces}
+          wallPanels={wallPanels}
           floorSurfaces={floorSurfaces}
           selectedFloorRoomId={selectedFloorRoomId}
           onFloorSelect={onFloorSelect}

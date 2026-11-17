@@ -94,6 +94,9 @@ function cloneFor(url: string, repeatX: number, repeatY: number, srgb: boolean):
   // tiny mip and the pattern shimmers. Both renderers clamp this to what the
   // GPU supports; 16 is the common maximum and costs little.
   c.anisotropy = 16;
+  // GLB export re-encodes images; without this it writes PNG, which is 3–5×
+  // the size of the JPEG we shipped (a furnished room went over 100 MB).
+  if (/\.jpe?g$/i.test(url)) c.userData.mimeType = "image/jpeg";
   if (!entry.loaded) {
     entry.clones.push(c);          // image + upload flag set when it arrives
   }
@@ -109,7 +112,7 @@ export function getFaceTextures(
   surface: WallSurface,
   wallLenM: number,
   wallHeightM: number,
-): { map: THREE.Texture; normalMap?: THREE.Texture } {
+): { map: THREE.Texture; normalMap?: THREE.Texture; roughnessMap?: THREE.Texture } {
   const key = `${surface.id}|${wallLenM.toFixed(2)}|${wallHeightM.toFixed(2)}`;
   const hit = faceCache.get(key);
   if (hit) return hit;
@@ -122,7 +125,13 @@ export function getFaceTextures(
     ? cloneFor(surface.normalMap, repeatX, repeatY, false)  // normals are data, not colour
     : undefined;
 
-  const entry = { map, normalMap };
+  // where the surface is shinier or duller: polished stone vs its veins,
+  // tile vs grout, wood grain. Data, not colour.
+  const roughnessMap = surface.roughnessMap
+    ? cloneFor(surface.roughnessMap, repeatX, repeatY, false)
+    : undefined;
+
+  const entry = { map, normalMap, roughnessMap };
   faceCache.set(key, entry);
   return entry;
 }
