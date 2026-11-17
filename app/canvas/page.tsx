@@ -55,6 +55,9 @@ import { useRendererBackend } from "@/lib/three/rendererBackend";
 import { capturePanoPair } from "@/lib/panoTest";
 import { useProjectStore } from "@/lib/store";
 import PhotoRenderButton from "@/components/PhotoRenderButton";
+import TourButton from "@/components/tour/TourButton";
+import { PANEL_STYLES, cleanPanelSpec, type PanelSpec, type PanelStyle } from "@/lib/walls/panelling";
+import type { CeilingSpec } from "@/lib/walls/ceiling";
 import { listRenders } from "@/lib/api/renders";
 import { getProject, saveFurniture, toggleShare, aiFurnish, renderScene, saveDimensions, saveRooms, saveWalls, saveThumbnail } from "@/lib/api/projects";
 import { rememberProjectThumb } from "@/lib/projectThumb";
@@ -105,7 +108,7 @@ const ThreeSceneV2 = dynamic(() => import("@/components/ThreeSceneV2"), {
 const FALLBACK_COLORS = ["#c3f4f0", "#b9eac5", "#87ddd7", "#f7dfad", "#d5dbda", "#ffc9c0"];
 
 function toGridRoom(room: any, index: number): GridRoom & {
-  width?: number; length?: number; height?: number;
+  width?: number; length?: number; height?: number; ceiling?: unknown;
 } {
   return {
     id: room.id, name: room.name,
@@ -117,6 +120,9 @@ function toGridRoom(room: any, index: number): GridRoom & {
     // could not be edited after the plan was analysed. They drive the whole
     // world scale, so they have to survive into the canvas.
     width: room.width, length: room.length, height: room.height,
+    // the ceiling design (lib/walls/ceiling) — dropped here, it would vanish
+    // on the next reload exactly as the measurements once did
+    ...(room.ceiling ? { ceiling: room.ceiling } : {}),
   };
 }
 
@@ -268,6 +274,10 @@ export default function CanvasPage() {
           }
           const savedHidden = (p.room_data as { hidden?: unknown } | undefined)?.hidden;
           if (savedHidden) setHidden(cleanHidden(savedHidden));
+          const savedPanels = (p.room_data as { wall_panels?: Record<string, unknown> } | undefined)?.wall_panels;
+          setWallPanels(Object.fromEntries(Object.entries(savedPanels ?? {})
+            .map(([k, v]) => [k, cleanPanelSpec(v)] as const)
+            .filter((e): e is readonly [string, PanelSpec] => !!e[1])));
           const savedKitchen = (p.room_data as any)?.kitchen as KitchenData | undefined;
           if (savedKitchen && Array.isArray(savedKitchen.runs)) {
             setKitchen({ runs: savedKitchen.runs, style: { ...DEFAULT_KITCHEN_STYLE, ...(savedKitchen.style ?? {}) } });
@@ -510,6 +520,8 @@ export default function CanvasPage() {
   const [wallColors, setWallColors] = useState<Record<string, string>>({});
   const [selectedWall, setSelectedWall] = useState<{ key: string; side: "A" | "B" } | null>(null);
   const [wallSurfaces, setWallSurfaces] = useState<Record<string, string>>({});
+  // panelling per wall side (lib/walls/panelling), saved with the project
+  const [wallPanels, setWallPanels] = useState<Record<string, PanelSpec>>({});
   const [doorFinishes, setDoorFinishes] = useState<Record<string, string>>({});
   // Kitchen builder: cabinet runs along walls (lib/kitchen). `kitchenLoaded`
   // keeps an early save from wiping a kitchen that hasn't loaded yet.
@@ -521,7 +533,7 @@ export default function CanvasPage() {
   const [selectedDoor, setSelectedDoor] = useState<string | null>(null);
   // door keys as reported by the 3D scene — authoritative
   const [doorKeys, setDoorKeys] = useState<string[]>([]);
-  const [wallTab, setWallTab] = useState<"paint" | "surface">("paint");
+  const [wallTab, setWallTab] = useState<"paint" | "surface" | "panelling">("paint");
   const [surfaceCat, setSurfaceCat] = useState<SurfaceCategory | "all">("all");
   const wallKeyOf = (w: { key: string; side: "A" | "B" }) => `${w.key}:${w.side}`;
 
@@ -542,11 +554,11 @@ export default function CanvasPage() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveFurniture(currentProject.id, placedFurniture as any, wallColors, wallSurfaces, doorFinishes, floorSurfaces,
-        kitchenLoaded.current ? kitchen : undefined, kitchenLoaded.current ? { hidden } : undefined)
+        kitchenLoaded.current ? kitchen : undefined, kitchenLoaded.current ? { hidden, wallPanels } : undefined)
         .catch(err => console.error("Scene save failed:", err));
     }, 1500);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen, hidden, currentProject?.id]);
+  }, [placedFurniture, wallColors, wallSurfaces, floorSurfaces, doorFinishes, kitchen, hidden, wallPanels, currentProject?.id]);
 
   // ─── Canvas → Shop ─────────────────────────────────────────────────────────
   // The save above is debounced 1500ms. Navigating inside that window would
@@ -574,7 +586,7 @@ export default function CanvasPage() {
         doorFinishes,
         floorSurfaces,
         kitchenLoaded.current ? kitchen : undefined,
-        kitchenLoaded.current ? { hidden } : undefined,
+        kitchenLoaded.current ? { hidden, wallPanels } : undefined,
       );
       if (picture) await Promise.race([picture, new Promise(r => setTimeout(r, 4000))]);
       router.push(`/marketplace?project=${currentProject.id}`);
@@ -1661,6 +1673,32 @@ export default function CanvasPage() {
       setKitchenSel(n === null ? null : { runId: run.id, index: n });
     }
   };
+  // Factory order pack (lib/production): built here from the kitchen as drawn,
+  // loaded on demand so the drawings/PDF code stays out of the canvas bundle.
+  const downloadFactoryPack = async () => {
+    const [{ placeKitchen }, { buildOrderPack }, me] = await Promise.all([
+      import("@/lib/production/placement"),
+      import("@/lib/production/pack"),
+      import("@/lib/api/auth").then(m => m.getCurrentUser()).catch(() => null),
+    ]);
+    const today = new Date().toISOString().slice(0, 10);
+    const pid = currentProject?.id ?? "draft";
+    const input = placeKitchen({
+      kitchen, walls: kitchenCtx.walls, size: openingPlanSize, openings,
+      order: {
+        orderNo: `${pid.slice(0, 8).toUpperCase()}-${today.replace(/-/g, "")}`,
+        client: (me && me.success ? me.data.user.full_name : "") || "",
+        project: currentProject?.name || "Kitchen",
+        date: today,
+      },
+    });
+    const pack = buildOrderPack(input);
+    const url = URL.createObjectURL(new Blob([pack.zip as BlobPart], { type: "application/zip" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = pack.filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  };
   const kitchenFits = (r: KitchenRun) => runProblem({ run: r, ...kitchenCtx, runs: kitchen.runs }) === null;
 
   useEffect(() => {
@@ -1718,6 +1756,28 @@ export default function CanvasPage() {
     } catch (err) {
       console.error("Failed to save ceiling heights:", err);
       setToast("Couldn't save the ceiling heights. Try again.");
+    } finally {
+      setSavingHeights(false);
+    }
+  };
+
+  // ceiling designs (lib/walls/ceiling), saved on the rooms like their heights
+  const applyRoomCeiling = async (ids: string[], spec: CeilingSpec | null) => {
+    if (!ids.length) return;
+    const next = rooms.map(r => {
+      if (!ids.includes(r.id)) return r;
+      const { ceiling: _old, ...rest } = r as typeof r & { ceiling?: unknown };
+      void _old;
+      return (spec ? { ...rest, ceiling: spec } : rest) as typeof r;
+    });
+    setRooms(next);
+    if (!currentProject?.id) return;
+    setSavingHeights(true);
+    try {
+      await saveRooms(currentProject.id, next as unknown as Parameters<typeof saveRooms>[1]);
+    } catch (err) {
+      console.error("Failed to save the ceiling design:", err);
+      setToast("Couldn't save the ceiling design. Try again.");
     } finally {
       setSavingHeights(false);
     }
@@ -2736,6 +2796,7 @@ export default function CanvasPage() {
                   onRemove={() => editKitchenRun((r, i, dir) => runEdits.remove(r, i, dir), () => null)}
                   onRemoveRun={() => editKitchenRun(() => null, () => null)}
                   onClose={toggleKitchen}
+                  onFactoryPack={downloadFactoryPack}
                 />
               )}
               {editOpenings && (
@@ -2856,8 +2917,9 @@ export default function CanvasPage() {
               )}
               {heightsOpen && (
                 <RoomHeightsPanel
-                  rooms={rooms.map(r => ({ id: r.id, name: r.name, color: r.color, height: r.height }))}
+                  rooms={rooms.map(r => ({ id: r.id, name: r.name, color: r.color, height: r.height, ceiling: (r as { ceiling?: unknown }).ceiling }))}
                   onApply={applyRoomHeights}
+                  onCeiling={applyRoomCeiling}
                   onClose={() => setHeightsOpen(false)}
                   saving={savingHeights}
                 />
@@ -3096,6 +3158,28 @@ export default function CanvasPage() {
             />
           )}
 
+          {/* 360° tour — one panorama per room, linked into a walk-through */}
+          {viewMode === "3d" && (
+            <TourButton
+              key={`tour-${currentProject?.id ?? "none"}`}
+              className={`absolute bottom-[200px] right-5 z-10 ${pathTracing || (walkthroughActive && !walkthroughPaused) ? "hidden" : ""}`}
+              projectId={currentProject?.id}
+              rooms={rooms.map((r, i) => ({ id: String(r.id), name: r.name || `Room ${i + 1}` }))}
+              prepare={async () => {
+                // a tour needs what Inside shows: ceilings on, every wall full height
+                const before = cameraView;
+                if (before !== "inside") {
+                  sceneRef.current?.setCameraView("inside");
+                  await new Promise(r => setTimeout(r, 1500));
+                }
+                return () => { if (before !== "inside") sceneRef.current?.setCameraView(before); };
+              }}
+              exportGlb={() => sceneRef.current?.exportGlb() ?? Promise.resolve(null)}
+              renderSpec={q => sceneRef.current?.renderSpec(q) ?? null}
+              tourLayout={ids => sceneRef.current?.tourLayout(ids) ?? null}
+            />
+          )}
+
           {/* 2D View */}
           {viewMode === "2d" && (
             <div
@@ -3290,6 +3374,7 @@ export default function CanvasPage() {
                   selectedFurnitureId={selectedFurnitureId}
                   wallColors={wallColors}
                   wallSurfaces={wallSurfaces}
+                  wallPanels={wallPanels}
                   floorSurfaces={floorSurfaces}
                   selectedFloorRoomId={selectedFloorRoomId}
                   onFloorSelect={(id) => {
@@ -3640,7 +3725,7 @@ export default function CanvasPage() {
 
                   {/* Paint | Surface */}
                   <div className="flex gap-1 p-1 bg-[#f5f5f5] rounded-[10px]">
-                    {(["paint", "surface"] as const).map(t => (
+                    {(["paint", "surface", "panelling"] as const).map(t => (
                       <button
                         key={t}
                         onClick={() => setWallTab(t)}
@@ -3648,12 +3733,34 @@ export default function CanvasPage() {
                           wallTab === t ? "bg-white text-[#0a0a0a] shadow-sm" : "text-[#737373] hover:text-[#0a0a0a]"
                         }`}
                       >
-                        {t === "paint" ? "Paint" : "Surface"}
+                        {t === "paint" ? "Paint" : t === "surface" ? "Surface" : "Panelling"}
                       </button>
                     ))}
                   </div>
 
-                  {wallTab === "surface" ? (
+                  {wallTab === "panelling" ? (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-[11px] text-[#737373]">Mouldings and panels on this side of the wall. They take the wall&apos;s paint colour.</p>
+                      {([{ id: null, label: "None" }, ...PANEL_STYLES] as { id: PanelStyle | null; label: string }[]).map(ps => {
+                        const key = `${selectedWall.key}:${selectedWall.side}`;
+                        const on = (wallPanels[key]?.style ?? null) === ps.id;
+                        return (
+                          <button key={ps.id ?? "none"}
+                            onClick={() => setWallPanels(prev => {
+                              const next = { ...prev };
+                              if (ps.id) next[key] = { style: ps.id }; else delete next[key];
+                              return next;
+                            })}
+                            className={`flex items-center justify-between rounded-[8px] border px-3 py-2 text-left text-[12px] transition ${
+                              on ? "border-[#004643] bg-[#f0f7f6] text-[#004643]" : "border-[#e5e5e5] text-[#404040] hover:border-[#d4d4d4]"
+                            }`}>
+                            <span>{ps.label}</span>
+                            {on && <Check size={13} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : wallTab === "surface" ? (
                     <div className="flex flex-col gap-3">
                       {WALL_SURFACES.length === 0 ? (
                         <p className="text-[11px] text-[#a3a3a3] py-4 text-center">

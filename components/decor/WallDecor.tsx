@@ -20,6 +20,7 @@
 
 import { useMemo } from "react";
 import * as THREE from "three";
+import { useThree } from "@react-three/fiber";
 
 import type { ProceduralKind } from "@/lib/furniture/catalog";
 export type { ProceduralKind };
@@ -32,7 +33,38 @@ interface Props {
   color?: string | null;
   /** Light fittings only: 0 = off … 1 = full glow. */
   glow?: number;
+  /** the catalogue id, for kinds whose variants differ by artwork (rugs) */
+  variant?: string;
 }
+
+// ── Rug artwork ─────────────────────────────────────────────────────────────
+// One image per rug (scripts/surfaces/rugs.py), loaded once and shared. The
+// scene draws on demand, so a texture that arrives later asks for a redraw.
+
+const rugCache = new Map<string, THREE.Texture>();
+let fibreNormal: THREE.Texture | null = null;
+function rugTexture(id: string, onLoad: () => void): THREE.Texture {
+  let t = rugCache.get(id);
+  if (!t) {
+    t = new THREE.TextureLoader().load(`/textures/rugs/${id}.jpg`, onLoad);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    t.userData.mimeType = "image/jpeg";
+    rugCache.set(id, t);
+  }
+  return t;
+}
+function fibreTexture(onLoad: () => void): THREE.Texture {
+  if (!fibreNormal) {
+    fibreNormal = new THREE.TextureLoader().load("/textures/rugs/rug-fibre-normal.jpg", onLoad);
+    fibreNormal.wrapS = fibreNormal.wrapT = THREE.RepeatWrapping;
+    fibreNormal.repeat.set(6, 6);
+    fibreNormal.userData.mimeType = "image/jpeg";
+  }
+  return fibreNormal;
+}
+
+const SHEER = "#f5f2ec";
 
 // ── Painted canvases ────────────────────────────────────────────────────────
 // Drawn once per kind and cached. Deterministic, so every project shows the
@@ -128,7 +160,8 @@ function pleatedPanel(w: number, h: number, depth: number, pleats: number): THRE
 
 // ── The pieces ──────────────────────────────────────────────────────────────
 
-export default function WallDecor({ kind, w, h, d, color, glow = 1 }: Props) {
+export default function WallDecor({ kind, w, h, d, color, glow = 1, variant }: Props) {
+  const invalidate = useThree(st => st.invalidate);
   const art = useMemo(
     () => (kind === "art-abstract" || kind === "art-lines" ? artTexture(kind) : null),
     [kind],
@@ -137,6 +170,16 @@ export default function WallDecor({ kind, w, h, d, color, glow = 1 }: Props) {
     if (kind !== "curtains") return null;
     const panelW = w * 0.32;
     return pleatedPanel(panelW, h - 0.06, Math.min(0.12, d), Math.max(3, Math.round(panelW / 0.14)));
+  }, [kind, w, h, d]);
+
+  const sheer = useMemo(() => {
+    if (kind !== "drapes" && kind !== "sheers") return null;
+    return pleatedPanel(w, h - 0.05, Math.min(0.06, d), Math.max(6, Math.round(w / 0.09)));
+  }, [kind, w, h, d]);
+  const heavy = useMemo(() => {
+    if (kind !== "drapes") return null;
+    const pw = w * 0.26;
+    return pleatedPanel(pw, h - 0.05, Math.min(0.14, d), Math.max(3, Math.round(pw / 0.12)));
   }, [kind, w, h, d]);
 
   switch (kind) {
@@ -242,6 +285,60 @@ export default function WallDecor({ kind, w, h, d, color, glow = 1 }: Props) {
             </mesh>
           ))}
         </group>
+      );
+    }
+
+    case "drapes":
+    case "sheers": {
+      // Floor-to-ceiling curtains on a ceiling track: a sheer across the
+      // whole width, and (drapes) two heavy panels drawn back to the sides.
+      const trackY = h / 2 - 0.02;
+      const fabric = color ?? (variant === "curtains-velvet-sheer" ? "#7d6a58" : "#d9cfc0");
+      return (
+        <group>
+          <mesh position={[0, trackY, 0]} castShadow>
+            <boxGeometry args={[w + 0.1, 0.03, 0.05]} />
+            <meshStandardMaterial color="#d8d8d6" roughness={0.35} metalness={0.7} />
+          </mesh>
+          {sheer && (
+            <mesh geometry={sheer} position={[0, -0.03, -d * 0.2]} receiveShadow>
+              <meshPhysicalMaterial color={kind === "sheers" ? (color ?? SHEER) : SHEER} roughness={0.9}
+                transparent opacity={0.62} side={THREE.DoubleSide} sheen={1} sheenRoughness={0.6}
+                sheenColor="#ffffff" depthWrite={false} />
+            </mesh>
+          )}
+          {kind === "drapes" && heavy && [-1, 1].map(s => (
+            <mesh key={s} geometry={heavy} position={[s * (w / 2 - w * 0.13), -0.03, d * 0.2]} castShadow receiveShadow>
+              <meshPhysicalMaterial color={fabric} roughness={0.92} side={THREE.DoubleSide}
+                sheen={1} sheenRoughness={0.5} sheenColor="#ffffff" />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case "rug":
+    case "rug-round": {
+      const map = variant ? rugTexture(variant, invalidate) : null;
+      const normal = fibreTexture(invalidate);
+      const pile = (
+        <meshPhysicalMaterial map={map ?? undefined} color={map ? "#ffffff" : (color ?? "#cfc6b8")}
+          normalMap={normal} normalScale={new THREE.Vector2(0.6, -0.6)} roughness={1}
+          sheen={1} sheenRoughness={0.8} sheenColor="#ffffff" />
+      );
+      if (kind === "rug-round") {
+        return (
+          <mesh receiveShadow castShadow>
+            <cylinderGeometry args={[w / 2, w / 2, h, 96]} />
+            {pile}
+          </mesh>
+        );
+      }
+      return (
+        <mesh receiveShadow castShadow>
+          <boxGeometry args={[w, h, d]} />
+          {pile}
+        </mesh>
       );
     }
 

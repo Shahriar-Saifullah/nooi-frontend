@@ -41,7 +41,9 @@ export type ProceduralKind =
   // appliances & electrical (round 2)
   | "split-ac" | "floor-ac" | "ceiling-fan" | "water-heater" | "socket" | "switch"
   // structure (phase 1)
-  | "elevator";
+  | "elevator"
+  // soft furnishings (architectural details)
+  | "drapes" | "sheers" | "rug" | "rug-round";
 
 /** One concrete design the user can drag into the scene. */
 export interface CatalogItem {
@@ -150,12 +152,17 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     id: "armchair", name: "Armchair", category: "living",
     variants: [
       v("living", "armchair", { id: "armchair", name: "Classic Armchair", path: "/models/armchair.glb", size: { w: 85, d: 80, h: 80 }, color: "#8f7a5f", tags: ["chair"], customizable: true }),
+      v("living", "armchair", { id: "ph-armchair-oak-leather", name: "Oak & Leather Armchair", path: "/models/ph/ph_modern_arm_chair_01.glb", thumbnail: "/models/thumbs/ph_modern_arm_chair_01.jpg", size: { w: 82, d: 99, h: 102 }, color: "#2b2b2b", tags: ["chair","armchair","leather","oak","modern"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/modern_arm_chair_01" } }),
+      v("living", "armchair", { id: "ph-lounge-chair-midcentury", name: "Mid-Century Lounge Chair", path: "/models/ph/ph_mid_century_lounge_chair.glb", thumbnail: "/models/thumbs/ph_mid_century_lounge_chair.jpg", size: { w: 101, d: 119, h: 117 }, color: "#7a4a2c", tags: ["chair","lounge","leather","swivel","modern"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/mid_century_lounge_chair" } }),
     ],
   },
   {
     id: "coffee-table", name: "Coffee Table", category: "living",
     variants: [
       v("living", "coffee-table", { id: "coffee-table", name: "Rectangular", path: "/models/coffee_table.glb", size: { w: 120, d: 60, h: 45 }, color: "#7a5c3f", tags: ["table"], customizable: true }),
+      v("living", "coffee-table", { id: "ph-coffee-stone-oak", name: "Stone & Oak Coffee Table", path: "/models/ph/ph_modern_coffee_table_01.glb", thumbnail: "/models/thumbs/ph_modern_coffee_table_01.jpg", size: { w: 60, d: 120, h: 39 }, color: "#b8b2a6", tags: ["table","coffee","stone","oak","modern"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/modern_coffee_table_01" } }),
+      v("living", "coffee-table", { id: "ph-coffee-lattice", name: "Lattice Coffee Table", path: "/models/ph/ph_modern_coffee_table_02.glb", thumbnail: "/models/thumbs/ph_modern_coffee_table_02.jpg", size: { w: 120, d: 120, h: 37 }, color: "#3b3632", tags: ["table","coffee","square","modern"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/modern_coffee_table_02" } }),
+      v("living", "coffee-table", { id: "ph-coffee-round-marble", name: "Round Marble Coffee Table", path: "/models/ph/ph_coffee_table_round_01.glb", thumbnail: "/models/thumbs/ph_coffee_table_round_01.jpg", size: { w: 130, d: 130, h: 49 }, color: "#e6e4e0", tags: ["table","coffee","round","marble"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/coffee_table_round_01" } }),
     ],
   },
   {
@@ -180,6 +187,10 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     id: "rug", name: "Rug", category: "living",
     variants: [
       v("living", "rug", { id: "rug", name: "Area Rug", path: "/models/rug.glb", size: { w: 200, d: 140, h: 2 }, color: "#a9b3a4", tags: ["carpet"], customizable: true }),
+      v("living", "rug", { id: "rug-moroccan", name: "Moroccan Wool Rug", path: "", procedural: "rug", thumbnail: "/models/thumbs/proc_rug-moroccan.png", size: { w: 300, d: 200, h: 1.5 }, color: "#ece6da", tags: ["rug", "carpet", "moroccan", "wool", "cream"], customizable: false, credit: { source: "in-house", license: "Nooi original" } }),
+      v("living", "rug", { id: "rug-abstract", name: "Abstract Grey Rug", path: "", procedural: "rug", thumbnail: "/models/thumbs/proc_rug-abstract.png", size: { w: 300, d: 200, h: 1.5 }, color: "#b8b4ae", tags: ["rug", "carpet", "abstract", "grey", "modern"], customizable: false, credit: { source: "in-house", license: "Nooi original" } }),
+      v("living", "rug", { id: "rug-bordered", name: "Classic Bordered Rug", path: "", procedural: "rug", thumbnail: "/models/thumbs/proc_rug-bordered.png", size: { w: 300, d: 220, h: 1.5 }, color: "#b9a487", tags: ["rug", "carpet", "persian", "classic", "border"], customizable: false, credit: { source: "in-house", license: "Nooi original" } }),
+      v("living", "rug", { id: "rug-jute-round", name: "Round Jute Rug", path: "", procedural: "rug-round", thumbnail: "/models/thumbs/proc_rug-jute-round.png", size: { w: 200, d: 200, h: 1.2 }, color: "#c5a170", tags: ["rug", "round", "jute", "natural"], customizable: false, credit: { source: "in-house", license: "Nooi original" } }),
     ],
   },
 
@@ -229,6 +240,8 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     id: "sideboard", name: "Sideboard", category: "dining",
     variants: [
       v("dining", "sideboard", { id: "sideboard", name: "Buffet Cabinet", path: "/models/sideboard.glb", size: { w: 160, d: 45, h: 85 }, color: "#6e5741", tags: ["storage"], customizable: true }),
+      v("dining", "sideboard", { id: "ph-console-classic", name: "Carved Console Table", path: "/models/ph/ph_classicconsole_01.glb", thumbnail: "/models/thumbs/ph_classicconsole_01.jpg", size: { w: 154, d: 59, h: 95 }, color: "#2e2a28", tags: ["console","table","classic","carved"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/ClassicConsole_01" } }),
+      v("dining", "sideboard", { id: "ph-cabinet-slatted", name: "Slatted Media Cabinet", path: "/models/ph/ph_modern_wooden_cabinet.glb", thumbnail: "/models/thumbs/ph_modern_wooden_cabinet.jpg", size: { w: 244, d: 52, h: 68 }, color: "#6a4a30", tags: ["cabinet","media","sideboard","modern","slatted"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/modern_wooden_cabinet" } }),
     ],
   },
 
@@ -243,6 +256,7 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     id: "bar-stool", name: "Bar Stool", category: "kitchen",
     variants: [
       v("kitchen", "bar-stool", { id: "bar-stool", name: "Counter Stool", path: "/models/bar_stool.glb", size: { w: 40, d: 40, h: 100 }, color: "#5c4634", tags: ["stool", "chair"], customizable: true }),
+      v("kitchen", "bar-stool", { id: "ph-bar-stool-round", name: "Round Wooden Bar Stool", path: "/models/ph/ph_bar_chair_round_01.glb", thumbnail: "/models/thumbs/ph_bar_chair_round_01.jpg", size: { w: 48, d: 49, h: 75 }, color: "#5a3d2b", tags: ["stool","bar","wood"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/bar_chair_round_01" } }),
     ],
   },
   {
@@ -297,12 +311,17 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     id: "plant", name: "Plant", category: "decor",
     variants: [
       v("decor", "plant", { id: "plant-large", name: "Potted Plant", path: "/models/plant_large.glb", size: { w: 45, d: 45, h: 130 }, color: "#5f7d54", tags: ["plant"], customizable: false }),
+      v("decor", "plant", { id: "ph-plant-tree", name: "Tall Potted Plant", path: "/models/ph/ph_potted_plant_01.glb", thumbnail: "/models/thumbs/ph_potted_plant_01.jpg", size: { w: 59, d: 63, h: 135 }, color: "#5f7d54", tags: ["plant","tree","pot"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/potted_plant_01" } }),
+      v("decor", "plant", { id: "ph-plant-leafy", name: "Leafy Potted Plant", path: "/models/ph/ph_potted_plant_02.glb", thumbnail: "/models/thumbs/ph_potted_plant_02.jpg", size: { w: 70, d: 66, h: 84 }, color: "#5f7d54", tags: ["plant","pot"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/potted_plant_02" } }),
+      v("decor", "plant", { id: "ph-plant-succulent", name: "Small Succulent", path: "/models/ph/ph_potted_plant_04.glb", thumbnail: "/models/thumbs/ph_potted_plant_04.jpg", size: { w: 17, d: 18, h: 27 }, color: "#5f7d54", tags: ["plant","succulent","small"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/potted_plant_04" } }),
     ],
   },
   {
     id: "side-table", name: "Side Table", category: "decor",
     variants: [
       v("decor", "side-table", { id: "side-table", name: "Accent Table", path: "/models/side_table.glb", size: { w: 50, d: 50, h: 55 }, color: "#7a5c3f", tags: ["table"], customizable: true }),
+      v("decor", "side-table", { id: "ph-side-table-oak", name: "Oak Side Table", path: "/models/ph/ph_side_table_01.glb", thumbnail: "/models/thumbs/ph_side_table_01.jpg", size: { w: 55, d: 55, h: 45 }, color: "#b98b5c", tags: ["table","side","oak"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/side_table_01" } }),
+      v("decor", "side-table", { id: "ph-side-table-tall", name: "Tall Plant Stand", path: "/models/ph/ph_side_table_tall_01.glb", thumbnail: "/models/thumbs/ph_side_table_tall_01.jpg", size: { w: 38, d: 38, h: 76 }, color: "#4a2f22", tags: ["table","side","stand","classic"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/side_table_tall_01" } }),
     ],
   },
 
@@ -314,12 +333,20 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     id: "vase", name: "Vase", category: "decor",
     variants: [
       v("decor", "vase", { id: "vase-ceramic", name: "Ceramic Vase", path: "/models/decor/vase_ceramic.glb", size: { w: 18, d: 18, h: 45 }, color: "#d9d4cc", tags: ["vase", "ceramic", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "vase", { id: "ph-vase-blue-white", name: "Blue & White Vase", path: "/models/ph/ph_antique_ceramic_vase_01.glb", thumbnail: "/models/thumbs/ph_antique_ceramic_vase_01.jpg", size: { w: 26, d: 26, h: 44 }, color: "#e8e8ef", tags: ["vase","ceramic","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/antique_ceramic_vase_01" } }),
+      v("decor", "vase", { id: "ph-vase-brass-tall", name: "Tall Brass Vase", path: "/models/ph/ph_brass_vase_01.glb", thumbnail: "/models/thumbs/ph_brass_vase_01.jpg", size: { w: 23, d: 23, h: 69 }, color: "#c9a34f", tags: ["vase","brass","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/brass_vase_01" } }),
+      v("decor", "vase", { id: "ph-vase-brass-ewer", name: "Brass Ewer", path: "/models/ph/ph_brass_vase_02.glb", thumbnail: "/models/thumbs/ph_brass_vase_02.jpg", size: { w: 21, d: 21, h: 53 }, color: "#c08a4a", tags: ["vase","brass","jug","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/brass_vase_02" } }),
+      v("decor", "vase", { id: "ph-vase-white-01", name: "White Ceramic Vase", path: "/models/ph/ph_ceramic_vase_01.glb", thumbnail: "/models/thumbs/ph_ceramic_vase_01.jpg", size: { w: 20, d: 20, h: 40 }, color: "#efefec", tags: ["vase","ceramic","white","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/ceramic_vase_01" } }),
+      v("decor", "vase", { id: "ph-vase-white-02", name: "Round White Vase", path: "/models/ph/ph_ceramic_vase_02.glb", thumbnail: "/models/thumbs/ph_ceramic_vase_02.jpg", size: { w: 22, d: 22, h: 31 }, color: "#efefec", tags: ["vase","ceramic","white","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/ceramic_vase_02" } }),
+      v("decor", "vase", { id: "ph-vase-white-03", name: "Slim White Vase", path: "/models/ph/ph_ceramic_vase_03.glb", thumbnail: "/models/thumbs/ph_ceramic_vase_03.jpg", size: { w: 11, d: 11, h: 41 }, color: "#efefec", tags: ["vase","ceramic","white","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/ceramic_vase_03" } }),
+      v("decor", "vase", { id: "ph-vase-white-04", name: "White Jug Vase", path: "/models/ph/ph_ceramic_vase_04.glb", thumbnail: "/models/thumbs/ph_ceramic_vase_04.jpg", size: { w: 18, d: 18, h: 34 }, color: "#efefec", tags: ["vase","ceramic","white","jug","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/ceramic_vase_04" } }),
     ],
   },
   {
     id: "book", name: "Book", category: "decor",
     variants: [
       v("decor", "book", { id: "book-hardback", name: "Hardback Book", path: "/models/decor/book.glb", size: { w: 18, d: 24, h: 4 }, color: "#8a9a8c", tags: ["book", "decor"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "book", { id: "ph-books-encyclopedia", name: "Leather Book Set", path: "/models/ph/ph_book_encyclopedia_set_01.glb", thumbnail: "/models/thumbs/ph_book_encyclopedia_set_01.jpg", size: { w: 55, d: 16, h: 24 }, color: "#7a4a2c", tags: ["book","books","set","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/book_encyclopedia_set_01" } }),
     ],
   },
   {
@@ -341,6 +368,7 @@ export const FURNITURE_TYPES: FurnitureType[] = [
       v("decor", "picture-frame", { id: "frame-medium", name: "Medium Frame", path: "/models/decor/frame_medium.glb", size: { w: 18, d: 3, h: 24 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
       v("decor", "picture-frame", { id: "frame-large", name: "Large Frame", path: "/models/decor/frame_large.glb", size: { w: 25, d: 4, h: 33 }, color: "#3f3a36", tags: ["frame", "photo", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
       v("decor", "picture-frame", { id: "frame-curved", name: "Curved Frame", path: "/models/decor/frame_curved.glb", size: { w: 30, d: 8, h: 22 }, color: "#3f3a36", tags: ["frame", "curved", "art"], customizable: true, credit: { source: "3DSKY Vol005", license: "VERIFY BEFORE SHIPPING" } }),
+      v("decor", "picture-frame", { id: "ph-frame-standing", name: "Standing Photo Frame", path: "/models/ph/ph_standing_picture_frame_01.glb", thumbnail: "/models/thumbs/ph_standing_picture_frame_01.jpg", size: { w: 10, d: 20, h: 25 }, color: "#2b2b2b", tags: ["frame","photo","standing"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/standing_picture_frame_01" } }),
     ],
   },
 
@@ -348,6 +376,23 @@ export const FURNITURE_TYPES: FurnitureType[] = [
   // Drawn in code (components/decor/WallDecor.tsx), so no .glb and no licence
   // to track. Dropped onto a wall they hang flush at `mountHeight` (centre, cm)
   // and face into the room; dragged, they slide along walls and up or down.
+  {
+    id: "ottoman", name: "Ottoman", category: "living",
+    variants: [
+      v("living", "ottoman", { id: "ph-ottoman-leather", name: "Leather Ottoman", path: "/models/ph/ph_ottoman_01.glb", thumbnail: "/models/thumbs/ph_ottoman_01.jpg", size: { w: 88, d: 62, h: 62 }, color: "#3a3330", tags: ["ottoman","pouf","footstool","leather"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/Ottoman_01" } }),
+    ],
+  },
+  {
+    id: "accent", name: "Accents", category: "decor",
+    variants: [
+      v("decor", "accent", { id: "ph-candleholders-brass", name: "Brass Candleholders", path: "/models/ph/ph_brass_candleholders.glb", thumbnail: "/models/thumbs/ph_brass_candleholders.jpg", size: { w: 105, d: 36, h: 84 }, color: "#c9a34f", tags: ["candle","candleholder","brass","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/brass_candleholders" } }),
+      v("decor", "accent", { id: "ph-bust-marble", name: "Marble Bust", path: "/models/ph/ph_marble_bust_01.glb", thumbnail: "/models/thumbs/ph_marble_bust_01.jpg", size: { w: 27, d: 30, h: 51 }, color: "#e8e6e2", tags: ["bust","sculpture","marble","statue","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/marble_bust_01" } }),
+      v("decor", "accent", { id: "ph-bowl-wooden", name: "Carved Wooden Bowl", path: "/models/ph/ph_wooden_bowl_01.glb", thumbnail: "/models/thumbs/ph_wooden_bowl_01.jpg", size: { w: 31, d: 31, h: 9 }, color: "#8a5a3a", tags: ["bowl","wood","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/wooden_bowl_01" } }),
+      v("decor", "accent", { id: "ph-basket-wicker", name: "Wicker Basket", path: "/models/ph/ph_wicker_basket_02.glb", thumbnail: "/models/thumbs/ph_wicker_basket_02.jpg", size: { w: 35, d: 25, h: 20 }, color: "#b8955f", tags: ["basket","wicker","storage","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/wicker_basket_02" } }),
+      v("decor", "accent", { id: "ph-cushions-pair", name: "Pair of Cushions", path: "/models/ph/ph_throw_pillows_01.glb", thumbnail: "/models/thumbs/ph_throw_pillows_01.jpg", size: { w: 94, d: 45, h: 45 }, color: "#c0603a", tags: ["cushion","pillow","throw","decor"], customizable: true, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/throw_pillows_01" } }),
+    ],
+  },
+
   {
     id: "wall-tv", name: "Wall TV", category: "living",
     variants: [
@@ -360,18 +405,25 @@ export const FURNITURE_TYPES: FurnitureType[] = [
     variants: [
       v("decor", "wall-art", { id: "art-abstract-lg", name: "Abstract Canvas", path: "", procedural: "art-abstract", thumbnail: "/models/thumbs/proc_art-abstract-lg.png", size: { w: 120, d: 4, h: 80 }, mountHeight: 155, color: "#c9a57a", tags: ["art", "painting", "canvas", "abstract", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
       v("decor", "wall-art", { id: "art-lines", name: "Line Art Print", path: "", procedural: "art-lines", thumbnail: "/models/thumbs/proc_art-lines.png", size: { w: 60, d: 3, h: 90 }, mountHeight: 150, color: "#2b2622", tags: ["art", "print", "line art", "frame", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("decor", "wall-art", { id: "ph-art-frame-white", name: "Framed Print (Tall)", path: "/models/ph/ph_hanging_picture_frame_01.glb", thumbnail: "/models/thumbs/ph_hanging_picture_frame_01.jpg", size: { w: 59, d: 2, h: 84 }, color: "#2b2b2b", tags: ["art","frame","print","wall"], customizable: true, mountType: "wall", mountHeight: 150, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/hanging_picture_frame_01" } }),
+      v("decor", "wall-art", { id: "ph-art-frame-landscape", name: "Framed Photo (Landscape)", path: "/models/ph/ph_hanging_picture_frame_02.glb", thumbnail: "/models/thumbs/ph_hanging_picture_frame_02.jpg", size: { w: 75, d: 3, h: 50 }, color: "#f2f2f2", tags: ["art","frame","photo","wall"], customizable: true, mountType: "wall", mountHeight: 150, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/hanging_picture_frame_02" } }),
+      v("decor", "wall-art", { id: "ph-art-frame-oval", name: "Oval Carved Frame", path: "/models/ph/ph_hanging_picture_frame_03.glb", thumbnail: "/models/thumbs/ph_hanging_picture_frame_03.jpg", size: { w: 39, d: 3, h: 50 }, color: "#7a2e1e", tags: ["art","frame","classic","wall"], customizable: true, mountType: "wall", mountHeight: 150, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/hanging_picture_frame_03" } }),
     ],
   },
   {
     id: "mirror", name: "Mirror", category: "decor",
     variants: [
       v("decor", "mirror", { id: "mirror-round", name: "Round Brass Mirror", path: "", procedural: "mirror-round", thumbnail: "/models/thumbs/proc_mirror-round.png", size: { w: 80, d: 4, h: 80 }, mountHeight: 155, color: "#b8955a", tags: ["mirror", "round", "brass", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("decor", "mirror", { id: "ph-mirror-arched-gold", name: "Arched Gold Mirror", path: "/models/ph/ph_ornate_mirror_01.glb", thumbnail: "/models/thumbs/ph_ornate_mirror_01.jpg", size: { w: 49, d: 3, h: 74 }, color: "#c9a34f", tags: ["mirror","gold","arched","wall"], customizable: true, mountType: "wall", mountHeight: 150, credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/ornate_mirror_01" } }),
     ],
   },
   {
     id: "curtains", name: "Curtains", category: "decor",
     variants: [
       v("decor", "curtains", { id: "curtains-linen", name: "Linen Curtains", path: "", procedural: "curtains", thumbnail: "/models/thumbs/proc_curtains-linen.png", size: { w: 260, d: 12, h: 265 }, mountHeight: 142, color: "#e8e1d4", tags: ["curtains", "drapes", "window", "linen", "wall"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("decor", "curtains", { id: "curtains-linen-sheer", name: "Linen Drapes + Sheer (floor to ceiling)", path: "", procedural: "drapes", thumbnail: "/models/thumbs/proc_curtains-linen-sheer.png", size: { w: 300, d: 16, h: 270 }, fitToWallHeight: true, color: "#d9cfc0", tags: ["curtains", "drapes", "sheer", "window", "linen", "ceiling track"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("decor", "curtains", { id: "curtains-velvet-sheer", name: "Velvet Drapes + Sheer (floor to ceiling)", path: "", procedural: "drapes", thumbnail: "/models/thumbs/proc_curtains-velvet-sheer.png", size: { w: 300, d: 18, h: 270 }, fitToWallHeight: true, color: "#7d6a58", tags: ["curtains", "drapes", "velvet", "sheer", "window", "luxury"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
+      v("decor", "curtains", { id: "curtains-sheer", name: "Sheer Curtain (floor to ceiling)", path: "", procedural: "sheers", thumbnail: "/models/thumbs/proc_curtains-sheer.png", size: { w: 300, d: 8, h: 270 }, fitToWallHeight: true, color: "#f5f2ec", tags: ["curtains", "sheer", "voile", "window"], customizable: true, mountType: "wall", credit: { source: "in-house", license: "Nooi original" } }),
     ],
   },
   {
@@ -486,6 +538,9 @@ export const FURNITURE_TYPES: FurnitureType[] = [
         customizable: true,
         mountType: "ceiling",
       }),
+      v("lighting", "chandelier", { id: "ph-chandelier-shades", name: "Brass Chandelier with Shades", path: "/models/ph/ph_chandelier_01.glb", thumbnail: "/models/thumbs/ph_chandelier_01.jpg", size: { w: 75, d: 82, h: 80 }, color: "#c9a34f", tags: ["light","chandelier","ceiling","brass","classic"], customizable: true, mountType: "ceiling", credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/Chandelier_01" } }),
+      v("lighting", "chandelier", { id: "ph-chandelier-crystal", name: "Crystal Chandelier", path: "/models/ph/ph_chandelier_03.glb", thumbnail: "/models/thumbs/ph_chandelier_03.jpg", size: { w: 78, d: 79, h: 104 }, color: "#c9a34f", tags: ["light","chandelier","ceiling","crystal","classic"], customizable: true, mountType: "ceiling", credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/Chandelier_03" } }),
+      v("lighting", "chandelier", { id: "ph-pendant-globe", name: "Glass Globe Pendant", path: "/models/ph/ph_modern_ceiling_lamp_01.glb", thumbnail: "/models/thumbs/ph_modern_ceiling_lamp_01.jpg", size: { w: 43, d: 43, h: 95 }, color: "#e6e6e6", tags: ["light","pendant","ceiling","globe","modern","lamp"], customizable: true, mountType: "ceiling", credit: { source: "Poly Haven", license: "CC0", url: "https://polyhaven.com/a/modern_ceiling_lamp_01" } }),
     ],
   },
 ];
