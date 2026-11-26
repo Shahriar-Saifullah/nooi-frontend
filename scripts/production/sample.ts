@@ -14,7 +14,7 @@ const input = placeKitchen({
   kitchen: data, walls, size, openings,
   order: { orderNo: "SAMPLE-001", client: "Sample client", project: "L-shaped kitchen (sample)", date: new Date().toISOString().slice(0, 10), designer: "Nooi" },
 });
-const pack = buildOrderPack(input);
+const pack = buildOrderPack(input, undefined, { parts: process.argv.includes("--parts") });
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/${pack.filename}`, pack.zip);
 for (const f of pack.files) { mkdirSync(`${outDir}/x/${f.name.split("/").slice(0, -1).join("/")}`, { recursive: true }); writeFileSync(`${outDir}/x/${f.name}`, f.data); }

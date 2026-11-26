@@ -30,7 +30,7 @@ interface Props {
   onRemoveRun: () => void;
   onClose: () => void;
   /** download the factory order pack (drawings, cut list, 3D) for this kitchen */
-  onFactoryPack?: () => Promise<void>;
+  onFactoryPack?: (opts: { parts: boolean }) => Promise<void>;
 }
 
 const KINDS = Object.keys(MODULES) as ModuleKind[];
@@ -151,23 +151,30 @@ export default function KitchenPanel(p: Props) {
 }
 
 /** "Factory order pack": a zip of drawings (DXF/PDF), the cut list (Excel/CSV) and the 3D parts model. */
-function FactoryPackButton({ run }: { run: () => Promise<void> }) {
+function FactoryPackButton({ run }: { run: (opts: { parts: boolean }) => Promise<void> }) {
   const [busy, setBusy] = React.useState(false);
+  const [parts, setParts] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const go = async () => {
     if (busy) return;
     setBusy(true); setError(null);
-    try { await run(); } catch (e) { setError(e instanceof Error ? e.message : "Could not make the order pack."); }
+    try { await run({ parts }); } catch (e) { setError(e instanceof Error ? e.message : "Could not make the order pack."); }
     finally { setBusy(false); }
   };
   return (
     <div className="mt-2.5 border-t border-white/10 pt-2.5">
-      <button onClick={go} disabled={busy} title="Drawings (DXF + PDF), cut list and parts (Excel + CSV) and a 3D model of every part, in one zip"
+      <button onClick={go} disabled={busy} title="Plan and elevations (PDF + DXF), cabinet schedule and the details form for the factory, in one zip"
         className="flex w-full items-center justify-center gap-1.5 rounded-[8px] bg-white/12 py-1.5 text-[11px] font-medium text-white hover:bg-white/20 disabled:opacity-60">
         {busy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
         {busy ? "Making the order pack…" : "Factory order pack"}
       </button>
-      <p className="mt-1 text-[9.5px] leading-snug text-white/45">Drawings, cut list and 3D parts for the factory, using Nooi&apos;s standard construction rules.</p>
+      <label className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-white/70">
+        <input type="checkbox" checked={parts} onChange={e => setParts(e.target.checked)} className="accent-[#c7de7d]" />
+        Add a parts list (cut list, hardware, 3D parts)
+      </label>
+      <p className="mt-1 text-[9.5px] leading-snug text-white/45">
+        Drawings and details for the factory to confirm{parts ? "; the parts list uses Nooi's standard construction rules" : ""}.
+      </p>
       {error && <p className="mt-1 text-[10px] text-red-300">{error}</p>}
     </div>
   );

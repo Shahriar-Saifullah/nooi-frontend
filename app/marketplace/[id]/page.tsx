@@ -48,6 +48,7 @@ import {
   getProductById, getProducts,
   type MarketplaceProduct, type ProductVariant,
 } from "@/lib/api/marketplace";
+import { sizeGuidance } from "@/lib/listings/factory";
 
 // three touches window on import, and the GLB is megabytes — only load the
 // viewer when the shopper opens the 3D tab.
@@ -71,7 +72,7 @@ const COPY = {
     details: "Details", reviews: "Reviews", noReviews: "No reviews yet.",
     moreFrom: (v: string) => `More from ${v}`, notFound: "Product not found",
     notFoundBody: "This product may have been removed or is no longer stocked.",
-    backToShop: "Back to marketplace", dimensions: "Dimensions", material: "Material",
+    backToShop: "Back to marketplace", dimensions: "Dimensions", material: "Material", usualSizes: "Usual sizes", sizeNote: "Sizes",
     sku: "SKU", leadTime: "Lead time", days: "days", vendor: "Vendor",
     category: "Category", from: "from",
   },
@@ -85,7 +86,7 @@ const COPY = {
     details: "التفاصيل", reviews: "التقييمات", noReviews: "لا توجد تقييمات بعد.",
     moreFrom: (v: string) => `المزيد من ${v}`, notFound: "المنتج غير موجود",
     notFoundBody: "ربما تمت إزالة هذا المنتج أو لم يعد متوفرًا.",
-    backToShop: "العودة إلى المتجر", dimensions: "الأبعاد", material: "الخامة",
+    backToShop: "العودة إلى المتجر", dimensions: "الأبعاد", material: "الخامة", usualSizes: "المقاسات المعتادة", sizeNote: "المقاسات",
     sku: "رمز المنتج", leadTime: "مدة التجهيز", days: "يوم", vendor: "المورد",
     category: "الفئة", from: "من",
   },
@@ -561,6 +562,9 @@ function ProductDetailInner() {
             <div className="mt-5 max-w-[620px] divide-y divide-[#F1F4F4]">
               {[
                 dims && { l: t.dimensions, v: dims },
+                // made-to-measure guidance from the vendor; the factory confirms sizes
+                sizeGuidance(product.size_ranges).length > 0 && { l: t.usualSizes, v: sizeGuidance(product.size_ranges).join(" · ") },
+                product.size_note && { l: t.sizeNote, v: product.size_note },
                 variant?.material && { l: t.material, v: variant.material },
                 variant?.sku && { l: t.sku, v: variant.sku },
                 { l: t.leadTime, v: `${num(product.lead_time_days)} ${t.days}` },

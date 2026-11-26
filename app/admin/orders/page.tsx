@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 
 import AdminShell from "@/components/admin/AdminShell";
+import OrderFactoryPanel from "@/components/factory/OrderFactoryPanel";
 import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import {
   searchOrders, getOrderForIntervention, overrideOrderStatus, cancelOrderAsAdmin, approveOrder, markShipmentDelivered,
@@ -434,6 +435,9 @@ function OrderDetail({ id, onBack }: { id: string; onBack: () => void }) {
               ))}
             </div>
           </section>
+
+          {/* Drawings and factory details per line (components/factory) */}
+          <OrderFactoryPanel orderId={id} title="Drawings & details for the factory" />
 
           {/* Shipments */}
           <section className="rounded-2xl border border-[#D5DBDA] bg-white p-5">

@@ -8,6 +8,10 @@ import VendorSupportPanel from "@/components/support/SupportCenter";
 import NotificationBell from "@/components/NotificationBell";
 import ListingReviewActions, { listingUiStatus } from "@/components/vendor/ListingReviewActions";
 import ListingExtrasFields from "@/components/vendor/ListingExtrasFields";
+import ListingFactoryFields from "@/components/vendor/ListingFactoryFields";
+import ListingDrawingsSection from "@/components/factory/ListingDrawingsSection";
+import OrderFactoryPanel from "@/components/factory/OrderFactoryPanel";
+import { EMPTY_LISTING_FACTORY, listingFactoryPayload, sizeRangesProblem, type ListingFactoryValue } from "@/lib/listings/factory";
 import ListingOptionsFields, { EMPTY_PRICING, pricingPayload, pricingProblem, type ListingPricingValue } from "@/components/vendor/ListingOptionsFields";
 import StoreLogoField, { uploadVendorAsset } from "@/components/vendor/StoreLogoField";
 import TermsGate from "@/components/legal/TermsGate";
@@ -234,6 +238,8 @@ export default function VendorDashboardView({
   const [nlStock, setNlStock] = useState("");
   /** More categories, origin, ships-to, certificates, patents. */
   const [nlExtras, setNlExtras] = useState<ListingExtras>(EMPTY_EXTRAS);
+  // made-to-measure size guidance and product drawings (lib/listings/factory)
+  const [nlFactory, setNlFactory] = useState<ListingFactoryValue>(EMPTY_LISTING_FACTORY);
   /** Per piece / per metre of width, and shopper options (fabric, legs …). */
   const [nlPricing, setNlPricing] = useState<ListingPricingValue>(EMPTY_PRICING);
   const [nlVars, setNlVars] = useState<Array<{ id: string; name: string; sku: string; stock: string }>>([
@@ -1110,6 +1116,7 @@ export default function VendorDashboardView({
     setNlPrice("");
     setNlDims({ width: "", depth: "", height: "" });
     setNlExtras(EMPTY_EXTRAS);
+    setNlFactory(EMPTY_LISTING_FACTORY);
     setNlPricing(EMPTY_PRICING);
     setNlStock("");
     setNlVars([{ id: "1", name: "Standard", sku: "", stock: "" }]);
@@ -1312,6 +1319,7 @@ export default function VendorDashboardView({
           origin: nlExtras.origin,
           origin_country: nlExtras.origin_country,
           ships_to: nlExtras.ships_to,
+          ...listingFactoryPayload(nlFactory),
           ...pricingPayload(nlPricing),
           storeName,
           businessName: accountData.businessName || storeName,
@@ -3809,6 +3817,11 @@ export default function VendorDashboardView({
                     uploadFile={(f) => uploadVendorAsset(f, "product_certificate")}
                   />
 
+                  <ListingFactoryFields
+                    value={nlFactory}
+                    onChange={(v) => { setNlFactory(v); setNlErr(""); }}
+                  />
+
                   <ListingOptionsFields
                     value={nlPricing}
                     onChange={(v) => { setNlPricing(v); setNlErr(""); }}
@@ -3869,7 +3882,7 @@ export default function VendorDashboardView({
                         setNlErr("Please enter the width, depth and height in cm (1–2000).");
                         return;
                       }
-                      const extrasErr = extrasProblem(nlExtras) ?? pricingProblem(nlPricing, Number(nlDims.width));
+                      const extrasErr = extrasProblem(nlExtras) ?? pricingProblem(nlPricing, Number(nlDims.width)) ?? sizeRangesProblem(nlFactory);
                       if (extrasErr) {
                         setNlErr(extrasErr);
                         return;
@@ -4765,6 +4778,11 @@ export default function VendorDashboardView({
                   </div>
                 </div>
 
+                {/* The client's drawings and details for the factory (components/factory) */}
+                {o.rawOrderId && /^[0-9a-f-]{36}$/i.test(o.rawOrderId) && (
+                  <OrderFactoryPanel key={o.rawOrderId} orderId={o.rawOrderId} title="Drawings & details for the factory" defaultOpen />
+                )}
+
                 {/* Existing tracking display */}
                 {o.tracking && (
                   <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", color: "#343837", background: "#F1F4F4", borderRadius: "8px", padding: "12px 14px" }}>
@@ -4966,6 +4984,8 @@ export default function VendorDashboardView({
                     <p style={{ margin: 0, fontSize: "13px", color: "#4B4F4F", lineHeight: 1.6 }}>{prod.description}</p>
                   </div>
                 )}
+                {/* Product drawings for factories (DWG / DXF / PDF, private) */}
+                <ListingDrawingsSection productId={prod.id} />
                 {/* Actions */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid #EAEDEC", paddingTop: "16px" }}>
                   <button type="button" onClick={() => { setOpenProductId(null); handleUnlistProduct(prod.id, prod.title); }} style={{ background: "#FFFFFF", color: "#343837", border: "1px solid #D5DBDA", borderRadius: "8px", padding: "10px", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>

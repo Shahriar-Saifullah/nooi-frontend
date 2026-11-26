@@ -11,6 +11,7 @@ import { bandingTotals, countertopName, frontFinishName, hardwareName, materialT
 import type { KitchenOrderInput } from "./placement";
 import type { ProductionRules } from "./rules";
 import type { Cell, Sheet } from "./xlsx";
+import { specRows, type SpecKey } from "./spec";
 
 export const CUT_HEADER = ["Part ID", "Cabinet", "Part", "Material", "Thickness", "Length", "Width", "Qty", "Grain",
   "Edge L1", "Edge L2", "Edge W1", "Edge W2", "Cut length", "Cut width", "Notes"];
@@ -23,7 +24,12 @@ export function cutListRows(k: KitchenParts, rules: ProductionRules): Cell[][] {
   ])];
 }
 
-export function orderSheets(input: KitchenOrderInput, k: KitchenParts, rules: ProductionRules): Sheet[] {
+/**
+ * `parts: false` (the default pack) is drawings + structured details only:
+ * what the first factories asked for. `parts: true` adds the cut list, edge
+ * banding, hardware and the construction rules behind them.
+ */
+export function orderSheets(input: KitchenOrderInput, k: KitchenParts, rules: ProductionRules, opts: { parts: boolean; spec: Record<SpecKey, string> }): Sheet[] {
   const o = input.order, s = input.style;
   const mats = materialTotals(k.parts);
   const bands = bandingTotals(k.parts, rules);
@@ -31,20 +37,22 @@ export function orderSheets(input: KitchenOrderInput, k: KitchenParts, rules: Pr
     ["Nooi kitchen order pack", ""],
     ["Order", o.orderNo], ["Client", o.client], ["Project", o.project], ["Date", o.date],
     ...(o.designer ? [["Designer", o.designer]] : []),
-    ["Construction rules", rules.name],
+    ...(opts.parts ? [["Construction rules", rules.name]] : []),
     ["", ""],
     ["Fronts", frontFinishName(s)], ["Handles", `${s.handleStyle}, ${hardwareName(s)}`], ["Worktop", countertopName(s.countertop)],
     ["", ""],
     ["Runs", k.runs.map(r => `${r.code} ${r.length} mm`).join(", ")],
-    ["Cabinets", k.cabinets.filter(c => c.type !== "appliance").length],
-    ["Boards (pieces)", k.parts.length],
+    ["Cabinets", k.cabinets.filter(c => c.type !== "appliance" && c.type !== "filler").length],
     ["Worktop pieces", k.worktops.length],
-    ["", ""],
-    ["Board", "Pieces", "Area m²"],
-    ...mats.map(m => [`${m.material}, ${m.thickness} mm`, m.pieces, m.areaM2]),
-    ["", ""],
-    ["Edge banding", "Metres (incl. 10 % extra)"],
-    ...bands.map(b => [b.material, b.metres]),
+    ...(opts.parts ? [
+      ["Boards (pieces)", k.parts.length],
+      ["", ""],
+      ["Board", "Pieces", "Area m²"],
+      ...mats.map(m => [`${m.material}, ${m.thickness} mm`, m.pieces, m.areaM2]),
+      ["", ""],
+      ["Edge banding", "Metres (incl. 10 % extra)"],
+      ...bands.map(b => [b.material, b.metres]),
+    ] : []),
     ["", ""],
     ["Please check", ""],
     ...k.warnings.map(w => ["•", w]),
@@ -60,14 +68,8 @@ export function orderSheets(input: KitchenOrderInput, k: KitchenParts, rules: Pr
         ...k.cabinets.map(c => [c.code, c.run, c.type, c.label, c.width, c.height, c.depth, c.x, c.y,
           c.fronts.filter(f => f.kind === "door").length, c.fronts.filter(f => f.kind === "drawer").length, c.contents, c.notes])],
     },
-    { name: "Cut list", rows: cutListRows(k, rules), widths: [13, 9, 20, 36, 10, 9, 9, 5, 12, 18, 18, 18, 18, 11, 11, 50] },
-    {
-      name: "Edge banding",
-      rows: [["Part ID", "Material", "Edge", "Length mm"], ...k.parts.flatMap(p => (["L1", "L2", "W1", "W2"] as const)
-        .filter(e => p.edges[e])
-        .map(e => [p.id, p.edges[e] === "F" ? rules.frontBanding.material : rules.carcassBanding.material, e, e.startsWith("L") ? p.length : p.width]))],
-    },
-    { name: "Hardware", rows: [["Item", "Finish", "Qty", "Used in"], ...k.hardware.map(h => [h.item, h.finish, h.qty, h.usedIn.join(", ")])] },
+    { name: "Factory details", rows: [["Item", "中文", "Value"], ...specRows(opts.spec)], widths: [40, 22, 90] },
+    ...(opts.parts ? partSheets(k, rules) : []),
     {
       name: "Worktops",
       rows: [["Piece", "Run", "Material", "Length", "Depth", "Thickness", "Cut-out", "Centre from left end", "Front edge to cut-out", "Cut-out width", "Cut-out depth", "Notes"],
@@ -76,7 +78,20 @@ export function orderSheets(input: KitchenOrderInput, k: KitchenParts, rules: Pr
           c?.label ?? "", c?.x ?? "", c?.fromFront ?? "", c?.width ?? "", c?.depth ?? "", i === 0 ? w.notes : ""]))],
     },
     { name: "Appliances", rows: [["Cabinet", "Run", "Appliance", "Size", "Notes"], ...k.appliances.map(a => [a.cabinet, a.run, a.item, a.size, a.notes])] },
-    { name: "Rules", rows: [["Rule", "Value"], ...rulesRows(rules)], widths: [36, 70] },
+    ...(opts.parts ? [{ name: "Rules", rows: [["Rule", "Value"], ...rulesRows(rules)], widths: [36, 70] }] : []),
+  ];
+}
+
+function partSheets(k: KitchenParts, rules: ProductionRules): Sheet[] {
+  return [
+    { name: "Cut list", rows: cutListRows(k, rules), widths: [13, 9, 20, 36, 10, 9, 9, 5, 12, 18, 18, 18, 18, 11, 11, 50] },
+    {
+      name: "Edge banding",
+      rows: [["Part ID", "Material", "Edge", "Length mm"], ...k.parts.flatMap(p => (["L1", "L2", "W1", "W2"] as const)
+        .filter(e => p.edges[e])
+        .map(e => [p.id, p.edges[e] === "F" ? rules.frontBanding.material : rules.carcassBanding.material, e, e.startsWith("L") ? p.length : p.width]))],
+    },
+    { name: "Hardware", rows: [["Item", "Finish", "Qty", "Used in"], ...k.hardware.map(h => [h.item, h.finish, h.qty, h.usedIn.join(", ")])] },
   ];
 }
 

@@ -44,6 +44,13 @@ export const CARCASS = 0.8;
 export const COUNTER_TOP = PLINTH + CARCASS + 0.02;      // 0.92 m
 export const TALL_TOP = PLINTH + 2.07;                    // 2.17 m
 export const UPPER_BOTTOM = TALL_TOP - 0.762;             // uppers' tops line up with tall units
+/**
+ * Where two runs meet in a corner, the run that butts against the other's
+ * fronts stops this far short of them. The factory fits a filler there, so
+ * doors and handles clear the corner and the worktops meet properly. Kept
+ * for every unit added from now on; kitchens drawn before stay valid.
+ */
+export const CORNER_FILLER = 0.05;
 
 export const MODULES: Record<ModuleKind, { label: string; width: number; widths: number[]; tall: boolean; upper: UpperKind; group: "Cabinets" | "Appliances" }> = {
   "base-door":         { label: "Base cabinet",     width: 0.6,  widths: [0.3, 0.4, 0.45, 0.5, 0.6, 0.8, 0.9, 1.0], tall: false, upper: "cabinet", group: "Cabinets" },
@@ -105,6 +112,8 @@ export function runSpan(r: KitchenRun, f: RunFrame): [number, number] {
 export function freeInterval(args: {
   walls: (PlanWallLike & { id?: string })[]; size: PlanSize; openings: PlanOpening[];
   runs: KitchenRun[]; wallIndex: number; side: 1 | -1; along: number; skipRunId?: string;
+  /** leave CORNER_FILLER between this run and another run's fronts */
+  filler?: boolean;
 }): [number, number] | null {
   const lines = args.walls.map((w, i) => wallLine(w, i, args.size));
   const line = lines[args.wallIndex];
@@ -145,7 +154,7 @@ export function freeInterval(args: {
     if (ol.horiz === line.horiz) continue;
     // a perpendicular run: its footprint in this wall's along axis is its
     // depth out from its own face, if its run touches this face
-    const depthEnd = f.face + r.side * (BASE_DEPTH + COUNTER_OVERHANG);
+    const depthEnd = f.face + r.side * (BASE_DEPTH + COUNTER_OVERHANG + (args.filler ? CORNER_FILLER : 0));
     const across: [number, number] = [Math.min(f.face, depthEnd), Math.max(f.face, depthEnd)];
     // our strip: this face out to our own depth
     const ours: [number, number] = [Math.min(face, face + args.side * (BASE_DEPTH + COUNTER_OVERHANG)), Math.max(face, face + args.side * (BASE_DEPTH + COUNTER_OVERHANG))];
@@ -176,6 +185,8 @@ export function moduleSpans(r: KitchenRun, f: RunFrame): [number, number][] {
 /** Does this run fit its wall: inside the free stretch, tall units clear of windows. */
 export function runProblem(args: {
   run: KitchenRun; walls: (PlanWallLike & { id?: string })[]; size: PlanSize; openings: PlanOpening[]; runs: KitchenRun[];
+  /** also keep the corner filler gap (new placements) */
+  filler?: boolean;
 }): string | null {
   const wi = runWallIndex(args.run, args.walls);
   if (wi < 0) return "That wall no longer exists.";
@@ -229,12 +240,12 @@ export function addModuleAt(args: {
     const next: KitchenRun = atLeft
       ? { ...r, start: r.start - f.dir * mod.width, modules: [mod, ...r.modules] }
       : { ...r, modules: [...r.modules, mod] };
-    const err = runProblem({ run: next, walls, size, openings, runs: data.runs });
+    const err = runProblem({ run: next, walls, size, openings, runs: data.runs, filler: true });
     if (err) return { error: err };
     return { runs: data.runs.map(x => (x.id === r.id ? next : x)), runId: r.id, index: atLeft ? 0 : next.modules.length - 1 };
   }
 
-  const free = freeInterval({ walls, size, openings, runs: data.runs, wallIndex, side, along });
+  const free = freeInterval({ walls, size, openings, runs: data.runs, wallIndex, side, along, filler: true });
   if (!free || free[1] - free[0] < mod.width - 1e-6) return { error: "No room for it here — try a longer stretch of wall." };
   // centre on the click, slid inside the free stretch; snap tight to a
   // corner when within 25 cm of one
@@ -243,7 +254,7 @@ export function addModuleAt(args: {
   if (free[1] - (lo + mod.width) < 0.25) lo = free[1] - mod.width;
   const start = f.dir > 0 ? lo : lo + mod.width;
   const run: KitchenRun = { id: newId("run"), wall: { index: wallIndex, key }, side, start, modules: [mod] };
-  const err = runProblem({ run, walls, size, openings, runs: data.runs });
+  const err = runProblem({ run, walls, size, openings, runs: data.runs, filler: true });
   if (err) return { error: err };
   return { runs: [...data.runs, run], runId: run.id, index: 0 };
 }

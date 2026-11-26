@@ -1675,7 +1675,7 @@ export default function CanvasPage() {
   };
   // Factory order pack (lib/production): built here from the kitchen as drawn,
   // loaded on demand so the drawings/PDF code stays out of the canvas bundle.
-  const downloadFactoryPack = async () => {
+  const downloadFactoryPack = async (opts: { parts: boolean }) => {
     const [{ placeKitchen }, { buildOrderPack }, me] = await Promise.all([
       import("@/lib/production/placement"),
       import("@/lib/production/pack"),
@@ -1692,7 +1692,7 @@ export default function CanvasPage() {
         date: today,
       },
     });
-    const pack = buildOrderPack(input);
+    const pack = buildOrderPack(input, undefined, { parts: opts.parts });
     const url = URL.createObjectURL(new Blob([pack.zip as BlobPart], { type: "application/zip" }));
     const a = document.createElement("a");
     a.href = url; a.download = pack.filename;

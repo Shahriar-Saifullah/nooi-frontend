@@ -34,6 +34,7 @@ import { formatMoney, DEFAULT_CURRENCY } from "@/lib/money";
 import OrderCancelHelp from "@/components/orders/OrderCancelHelp";
 import InvoiceButton from "@/components/orders/InvoiceButton";
 import { useLanguage } from "@/lib/i18n/useTranslations";
+import OrderFactoryPanel from "@/components/factory/OrderFactoryPanel";
 import {
   getOrderById, submitReturnRequest, deriveOrderStage,
   SHIPMENT_PROGRESSION,
@@ -378,6 +379,11 @@ function TrackingInner() {
               }}
             />
           ))}
+        </div>
+
+        {/* Drawings and details for the factory making each item (components/factory) */}
+        <div className="mt-6">
+          <OrderFactoryPanel orderId={order.id} currentUserId={(order as { user_id?: string }).user_id ?? null} />
         </div>
 
         <OrderCancelHelp order={order} money={money} />

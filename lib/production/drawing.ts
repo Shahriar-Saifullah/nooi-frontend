@@ -110,7 +110,7 @@ export function planDrawing(input: KitchenOrderInput, k: KitchenParts): Drawing 
     for (const c of cabs) {
       const layer: Layer = c.type === "wall" ? "UPPERS" : c.type === "tall" ? "TALL" : c.type === "appliance" ? "APPLIANCES" : "CABINETS";
       ents.push(footprint(r, c.x, c.x + c.width, 0, c.depth, layer));
-      if (c.type !== "wall") {
+      if (c.type !== "wall" && c.type !== "filler") {
         const mid = toPlan(r, c.x + c.width / 2, c.depth / 2);
         ents.push(text([mid[0], mid[1] - 40], 70, c.code));
       }
@@ -123,7 +123,7 @@ export function planDrawing(input: KitchenOrderInput, k: KitchenParts): Drawing 
       }
     }
     // the run's overall length, along its front
-    const len = cabs.filter(c => c.type !== "wall").reduce((a, c) => Math.max(a, c.x + c.width), 0);
+    const len = cabs.filter(c => c.type !== "wall" && c.type !== "filler").reduce((a, c) => Math.max(a, c.x + c.width), 0);
     const a = toPlan(r, 0, 900), b = toPlan(r, len, 900);
     const a0 = toPlan(r, 0, 650), b0 = toPlan(r, len, 650);
     ents.push({ t: "line", a: a0, b: a, layer: "DIMS" }, { t: "line", a: b0, b, layer: "DIMS" }, { t: "line", a, b, layer: "DIMS" });
@@ -168,6 +168,7 @@ export function elevationDrawings(input: KitchenOrderInput, k: KitchenParts): Dr
     const ents: Ent[] = [];
     const cabs = k.cabinets.filter(c => c.run === r.code);
     const len = cabs.reduce((a, c) => Math.max(a, c.x + c.width), 0);
+    const x0 = cabs.reduce((a, c) => Math.min(a, c.x), 0);     // a corner filler can sit left of 0
     const plinth = PLINTH * 1000;
     ents.push({ t: "line", a: [-300, 0], b: [len + 300, 0], layer: "WALLS" });
     for (const c of cabs) {
@@ -189,7 +190,8 @@ export function elevationDrawings(input: KitchenOrderInput, k: KitchenParts): Dr
         if (c.kind === "dishwasher") ents.push(text([c.x + c.width / 2, c.y + c.height / 2], 55, "DISHWASHER"));
       }
       const labelY = c.type === "wall" ? c.y + c.height + 50 : c.type === "base" || c.type === "appliance" ? c.y + c.height + 120 : c.y + c.height + 50;
-      if (c.kind !== "fridge-single") ents.push(text([c.x + c.width / 2, labelY], 50, c.code));
+      if (c.kind !== "fridge-single" && c.type !== "filler") ents.push(text([c.x + c.width / 2, labelY], 50, c.code));
+      if (c.type === "filler" && c.label === "Corner filler") ents.push(text([c.x + c.width / 2, c.y + c.height + 50], 40, "filler"));
     }
     // plinth and worktops
     for (const p of k.parts.filter(x => x.run === r.code && x.role === "plinth")) ents.push(rect(p.box.x0, 0, p.box.x1 - p.box.x0, plinth - 3, "PLINTH"));
@@ -209,7 +211,7 @@ export function elevationDrawings(input: KitchenOrderInput, k: KitchenParts): Dr
     // dimensions: each unit under the floor line, the run, and the heights
     const base = cabs.filter(c => c.type !== "wall");
     base.forEach(c => ents.push(...dimH(c.x, c.x + c.width, -180, -10, 55)));
-    ents.push(...dimH(0, len, -380, -200, 70));
+    ents.push(...dimH(x0, len, -380, -200, 70));
     const counter = (PLINTH + CARCASS) * 1000 + (k.worktops.find(w => w.run === r.code)?.thickness ?? 20);
     const hasUpper = cabs.some(c => c.type === "wall");
     const hasTall = cabs.some(c => c.type === "tall");

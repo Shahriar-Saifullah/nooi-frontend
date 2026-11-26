@@ -79,6 +79,9 @@ export interface MarketplaceProduct {
   price_unit?: PriceUnit;
   min_width_cm?: number | null;
   max_width_cm?: number | null;
+  /** made-to-measure guidance the factory confirms (lib/listings/factory) */
+  size_ranges?: import("@/lib/listings/factory").SizeRanges;
+  size_note?: string | null;
   /** vendor options: fabric, legs, handles … (lib/listings/configure) */
   options?: OptionGroup[];
   tags: string[];
@@ -206,6 +209,8 @@ function normaliseRaw(row: any): MarketplaceProduct {
     price_unit: row.price_unit === "metre" ? "metre" : "unit",
     min_width_cm: row.min_width_cm ?? null,
     max_width_cm: row.max_width_cm ?? null,
+    size_ranges: row.size_ranges && typeof row.size_ranges === "object" ? row.size_ranges : {},
+    size_note: row.size_note ?? null,
     options: Array.isArray(row.options) ? row.options : [],
     tags: row.tags ?? [],
     base_price: Number(row.base_price),

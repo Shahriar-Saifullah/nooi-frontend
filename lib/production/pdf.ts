@@ -13,6 +13,7 @@ import { bandingTotals, countertopName, frontFinishName, hardwareName, materialT
 import type { KitchenOrderInput } from "./placement";
 import type { ProductionRules } from "./rules";
 import { rulesRows } from "./workbook";
+import { SPEC_FIELDS, type SpecKey } from "./spec";
 
 const PAGE_W = 297, PAGE_H = 210, M = 12;
 const BRAND: [number, number, number] = [0, 56, 50];
@@ -116,7 +117,10 @@ function table(
   }
 }
 
-export function orderPdf(input: KitchenOrderInput, k: KitchenParts, rules: ProductionRules, drawings: { plan: Drawing; elevations: Drawing[] }): Uint8Array {
+export function orderPdf(
+  input: KitchenOrderInput, k: KitchenParts, rules: ProductionRules, drawings: { plan: Drawing; elevations: Drawing[] },
+  opts: { parts: boolean; spec: Record<SpecKey, string> },
+): Uint8Array {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   let page = 1;
   const next = (title: string) => { doc.addPage(); page++; frame(doc, title, input, page); };
@@ -126,7 +130,7 @@ export function orderPdf(input: KitchenOrderInput, k: KitchenParts, rules: Produ
   doc.setFillColor(...BRAND); doc.rect(0, 0, PAGE_W, 34, "F");
   doc.setFillColor(...ACCENT); doc.rect(0, 34, PAGE_W, 1.5, "F");
   doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(22);
-  doc.text("Kitchen order pack", M, 17);
+  doc.text(opts.parts ? "Kitchen order pack" : "Kitchen order: drawings", M, 17);
   doc.setFont("helvetica", "normal"); doc.setFontSize(11);
   doc.text(t(`${o.project}  |  Order ${o.orderNo}`), M, 26);
   doc.setTextColor(0, 0, 0);
@@ -137,7 +141,7 @@ export function orderPdf(input: KitchenOrderInput, k: KitchenParts, rules: Produ
   let y = 48;
   [["Client", o.client], ["Project", o.project], ["Order", o.orderNo], ["Date", o.date], ...(o.designer ? [["Designer", o.designer]] : []),
     ["Fronts", frontFinishName(s)], ["Handles", `${s.handleStyle}, ${hardwareName(s)}`], ["Worktop", countertopName(s.countertop)],
-    ["Rules", rules.name]].forEach(([a, b]) => { kv(a, b, M, y); y += 7; });
+    ...(opts.parts ? [["Rules", rules.name]] : [])].forEach(([a, b]) => { kv(a, b, M, y); y += 7; });
 
   y = 48;
   const x2 = 160;
@@ -145,24 +149,28 @@ export function orderPdf(input: KitchenOrderInput, k: KitchenParts, rules: Produ
   y += 7;
   const counts: [string, unknown][] = [
     ["Runs", k.runs.map(r => `${r.code} (${r.length} mm)`).join(", ")],
-    ["Cabinets", k.cabinets.filter(c => c.type !== "appliance").length],
-    ["Boards", `${k.parts.length} pieces`],
+    ["Cabinets", k.cabinets.filter(c => c.type !== "appliance" && c.type !== "filler").length],
+    ...(opts.parts ? [["Boards", `${k.parts.length} pieces`] as [string, unknown]] : []),
     ["Worktop", `${k.worktops.length} piece${k.worktops.length === 1 ? "" : "s"}`],
     ["Appliances", k.appliances.length],
   ];
   counts.forEach(([a, b]) => { kv(a, b, x2, y); y += 6; });
   y += 3;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.text("Boards", x2, y); y += 5;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
-  for (const m of materialTotals(k.parts)) { doc.text(doc.splitTextToSize(t(`${m.material}, ${m.thickness} mm: ${m.pieces} pcs, ${m.areaM2} m²`), PAGE_W - M - x2) as string[], x2, y); y += 5; }
-  for (const b of bandingTotals(k.parts, rules)) { doc.text(t(`${b.material}: ${b.metres} m`), x2, y); y += 5; }
+  if (opts.parts) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.text("Boards", x2, y); y += 5;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+    for (const m of materialTotals(k.parts)) { doc.text(doc.splitTextToSize(t(`${m.material}, ${m.thickness} mm: ${m.pieces} pcs, ${m.areaM2} m²`), PAGE_W - M - x2) as string[], x2, y); y += 5; }
+    for (const b of bandingTotals(k.parts, rules)) { doc.text(t(`${b.material}: ${b.metres} m`), x2, y); y += 5; }
+  }
 
   y = Math.max(y, 120) + 4;
   doc.setFillColor(248, 246, 238); doc.rect(M, y - 5, PAGE_W - 2 * M, 8 + k.warnings.length * 5.5 + 12, "F");
   doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...BRAND); doc.text("Please check", M + 3, y + 1); doc.setTextColor(0, 0, 0);
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
   k.warnings.forEach((w, i) => doc.text(t(`- ${w}`), M + 3, y + 7 + i * 5.5));
-  doc.text(t("These files use Nooi's standard construction rules (last page). Mark up anything your factory does differently and we will match it."), M + 3, y + 7 + k.warnings.length * 5.5 + 2);
+  doc.text(t(opts.parts
+    ? "The parts list uses Nooi's standard construction rules (last page). Mark up anything your factory does differently and we will match it."
+    : "Drawings and details for the factory to confirm. Sizes and options are guidance; a parts list can be added on request."), M + 3, y + 7 + k.warnings.length * 5.5 + 2);
   frame(doc, "Cover", input, page);
 
   // ── drawings ──
@@ -187,6 +195,14 @@ export function orderPdf(input: KitchenOrderInput, k: KitchenParts, rules: Produ
   ], k.cabinets.map(c => [c.code, c.type, c.label, c.width, c.height, c.depth, c.x, c.fronts.filter(f => f.kind === "door").length,
     c.fronts.filter(f => f.kind === "drawer").length, [c.contents, c.notes].filter(Boolean).join(" ")]), () => next("Cabinets"));
 
+  next("Factory details");
+  heading(doc, "Details for the factory");
+  doc.setFontSize(8.5); doc.setTextColor(90, 90, 90);
+  doc.text(t("From the design. \"To confirm\" means the client and the factory agree it; the Excel file has the same list with Chinese labels."), M, M + 12);
+  doc.setTextColor(0, 0, 0);
+  table(doc, M + 20, [{ title: "Item", w: 75 }, { title: "Value", w: 198 }], SPEC_FIELDS.map(f => [f.label, opts.spec[f.key] ?? ""]), () => next("Factory details"), 8.5);
+
+  if (opts.parts) {
   next("Cut list");
   heading(doc, "Cut list");
   const bandShort = (e: string) => (e === "F" ? "F" : e === "C" ? "C" : "");
@@ -205,6 +221,7 @@ export function orderPdf(input: KitchenOrderInput, k: KitchenParts, rules: Produ
   heading(doc, "Hardware");
   table(doc, M + 16, [{ title: "Item", w: 110 }, { title: "Finish", w: 30 }, { title: "Qty", w: 15, align: "right" }, { title: "Used in", w: 118 }],
     k.hardware.map(h => [h.item, h.finish, h.qty, h.usedIn.join(", ")]), () => next("Hardware"));
+  }
   next("Worktops and appliances");
   heading(doc, "Worktops");
   table(doc, M + 16, [
@@ -218,6 +235,7 @@ export function orderPdf(input: KitchenOrderInput, k: KitchenParts, rules: Produ
   table(doc, yApp + 8, [{ title: "Cabinet", w: 20 }, { title: "Appliance", w: 70 }, { title: "Size", w: 60 }, { title: "Notes", w: 123 }],
     k.appliances.map(a => [a.cabinet, a.item, a.size, a.notes]), () => next("Appliances"));
 
+  if (!opts.parts) return new Uint8Array(doc.output("arraybuffer"));
   next("Construction rules");
   heading(doc, "Construction rules used");
   doc.setFontSize(8.5); doc.setTextColor(90, 90, 90);
