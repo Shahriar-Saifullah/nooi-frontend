@@ -61,7 +61,7 @@ export interface Cabinet {
   run: string;
   kind: string;
   label: string;
-  type: "base" | "wall" | "tall" | "appliance";
+  type: "base" | "wall" | "tall" | "appliance" | "filler";
   width: number;
   height: number;
   depth: number;
@@ -121,7 +121,7 @@ const HOB_CUTOUT: Record<number, [number, number]> = { 600: [560, 490], 750: [72
 
 const APPLIANCE: Partial<Record<KitchenModule["kind"], (w: number) => { item: string; size: string; notes: string }>> = {
   "sink-base": w => ({ item: "Sink (single bowl) + mixer tap", size: `for a ${w} mm cabinet`, notes: "Cut-out to the sink's template." }),
-  "dishwasher": w => ({ item: "Dishwasher, fully integrated", size: `${w} mm wide, ${mm(CARCASS)} mm niche`, notes: "Takes the door panel listed in the cut list." }),
+  "dishwasher": w => ({ item: "Dishwasher, fully integrated", size: `${w} mm wide, ${mm(CARCASS)} mm niche`, notes: "Takes a door panel matching the fronts." }),
   "cooktop-gas": w => ({ item: "Gas hob", size: `${w} mm`, notes: "Cut-out to the hob's template." }),
   "cooktop-induction": w => ({ item: "Induction hob", size: `${w} mm`, notes: "Cut-out to the hob's template." }),
   "fridge-single": w => ({ item: "Fridge, freestanding", size: `${w} mm wide space`, notes: "No carcass — the space is left open." }),
@@ -149,6 +149,8 @@ export function kitchenParts(input: KitchenOrderInput, rules: ProductionRules): 
 
   // inside depth (front of the back panel to the front edge)
   const backSpace = rules.backFitting === "grooved" ? rules.backGroove.setback + bt : bt;
+
+  const fillers = cornerFillers(input, ft);
 
   for (const run of input.runs) {
     let x = 0;                                   // mm along the run
@@ -274,6 +276,38 @@ export function kitchenParts(input: KitchenOrderInput, rules: ProductionRules): 
       x += W;
     });
 
+    // ── corner fillers: where this run stops short of another run's fronts ──
+    const fl = fillers.get(run.code) ?? {};
+    let fn = 0;
+    for (const end of ["start", "end"] as const) {
+      const f = fl[end];
+      if (!f) continue;
+      const m = end === "start" ? run.modules[0] : run.modules[run.modules.length - 1];
+      const i = end === "start" ? 0 : run.modules.length - 1;
+      const preset = cabinetPresetById(m.kind).createPatch(undefined) as { carcassHeight?: number };
+      const H = mm(preset.carcassHeight ?? (MODULES[m.kind].tall ? TALL_TOP - PLINTH : CARCASS));
+      const fx = end === "start" ? -f.gap : runLen;
+      const y0 = mm(PLINTH), D = mm(BASE_DEPTH);
+      fn++;
+      const code = `${run.code}-FL${fn}`;
+      const rect: FrontRect = { x: fx, y: y0, w: f.gap, h: H, kind: "panel" };
+      out.cabinets.push({ code, run: run.code, kind: "filler", label: "Corner filler", type: "filler", width: f.gap, height: H, depth: D, x: fx, y: y0, fronts: [rect], contents: "", notes: `Between ${run.code} and ${f.against}'s fronts.` });
+      const p = board(code, run.code, "Corner filler", "front", H, f.gap + 10, ft, rules, { L1: true, L2: true, W1: true, W2: true },
+        { x0: fx, x1: fx + f.gap, y0, y1: y0 + H, z0: D, z1: D + ft }, frontMaterial, `${code}-P`, wood ? "length" : "none");
+      p.notes = `Width includes 10 mm to scribe on site. Fixed to the side of ${run.code}-${String(i + 1).padStart(2, "0")}.`;
+      out.parts.push(p);
+      if (m.upper === "cabinet" && run.showUpper[i] && !MODULES[m.kind].tall) {
+        const UH = mm(0.762), UD = mm(UPPER_DEPTH), uy = mm(UPPER_BOTTOM);
+        fn++;
+        const uc = `${run.code}-FL${fn}`;
+        out.cabinets.push({ code: uc, run: run.code, kind: "filler", label: "Corner filler (wall)", type: "filler", width: f.gap, height: UH, depth: UD, x: fx, y: uy, fronts: [{ x: fx, y: uy, w: f.gap, h: UH, kind: "panel" }], contents: "", notes: `Above ${code}.` });
+        const up = board(uc, run.code, "Corner filler (wall)", "front", UH, f.gap + 10, ft, rules, { L1: true, L2: true, W1: true, W2: true },
+          { x0: fx, x1: fx + f.gap, y0: uy, y1: uy + UH, z0: UD, z1: UD + ft }, frontMaterial, `${uc}-P`, wood ? "length" : "none");
+        up.notes = "Width includes 10 mm to scribe on site.";
+        out.parts.push(up);
+      }
+    }
+
     // ── plinths: one length per stretch of floor cabinets (a freestanding fridge breaks it) ──
     const pt = rules.plinthBoard.thickness;
     let px = 0, seg = 0, from = 0;
@@ -284,6 +318,11 @@ export function kitchenParts(input: KitchenOrderInput, rules: ProductionRules): 
       px += w;
       if (i === run.modules.length - 1 && px > from) plinthSegs.push([from, px]);
     });
+    if (plinthSegs.length) {
+      if (fl.start && plinthSegs[0][0] === 0) plinthSegs[0][0] = -fl.start.gap;
+      const last = plinthSegs[plinthSegs.length - 1];
+      if (fl.end && last[1] === runLen) last[1] = runLen + fl.end.gap;
+    }
     for (const [a, b] of plinthSegs) {
       for (const [p0, p1] of splitLength(a, b, 2800)) {
         seg++;
@@ -310,6 +349,13 @@ export function kitchenParts(input: KitchenOrderInput, rules: ProductionRules): 
     });
     const tt = worktopThickness(rules, style.countertop);
     const depth = mm(BASE_DEPTH) + ft + rules.worktopFrontOverhang;
+    // at a corner filler the worktop runs on to meet the other run's worktop edge
+    const meets: Record<"start" | "end", string | null> = { start: null, end: null };
+    if (tops.length) {
+      if (fl.start && tops[0].a === 0) { tops[0].a = -(fl.start.gap - rules.worktopFrontOverhang); meets.start = fl.start.against; }
+      const lt = tops[tops.length - 1];
+      if (fl.end && lt.b === runLen) { lt.b = runLen + (fl.end.gap - rules.worktopFrontOverhang); meets.end = fl.end.against; }
+    }
     const maxLen = worktopMaxLength(rules, style.countertop);
     let wn = 0;
     for (const top of tops) {
@@ -347,6 +393,8 @@ export function kitchenParts(input: KitchenOrderInput, rules: ProductionRules): 
         const notes: string[] = [];
         if (pieces.length > 1) notes.push(k === 0 ? "Joint at the right end." : k === pieces.length - 1 ? "Joint at the left end." : "Joints at both ends.");
         if (mine.length) notes.push("Cut-outs: check against each appliance's template.");
+        if (meets.start && p0 === top.a && p0 < 0) notes.push(`Left end butts against ${meets.start}'s worktop at the corner.`);
+        if (meets.end && p1 === top.b && p1 > runLen) notes.push(`Right end butts against ${meets.end}'s worktop at the corner.`);
         out.worktops.push({
           id, run: run.code, material: countertopName(style.countertop), materialId: style.countertop,
           length: r1(p1 - p0), depth, thickness: tt, cutouts: mine, notes: notes.join(" "),
@@ -361,7 +409,7 @@ export function kitchenParts(input: KitchenOrderInput, rules: ProductionRules): 
   if (out.worktops.length && tt !== 20) out.warnings.push(`Worktop is ${tt} mm thick, so the counter stands at ${mm(PLINTH + CARCASS) + tt} mm (the 3D design shows ${mm(PLINTH + CARCASS) + 20} mm).`);
   out.warnings.push(...cornerClashes(input, out));
   out.warnings.push("Cut-outs for the sink and hob are standard sizes; confirm each against the appliance's own template before cutting.");
-  out.warnings.push("Fillers and end panels are not included yet; any gap between a run and a wall is left open.");
+  out.warnings.push("Corner fillers are included; end panels and fillers against walls are not yet, so the fitter scribes those on site.");
   return out;
 }
 
@@ -521,7 +569,7 @@ const depthInto = (a: Rect2, b: Rect2) => Math.round(Math.min(Math.min(a.x1, b.x
 function cornerClashes(input: KitchenOrderInput, k: KitchenParts): string[] {
   const out: string[] = [];
   const run = (code: string) => input.runs.find(r => r.code === code)!;
-  const bodies = k.cabinets.filter(c => c.type !== "wall").map(c => {
+  const bodies = k.cabinets.filter(c => c.type !== "wall" && c.type !== "filler").map(c => {
     const r = run(c.run);
     const front = c.fronts.length ? 20 : 0;
     return { c, rect: worldRect(r, c.x, c.x + c.width, 0, c.depth + front) };
@@ -539,7 +587,42 @@ function cornerClashes(input: KitchenOrderInput, k: KitchenParts): string[] {
     const swing = worldRect(run(a.c.run), a.c.x + 25, a.c.x + a.c.width - 25, a.c.depth + 20, a.c.depth + 420);
     for (const b of bodies) {
       if (b.c.run === a.c.run || !overlap(swing, b.rect)) continue;
-      out.push(`${a.c.code}'s doors/drawers open against ${b.c.code} at the corner: add a corner filler (at least 50 mm) or use a blind corner unit.`);
+      out.push(`${a.c.code} sits in the corner behind ${b.c.code}: make it a blind corner unit (a fixed panel where ${b.c.code} covers it, doors on the open part) or leave it as corner storage reached from the side.`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Corner fillers: where a run ends in front of another run's fronts (an
+ * L-shaped kitchen), the gap between its end and those fronts gets a filler
+ * panel. The design keeps CORNER_FILLER (50 mm) there for every unit placed
+ * since fillers were added; gaps under 30 mm get no filler (too thin to fit)
+ * and over 200 mm are not a corner.
+ */
+export function cornerFillers(input: KitchenOrderInput, frontThickness: number): Map<string, Partial<Record<"start" | "end", { gap: number; against: string }>>> {
+  const out = new Map<string, Partial<Record<"start" | "end", { gap: number; against: string }>>>();
+  const D = mm(BASE_DEPTH);
+  const len = (r: PlacedRun) => mm(r.modules.reduce((a, m) => a + m.width, 0));
+  const toRun = (r: PlacedRun, wx: number, wz: number) => {
+    const along = r.horiz ? wx : wz, cross = r.horiz ? wz : wx;
+    return { x: ((along - r.start) * r.dir) * 1000, z: ((cross - r.face) * r.side) * 1000 };
+  };
+  for (const b of input.runs) {
+    for (const end of ["start", "end"] as const) {
+      const ex = end === "start" ? 0 : len(b);
+      const [wx, wz] = runToWorld(b, ex / 1000, D / 2000);
+      for (const a of input.runs) {
+        if (a === b || a.horiz === b.horiz) continue;
+        const p = toRun(a, wx, wz);
+        if (p.x < 0 || p.x > len(a)) continue;                 // not in front of that run
+        // the end must face towards that run's fronts: moving inward along b goes away from them
+        const [ix, iz] = runToWorld(b, (ex + (end === "start" ? 100 : -100)) / 1000, D / 2000);
+        if (toRun(a, ix, iz).z <= p.z) continue;
+        const gap = Math.round(p.z - (D + frontThickness));
+        if (gap < 30 || gap > 200) continue;
+        out.set(b.code, { ...(out.get(b.code) ?? {}), [end]: { gap, against: a.code } });
+      }
     }
   }
   return out;

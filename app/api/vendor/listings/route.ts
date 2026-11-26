@@ -5,6 +5,7 @@ import { resolveVendorUser } from "@/app/api/vendor/_utils/auth";
 import { cleanExtras, cleanCategories, cleanCertificates, cleanPatents, cleanOrigin, cleanShipsTo } from "@/lib/listings/extras";
 import { TERMS_VERSIONS } from "@/lib/legal/terms";
 import { cleanOptionGroups, cleanPricing } from "@/lib/listings/configure";
+import { cleanDraftDrawings, cleanSizeNote, cleanSizeRanges } from "@/lib/listings/factory";
 
 const CATEGORY_MAP: Record<
   string,
@@ -382,6 +383,11 @@ export async function POST(req: Request) {
         // per piece / per metre of width, and shopper options (lib/listings/configure)
         ...cleanPricing(body, cleanDimensions(dimensions_cm)?.width ?? null),
         options: cleanOptionGroups(body.options),
+        // Made-to-measure guidance and the vendor's drawings (lib/listings/factory):
+        // size ranges and a note shoppers see as guidance; drawings stay private.
+        size_ranges: cleanSizeRanges(body.size_ranges),
+        size_note: cleanSizeNote(body.size_note),
+        drawings: cleanDraftDrawings(body.drawings, userId),
         // Hidden from shoppers until a Nooi admin approves it (/admin/listings).
         listing_status: "pending",
         submitted_at: new Date().toISOString(),

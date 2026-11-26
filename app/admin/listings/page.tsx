@@ -16,6 +16,8 @@ import { ArrowLeft, Loader2, Search, Check, X, EyeOff, Eye, AlertCircle } from "
 
 import AdminShell from "@/components/admin/AdminShell";
 import { listListings, getListing, decideListing, type ListingRow, type ListingStatus, type ListingDetail } from "@/lib/api/admin";
+import ListingDrawingsSection from "@/components/factory/ListingDrawingsSection";
+import type { SizeRanges } from "@/lib/listings/factory";
 import { formatMoney } from "@/lib/money";
 
 const TABS: { key: string; label: string }[] = [
@@ -196,6 +198,9 @@ function Detail({ id, onBack }: { id: string; onBack: () => void }) {
               <span className="text-[#8E9493]">Commission</span><span>{l.retailers?.commission_rate}%</span>
             </div>
           </section>
+          <ListingDrawingsSection productId={l.id}
+            sizeRanges={(l as ListingDetail & { size_ranges?: SizeRanges }).size_ranges}
+            sizeNote={(l as ListingDetail & { size_note?: string | null }).size_note} />
           <section className="rounded-2xl border border-[#D5DBDA] bg-white p-5 text-[12.5px]">
             <h2 className="text-[13px] font-medium text-[#101212]">Options · {l.product_variants.length}</h2>
             {l.product_variants.map(v => (

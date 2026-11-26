@@ -2,9 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_KITCHEN_STYLE } from "@/lib/kitchen/materials";
-import type { KitchenModule, ModuleKind, UpperKind } from "@/lib/kitchen/model";
+import { CORNER_FILLER, frameOf, runProblem, runSpan, type KitchenModule, type ModuleKind, type UpperKind } from "@/lib/kitchen/model";
 import { DEFAULT_RULES, hingesFor, runnerFor, type ProductionRules } from "@/lib/production/rules";
-import { kitchenParts, bandingTotals } from "@/lib/production/parts";
+import { kitchenParts, bandingTotals, cornerFillers } from "@/lib/production/parts";
 import { placeKitchen, runToWorld, type KitchenOrderInput, type PlacedRun } from "@/lib/production/placement";
 import { buildOrderPack } from "@/lib/production/pack";
 import { sampleKitchen } from "@/lib/production/sample";
@@ -119,11 +119,22 @@ test("the sample L-kitchen: corner clashes are reported, the pack has every file
   const input = placeKitchen({ kitchen: data, walls, size, openings, order: { orderNo: "S-1", client: "c", project: "Sample", date: "2026-11-16" } });
   assert.equal(input.runs.length, 2);
   assert.ok(input.plan.walls.length === 4 && input.plan.openings.length === 2);
-  const pack = buildOrderPack(input);
+  // with the parts list
+  const pack = buildOrderPack(input, undefined, { parts: true });
   const names = pack.files.map(f => f.name);
   for (const n of ["README.txt", "order-S-1.pdf", "order-S-1.xlsx", "cutlist.csv", "drawings/plan.dxf", "drawings/elevation-R1.dxf",
     "drawings/elevation-R2.dxf", "drawings/parts.dxf", "3d/kitchen.glb", "3d/kitchen.obj", "3d/kitchen.mtl", "order.json"]) assert.ok(names.includes(n), n);
-  assert.ok(pack.parts.warnings.some(w => w.includes("corner")));
+  // the corner cabinet behind the other run is flagged; the worktop no longer runs into it
+  assert.ok(pack.parts.warnings.some(w => w.includes("blind corner")));
+  assert.ok(!pack.parts.warnings.some(w => w.startsWith("Worktop") && w.includes("runs")));
+  // drawings only (the default): no parts files
+  const lite = buildOrderPack(input);
+  const ln = lite.files.map(f => f.name);
+  assert.deepEqual(ln.sort(), ["README.txt", "drawings/elevation-R1.dxf", "drawings/elevation-R2.dxf", "drawings/plan.dxf", "order-S-1.pdf", "order-S-1.xlsx", "order.json"].sort());
+  const json = JSON.parse(lite.files.find(f => f.name === "order.json")!.data as string);
+  assert.equal(json.parts, false);
+  assert.match(json.factory_details.fillers, /corner filler/);
+  assert.match(json.factory_details.hinges, /concealed hinge/);
   const pdf = pack.files.find(f => f.name.endsWith(".pdf"))!.data as Uint8Array;
   assert.equal(new TextDecoder().decode(pdf.slice(0, 5)), "%PDF-");
   // the zip starts with a local header and ends with the directory record
@@ -147,4 +158,48 @@ test("zip, DXF, GLB basics", () => {
   assert.equal(dv.getUint32(8, true), glb.length);
   const json = JSON.parse(new TextDecoder().decode(glb.slice(20, 20 + dv.getUint32(12, true))));
   assert.equal(json.nodes.length, k.parts.length + k.worktops.length);
+});
+
+test("corner fillers: a run that stops short of another run's fronts gets a filler there", () => {
+  const { data, walls, size, openings } = sampleKitchen();
+  const input = placeKitchen({ kitchen: data, walls, size, openings, order: { orderNo: "S", client: "", project: "", date: "" } });
+  const fills = cornerFillers(input, 18);
+  // R2 (left wall, tall units) ends 50 mm past R1's worktop line: 52 mm from R1's door faces
+  assert.deepEqual(fills.get("R2"), { end: { gap: 52, against: "R1" } });
+  assert.equal(fills.get("R1"), undefined);
+  const k = kitchenParts(input, DEFAULT_RULES);
+  const fl = k.cabinets.filter(c => c.type === "filler");
+  assert.equal(fl.length, 1);
+  assert.equal(fl[0].width, 52);
+  const p = part(k, `${fl[0].code}-P`);
+  assert.equal(p.width, 62);                     // 10 mm to scribe
+  assert.equal(p.length, 2070);                  // full height beside a tall unit
+});
+
+test("corner fillers: the worktop runs on over the filler to meet the other worktop", () => {
+  // an L of two base runs: B (vertical) ends 50 mm in front of A's fronts
+  const A: PlacedRun = { id: "a", code: "R1", modules: [mod("base-door", 0.6), mod("base-door", 0.6)], start: 0, dir: 1, face: 0, side: 1, horiz: true, rotation: 0, showUpper: [false, false] };
+  const B: PlacedRun = { id: "b", code: "R2", modules: [mod("base-door", 0.6)], start: 1.268, dir: -1, face: 0, side: 1, horiz: false, rotation: Math.PI / 2, showUpper: [false] };
+  const input: KitchenOrderInput = { order: { orderNo: "L", client: "", project: "", date: "" }, style: DEFAULT_KITCHEN_STYLE, plan: { walls: [], openings: [] }, runs: [A, B] };
+  const k = kitchenParts(input, DEFAULT_RULES);
+  const f = cornerFillers(input, 18).get("R2");
+  assert.ok(f?.end && f.end.against === "R1" && Math.abs(f.end.gap - 50) <= 1, JSON.stringify(f));
+  const wt = k.worktops.find(w => w.run === "R2")!;
+  assert.equal(wt.length, 600 + f!.end!.gap - DEFAULT_RULES.worktopFrontOverhang);
+  assert.match(wt.notes, /butts against R1/);
+  assert.equal(k.parts.filter(p => p.role === "plinth" && p.run === "R2")[0].length, 600 + f!.end!.gap);
+});
+
+test("kitchen builder keeps the corner filler gap for new units only", () => {
+  const { data, walls, size, openings } = sampleKitchen();
+  const r2 = data.runs[1];
+  // the sample's left-wall run was placed with the gap: 0.62 + 0.05 from the top wall's face
+  const f = frameOf(r2, walls, size)!;
+  const [lo, hi] = runSpan(r2, f);
+  const topFace = f.line.a0 + f.line.t / 2;   // not exact for every plan; the gap is what matters
+  void lo; void topFace;
+  const tight = { ...r2, start: r2.start - CORNER_FILLER };       // move it 50 mm into the corner
+  assert.equal(runProblem({ run: tight, walls, size, openings, runs: data.runs }), null);          // still valid for old kitchens
+  assert.ok(runProblem({ run: tight, walls, size, openings, runs: data.runs, filler: true }));       // but not for new placements
+  assert.ok(hi > lo);
 });
